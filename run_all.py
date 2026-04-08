@@ -26,6 +26,11 @@ CONSOLIDATED_HTML_PATH = OUTPUT_DIR / "consolidated-report.html"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run all available lab harnesses and build a consolidated report.")
     parser.add_argument(
+        "--refresh-report",
+        action="store_true",
+        help="Rebuild each lab report and the consolidated report from existing captured artifacts without rerunning labs.",
+    )
+    parser.add_argument(
         "--skip-setup",
         action="store_true",
         help="Skip the shared workspace setup stage.",
@@ -53,7 +58,9 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     setup_payload: dict[str, Any] | None = None
-    if not args.skip_setup:
+    if args.refresh_report:
+        print("Refreshing reports from existing captured artifacts...")
+    elif not args.skip_setup:
         print("Running shared workspace setup...")
         setup_result = run_setup(
             stream_output=True,
@@ -92,9 +99,10 @@ def main() -> int:
 
     lab_results: list[dict[str, Any]] = []
     for lab in labs:
-        print(f"Running {lab}...")
+        print(f"{'Refreshing report for' if args.refresh_report else 'Running'} {lab}...")
+        lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
         result = run_command(
-            ["python3", f"{lab}/run.py", "--skip-setup"],
+            lab_command,
             ROOT,
             stream_output=True,
             stream_prefix=f"[all:{lab}]",

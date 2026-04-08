@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from html import escape
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -112,6 +113,21 @@ def render_html(payload: dict[str, Any]) -> str:
       padding: 18px;
       margin-top: 18px;
     }}
+    .toolbar {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }}
+    .toolbar button {{
+      border: 1px solid #d7ccb8;
+      background: #fbf6ec;
+      color: #182126;
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
     .assertions {{
       margin: 0;
       padding-left: 20px;
@@ -162,6 +178,105 @@ def render_html(payload: dict[str, Any]) -> str:
     .failure-group h3 {{
       margin-bottom: 8px;
     }}
+    .category-summary table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }}
+    .category-summary th, .category-summary td {{
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+    }}
+    .category-summary a {{
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+    .table-wrap {{
+      margin-top: 10px;
+      overflow-x: auto;
+    }}
+    .table-wrap table {{
+      width: 100%;
+      min-width: 360px;
+      border-collapse: collapse;
+      background: #fffaf1;
+      border: 1px solid #eadfcd;
+      border-radius: 10px;
+      overflow: hidden;
+    }}
+    .table-wrap th,
+    .table-wrap td {{
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+      white-space: nowrap;
+    }}
+    .table-wrap th {{
+      background: #f7efe0;
+      font-size: 0.95rem;
+    }}
+    .table-wrap tbody tr:last-child td {{
+      border-bottom: 0;
+    }}
+    .category-summary {{
+      margin-bottom: 22px;
+    }}
+    .phase-block {{
+      margin-top: 18px;
+    }}
+    .phase-block > summary,
+    .assertion-section > summary,
+    .console-block > summary,
+    .artifacts-block > summary {{
+      cursor: pointer;
+      list-style: none;
+      position: relative;
+      padding-left: 24px;
+    }}
+    .phase-block > summary::-webkit-details-marker,
+    .assertion-section > summary::-webkit-details-marker,
+    .console-block > summary::-webkit-details-marker,
+    .artifacts-block > summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .phase-block > summary::before,
+    .assertion-section > summary::before,
+    .console-block > summary::before,
+    .artifacts-block > summary::before {{
+      content: "▸";
+      position: absolute;
+      left: 0;
+      top: 2px;
+      color: var(--accent);
+      font-size: 1rem;
+      line-height: 1;
+      transition: transform 0.15s ease;
+    }}
+    .phase-block[open] > summary::before,
+    .assertion-section[open] > summary::before,
+    .console-block[open] > summary::before,
+    .artifacts-block[open] > summary::before {{
+      transform: rotate(90deg);
+    }}
+    .toggle-hint {{
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 6px 0 12px;
+    }}
+    .summary-row {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .summary-row h2,
+    .summary-row h3 {{
+      margin: 0;
+    }}
     .assertion-anchor {{
       scroll-margin-top: 24px;
     }}
@@ -201,6 +316,10 @@ def render_html(payload: dict[str, Any]) -> str:
       color: var(--muted);
       font-size: 0.95rem;
     }}
+    .section-heading {{
+      margin-top: 10px;
+      margin-bottom: 12px;
+    }}
   </style>
 </head>
 <body>
@@ -225,20 +344,35 @@ def render_html(payload: dict[str, Any]) -> str:
         </section>
       </div>
       {failure_index_html}
+      <div class="toolbar">
+        <button type="button" onclick="toggleAllDetails(true)">Expand All</button>
+        <button type="button" onclick="toggleAllDetails(false)">Collapse All</button>
+      </div>
     </section>
     {phases}
   </main>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {{
+      document.querySelectorAll('details.phase-block, details.assertion-section, details.artifacts-block').forEach(function(node) {{
+        node.open = false;
+      }});
+    }});
+
+    function toggleAllDetails(open) {{
+      document.querySelectorAll('details.phase-block, details.assertion-section, details.console-block, details.artifacts-block, details.assertion-details').forEach(function(node) {{
+        node.open = open;
+      }});
+    }}
+  </script>
 </body>
 </html>
 """
 
 
 def render_phase(phase: dict[str, Any]) -> str:
-    artifacts = "".join(
-        f'<a href="{escape(item["href"])}">{escape(item["label"])}</a>'
-        for item in phase.get("artifacts", [])
-    )
-    assertions = "".join(render_assertion(assertion) for assertion in phase.get("assertions", []))
+    assertions = render_assertion_sections(phase)
+    category_summary = render_category_summary(phase)
+    artifacts_html = render_artifacts_section(phase.get("artifacts", []))
     command_html = ""
     command = phase.get("command")
     if command:
@@ -249,7 +383,7 @@ def render_phase(phase: dict[str, Any]) -> str:
     console_html = ""
     if phase.get("consoleSnippet"):
         console_html = (
-            "<details><summary>Console snippet</summary>"
+            "<details class=\"console-block\"><summary>Console Snippet</summary>"
             f"<pre>{escape(phase['consoleSnippet'])}</pre></details>"
         )
     fix_html = ""
@@ -258,17 +392,17 @@ def render_phase(phase: dict[str, Any]) -> str:
         fix_html = f"<h3>What Changed</h3><ul>{fix_items}</ul>"
 
     return (
-        f"<section class=\"panel\">"
-        f"<div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase['status'].upper())}</div>"
-        f"<h2>{escape(phase['name'])}</h2>"
+        f"<details class=\"panel phase-block\">"
+        f"<summary><div class=\"summary-row\"><div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase['status'].upper())}</div><h2>{escape(phase['name'])}</h2></div></summary>"
+        f"<p class=\"toggle-hint\">Click the section title to expand or collapse details.</p>"
         f"<p>{escape(phase['description'])}</p>"
         f"{command_html}"
         f"{fix_html}"
-        f"<h3>Assertions</h3>"
-        f"<ul class=\"assertions\">{assertions}</ul>"
-        f"<div class=\"artifacts\">{artifacts}</div>"
+        f"{category_summary}"
+        f"{assertions}"
+        f"{artifacts_html}"
         f"{console_html}"
-        f"</section>"
+        f"</details>"
     )
 
 
@@ -292,7 +426,63 @@ def render_assertion(assertion: dict[str, Any]) -> str:
     )
 
 
+def render_assertion_sections(phase: dict[str, Any]) -> str:
+    assertions = phase.get("assertions", [])
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for assertion in assertions:
+        grouped.setdefault(assertion.get("category", "other"), []).append(assertion)
+
+    sections = "".join(
+        render_assertion_section(phase["name"], category, items) for category, items in grouped.items()
+    )
+    return f"<h3 class=\"section-heading\">Validations</h3>{sections}"
+
+
+def render_assertion_section(phase_name: str, category: str, assertions: list[dict[str, Any]]) -> str:
+    items = "".join(render_assertion(assertion) for assertion in assertions)
+    section_id = category_section_id(phase_name, category)
+    return (
+        f"<details id=\"{escape(section_id)}\" class=\"assertion-section\">"
+        f"<summary><h3>{escape(category_title(category))}</h3></summary>"
+        f"<ul class=\"assertions\">{items}</ul>"
+        f"</details>"
+    )
+
+
+def render_artifacts_section(artifacts: list[dict[str, Any]]) -> str:
+    if not artifacts:
+        return ""
+    artifact_links = "".join(
+        f'<a href="{escape(item["href"])}">{escape(item["label"])}</a>'
+        for item in artifacts
+    )
+    return (
+        "<details class=\"artifacts-block\">"
+        "<summary><h3>Artifacts</h3></summary>"
+        f"<div class=\"artifacts\">{artifact_links}</div>"
+        "</details>"
+    )
+
+
 def render_detail_item(item: dict[str, Any]) -> str:
+    if item.get("type") == "table":
+        headers = item.get("headers", [])
+        rows = item.get("rows", [])
+        header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
+        row_html = "".join(
+            "<tr>" + "".join(f"<td>{escape('' if value is None else str(value))}</td>" for value in row) + "</tr>"
+            for row in rows
+        )
+        rendered_value = (
+            '<div class="table-wrap"><table>'
+            f"<thead><tr>{header_html}</tr></thead>"
+            f"<tbody>{row_html}</tbody>"
+            "</table></div>"
+        )
+        return (
+            f"<div class=\"detail-item\"><strong>{escape(item['label'])}</strong>{rendered_value}</div>"
+        )
+
     value = "" if item.get("value") is None else str(item["value"])
     if "\n" in value:
         rendered_value = f"<pre>{escape(value)}</pre>"
@@ -363,6 +553,56 @@ def category_label(category: str) -> str:
     return labels.get(category, f"{category.title()} Failures")
 
 
+def category_title(category: str) -> str:
+    labels = {
+        "command": "Command Validations",
+        "console": "Console Validations",
+        "report": "Report Validations",
+        "readme": "README Validations",
+        "artifacts": "Artifact Validations",
+        "setup": "Setup Validations",
+    }
+    return labels.get(category, f"{category.title()} Validations")
+
+
+def render_category_summary(phase: dict[str, Any]) -> str:
+    assertions = phase.get("assertions", [])
+    grouped: dict[str, dict[str, int]] = {}
+    for assertion in assertions:
+        category = assertion.get("category", "other")
+        stats = grouped.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "other": 0})
+        stats["total"] += 1
+        status = assertion.get("status", "other")
+        if status == "passed":
+            stats["passed"] += 1
+        elif status == "failed":
+            stats["failed"] += 1
+        elif status == "skipped":
+            stats["skipped"] += 1
+        else:
+            stats["other"] += 1
+
+    rows = "".join(
+        f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['other']}</td></tr>"
+        for category, stats in grouped.items()
+    )
+    return (
+        '<section class="category-summary">'
+        "<h3>Category Summary</h3>"
+        "<table>"
+        "<thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Other</th></tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+        "</section>"
+    )
+
+
+def category_section_id(phase_name: str, category: str) -> str:
+    phase_slug = re.sub(r"[^a-z0-9]+", "-", phase_name.lower()).strip("-")
+    category_slug = re.sub(r"[^a-z0-9]+", "-", category.lower()).strip("-")
+    return f"{phase_slug}-{category_slug}"
+
+
 def build_report(
     *,
     lab_name: str,
@@ -393,7 +633,7 @@ def build_report(
         },
         "summary": [
             {"label": "Phases", "value": len(phases)},
-            {"label": "Assertions", "value": total_assertions},
+            {"label": "Validations", "value": total_assertions},
             {"label": "Failures", "value": failed_assertions},
         ],
         "phases": phases,

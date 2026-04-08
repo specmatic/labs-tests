@@ -25,6 +25,18 @@ Run every available lab harness from the repo root and build a consolidated repo
 python3 run_all.py
 ```
 
+Refresh all available lab reports and the consolidated report from existing captured artifacts without rerunning labs:
+
+```bash
+python3 run_all.py --refresh-report
+```
+
+Refresh an individual lab report from previously captured artifacts without rerunning the lab:
+
+```bash
+python3 api-coverage/run.py --refresh-report
+```
+
 Outputs are written to:
 
 - `output/consolidated-report.json`

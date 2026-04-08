@@ -21,6 +21,18 @@ Or from inside this folder:
 python3 run.py
 ```
 
+To rebuild `report.json` and `report.html` from the existing captured artifacts without rerunning Docker:
+
+```bash
+python3 api-coverage/run.py --refresh-report
+```
+
+Or from inside this folder:
+
+```bash
+python3 run.py --refresh-report
+```
+
 From inside this folder, the destructive refresh form is:
 
 ```bash
