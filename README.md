@@ -25,8 +25,8 @@ Run every available lab harness from the repo root and build a consolidated repo
 python3 run_all.py
 ```
 
-Generated root-level outputs:
+Outputs are written to:
 
-- [`output/consolidated-report.json`](output/consolidated-report.json)
-- [`output/consolidated-report.html`](output/consolidated-report.html)
-- [`output/setup-output.json`](output/setup-output.json)
+- output/consolidated-report.json
+- output/consolidated-report.html
+- output/setup-output.json
