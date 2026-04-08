@@ -27,6 +27,6 @@ python3 run_all.py
 
 Outputs are written to:
 
-- output/consolidated-report.json
-- output/consolidated-report.html
-- output/setup-output.json
+- `output/consolidated-report.json`
+- `output/consolidated-report.html`
+- `output/setup-output.json`
