@@ -276,8 +276,9 @@ def build_lab_spec() -> LabSpec:
 
 def clear_previous_reports(spec: LabSpec) -> None:
     build_dir = spec.upstream_lab / "build"
+    teardown_compose(spec)
     if build_dir.exists():
-        shutil.rmtree(build_dir)
+        shutil.rmtree(build_dir, ignore_errors=True)
 
 
 def teardown_compose(spec: LabSpec) -> None:

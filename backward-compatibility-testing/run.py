@@ -26,23 +26,6 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "backward-compatibility-testing"
 PRODUCTS_FILE = UPSTREAM_LAB / "products.yaml"
 README_FILE = UPSTREAM_LAB / "README.md"
 OUTPUT_DIR = ROOT / "backward-compatibility-testing" / "output"
-LAB_COMMAND = [
-    "docker",
-    "run",
-    "--rm",
-    "-v",
-    "..:/workspace",
-    "-v",
-    "../license.txt:/specmatic/specmatic-license.txt:ro",
-    "-w",
-    "/workspace",
-    "specmatic/enterprise:latest",
-    "backward-compatibility-check",
-    "--base-branch",
-    "origin/main",
-    "--target-path",
-    "backward-compatibility-testing/products.yaml",
-]
 
 
 def main() -> int:
@@ -60,7 +43,7 @@ def build_lab_spec() -> LabSpec:
         files={"products": PRODUCTS_FILE},
         readme_path=README_FILE,
         output_dir=OUTPUT_DIR,
-        command=LAB_COMMAND,
+        command=build_lab_command(),
         common_artifact_specs=(
             ArtifactSpec(
                 label="products.yaml",
@@ -128,6 +111,38 @@ def build_lab_spec() -> LabSpec:
             ),
         ),
     )
+
+
+def build_lab_command() -> list[str]:
+    workspace_root = UPSTREAM_LAB.parent
+    license_file = workspace_root / "license.txt"
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{workspace_root}:/workspace",
+    ]
+    if license_file.exists():
+        command.extend(
+            [
+                "-v",
+                f"{license_file}:/specmatic/specmatic-license.txt:ro",
+            ]
+        )
+    command.extend(
+        [
+            "-w",
+            "/workspace",
+            "specmatic/enterprise:latest",
+            "backward-compatibility-check",
+            "--base-branch",
+            "origin/main",
+            "--target-path",
+            "backward-compatibility-testing/products.yaml",
+        ]
+    )
+    return command
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
