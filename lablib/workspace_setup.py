@@ -9,7 +9,11 @@ from lablib.command_runner import CommandResult, run_command
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
-LAB_NAMES = ["api-coverage"]
+LAB_NAMES = [
+    "api-coverage",
+    "api-resiliency-testing",
+    "backward-compatibility-testing",
+]
 
 
 @dataclass

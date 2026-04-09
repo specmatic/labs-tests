@@ -57,3 +57,10 @@ Outputs are written to:
 - `output/consolidated-report.json`
 - `output/consolidated-report.html`
 - `output/setup-output.json`
+
+GitHub Actions workflow:
+
+- `.github/workflows/labs-tests.yml`
+- runs `python3 run_all.py --refresh-labs --force`
+- publishes a GitHub job summary based on `output/consolidated-report.json`
+- uploads all generated reports as the `specmatic-labs-reports` artifact

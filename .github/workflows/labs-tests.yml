@@ -1,0 +1,103 @@
+name: Specmatic Labs Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  run-labs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out labs-tests
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Run all lab harnesses
+        id: run_labs
+        shell: bash
+        run: |
+          set +e
+          python3 run_all.py --refresh-labs --force
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build GitHub summary
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          report_path = Path("output/consolidated-report.json")
+          if not report_path.exists():
+              print("## Specmatic Labs Tests")
+              print("")
+              print("Consolidated report was not generated.")
+              raise SystemExit(0)
+
+          payload = json.loads(report_path.read_text(encoding="utf-8"))
+          environment = payload.get("environment", {})
+          summary = {item["label"]: item["value"] for item in payload.get("summary", [])}
+
+          print("## Specmatic Labs Tests")
+          print("")
+          print(f"- Status: **{payload.get('status', 'unknown').upper()}**")
+          print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
+          print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
+          print(f"- Labs discovered: `{summary.get('Labs discovered', 0)}`")
+          print(f"- Labs passed: `{summary.get('Labs passed', 0)}`")
+          print(f"- Labs failed: `{summary.get('Labs failed', 0)}`")
+          print("- Reports artifact: `specmatic-labs-reports`")
+          print("")
+          print("| Lab | Status | Time (s) | Exit Code | Failures |")
+          print("| --- | --- | ---: | ---: | ---: |")
+          for lab in payload.get("labs", []):
+              failures = "n/a"
+              for item in lab.get("summary", []):
+                  if item.get("label") == "Failures":
+                      failures = item.get("value", "n/a")
+                      break
+              print(
+                  f"| {lab.get('name', 'unknown')} | {lab.get('status', 'unknown')} | "
+                  f"{lab.get('durationSeconds', 'n/a')} | {lab.get('exitCode', 'n/a')} | "
+                  f"{failures} |"
+              )
+          PY
+
+      - name: Upload generated reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: specmatic-labs-reports
+          if-no-files-found: error
+          path: |
+            output/
+            api-coverage/output/
+            api-resiliency-testing/output/
+            backward-compatibility-testing/output/
+
+      - name: Fail workflow when any lab fails
+        if: steps.run_labs.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "One or more lab harnesses failed. See the consolidated summary and uploaded reports artifact."
+          exit 1
