@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lablib.command_runner import run_command
 from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
@@ -18,6 +16,8 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     build_coverage_assertions,
+    clear_docker_owned_build_dir,
+    docker_compose_down,
     run_lab,
 )
 
@@ -158,13 +158,11 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
-    build_dir = spec.upstream_lab / "build"
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
+    clear_docker_owned_build_dir(spec)
 
 
 def teardown_compose(spec: LabSpec) -> None:
-    run_command(["docker", "compose", "down", "-v"], spec.upstream_lab)
+    docker_compose_down(spec, "down", "-v")
 
 
 def set_baseline_contract(content: str) -> str:

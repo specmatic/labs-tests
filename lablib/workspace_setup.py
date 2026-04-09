@@ -100,7 +100,7 @@ def run_setup(
                 execute(
                     ["docker", "compose", "pull", "--ignore-buildable"],
                     upstream_lab_path,
-                    f"setup:{lab_name}",
+                    "setup:docker",
                     stream_output=stream_output,
                 ),
                 f"Pull referenced Docker images for {lab_name}",
@@ -111,7 +111,7 @@ def run_setup(
                 execute(
                     ["docker", "compose", "build", "--pull"],
                     upstream_lab_path,
-                    f"setup:{lab_name}",
+                    "setup:docker",
                     stream_output=stream_output,
                 ),
                 f"Refresh buildable Docker images for {lab_name}",

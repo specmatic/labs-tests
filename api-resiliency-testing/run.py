@@ -4,14 +4,12 @@ import argparse
 import json
 from pathlib import Path
 import re
-import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lablib.command_runner import run_command
 from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
@@ -21,8 +19,10 @@ from lablib.scaffold import (
     add_standard_lab_args,
     assert_condition,
     assert_equal,
+    clear_docker_owned_build_dir,
     detail,
     detail_table,
+    docker_compose_down,
     parse_html_embedded_report,
     run_lab,
 )
@@ -275,14 +275,11 @@ def build_lab_spec() -> LabSpec:
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
-    build_dir = spec.upstream_lab / "build"
-    teardown_compose(spec)
-    if build_dir.exists():
-        shutil.rmtree(build_dir, ignore_errors=True)
+    clear_docker_owned_build_dir(spec)
 
 
 def teardown_compose(spec: LabSpec) -> None:
-    run_command(["docker", "compose", "--profile", "test", "down", "-v"], spec.upstream_lab)
+    docker_compose_down(spec, "--profile", "test", "down", "-v")
 
 
 def baseline_operation_rows() -> list[dict[str, object]]:

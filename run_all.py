@@ -58,7 +58,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    labs_git_ref = upstream_labs_git_ref()
 
     setup_payload: dict[str, Any] | None = None
     if args.refresh_report:
@@ -97,6 +96,7 @@ def main() -> int:
             )
             return 1
 
+    labs_git_ref = upstream_labs_git_ref()
     labs = discover_labs()
     print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
 

@@ -172,6 +172,21 @@ Current command expectations:
 - `python3 run_all.py`
 - `python3 run_all.py --refresh-report`
 
+## Docker-owned artifact cleanup
+
+Many Specmatic labs generate `build/` outputs as `root` inside Docker containers. Do not delete those directories with a plain `shutil.rmtree()` in lab code.
+
+Rules:
+
+- for Docker Compose-based labs, always tear containers down before clearing prior reports
+- use shared helpers from `lablib/scaffold.py` for cleanup instead of ad hoc file deletion
+- prefer a non-fatal cleanup path (`docker compose down -v` followed by best-effort `rmtree(..., ignore_errors=True)`) so CI does not crash on Docker-owned files
+- apply the same cleanup pattern to every new Docker-based lab from the start
+
+Also note:
+
+- if consolidated metadata depends on `../labs`, compute it after setup/clone has completed, not before
+
 ## Report-only refresh behavior
 
 Every lab runner should support rebuilding reports from existing artifacts without rerunning the lab.

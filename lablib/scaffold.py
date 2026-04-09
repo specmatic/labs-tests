@@ -160,6 +160,17 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     return 0 if report["status"] == "passed" else 1
 
 
+def docker_compose_down(spec: LabSpec, *compose_args: str) -> CommandResult:
+    return run_command(["docker", "compose", *compose_args], spec.upstream_lab)
+
+
+def clear_docker_owned_build_dir(spec: LabSpec) -> None:
+    docker_compose_down(spec, "down", "-v")
+    build_dir = spec.upstream_lab / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir, ignore_errors=True)
+
+
 def execute_phase(
     spec: LabSpec,
     phase: PhaseSpec,
