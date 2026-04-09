@@ -99,7 +99,10 @@ def main() -> int:
 
     lab_results: list[dict[str, Any]] = []
     for lab in labs:
-        print(f"{'Refreshing report for' if args.refresh_report else 'Running'} {lab}...")
+        print()
+        print("=" * 78)
+        print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
+        print("=" * 78)
         lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
         result = run_command(
             lab_command,
@@ -110,11 +113,13 @@ def main() -> int:
         report_json_path = ROOT / lab / "output" / "report.json"
         report_html_path = ROOT / lab / "output" / "report.html"
         lab_report = load_json(report_json_path) if report_json_path.exists() else None
+        duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
         lab_results.append(
             {
                 "name": lab,
                 "status": (lab_report or {}).get("status", "failed"),
                 "exitCode": result.exit_code,
+                "durationSeconds": duration_seconds,
                 "reportJsonPath": str(report_json_path),
                 "reportHtmlPath": str(report_html_path),
                 "summary": (lab_report or {}).get("summary", []),
@@ -151,6 +156,12 @@ def discover_labs() -> list[str]:
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def report_duration_seconds(report: dict[str, Any] | None) -> float:
+    if not report:
+        return 0.0
+    return sum(phase.get("command", {}).get("durationSeconds", 0.0) for phase in report.get("phases", []))
 
 
 def write_consolidated_report(payload: dict[str, Any]) -> None:
@@ -243,6 +254,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
             <th>Lab</th>
             <th>Status</th>
             <th>Exit Code</th>
+            <th>Time (s)</th>
             <th>Reports</th>
             <th>Failures</th>
           </tr>
@@ -267,6 +279,7 @@ def render_lab_row(lab: dict[str, Any]) -> str:
         f"<td>{escape(lab['name'])}</td>"
         f"<td>{escape(lab['status'])}</td>"
         f"<td>{escape(str(lab['exitCode']))}</td>"
+        f"<td>{escape(str(lab.get('durationSeconds', 'n/a')))}</td>"
         f"<td><a href=\"{escape(json_link)}\">json</a> / <a href=\"{escape(html_link)}\">html</a></td>"
         f"<td>{escape(str(failures))}</td>"
         "</tr>"

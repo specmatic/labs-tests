@@ -1,7 +1,7 @@
-# api-coverage automation
+# backward-compatibility-testing automation
 
-This folder contains the JSON-first automation harness for the upstream
-`labs/api-coverage` lab.
+This folder contains the scaffolded automation harness for the upstream
+`labs/backward-compatibility-testing` lab.
 
 This automation validates the CLI run and generated artifacts only. It does not
 validate the optional Specmatic Studio follow-up flow.
@@ -9,13 +9,7 @@ validate the optional Specmatic Studio follow-up flow.
 Run it with:
 
 ```bash
-python3 api-coverage/run.py
-```
-
-To first force the sibling `../labs` checkout back to the latest `main`:
-
-```bash
-python3 api-coverage/run.py --refresh-labs --force
+python3 backward-compatibility-testing/run.py
 ```
 
 Or from inside this folder:
@@ -27,7 +21,7 @@ python3 run.py
 To rebuild `report.json` and `report.html` from the existing captured artifacts without rerunning Docker:
 
 ```bash
-python3 api-coverage/run.py --refresh-report
+python3 backward-compatibility-testing/run.py --refresh-report
 ```
 
 Or from inside this folder:
@@ -36,7 +30,13 @@ Or from inside this folder:
 python3 run.py --refresh-report
 ```
 
-From inside this folder, the destructive refresh form is:
+To first force the sibling `../labs` checkout back to the latest `main`:
+
+```bash
+python3 backward-compatibility-testing/run.py --refresh-labs --force
+```
+
+Or from inside this folder:
 
 ```bash
 python3 run.py --refresh-labs --force
@@ -68,7 +68,7 @@ python3 run_all.py --refresh-report
 
 Outputs are written to:
 
-- `api-coverage/output/report.json`
-- `api-coverage/output/report.html`
-- `api-coverage/output/baseline/`
-- `api-coverage/output/fixed/`
+- `backward-compatibility-testing/output/report.json`
+- `backward-compatibility-testing/output/report.html`
+- `backward-compatibility-testing/output/baseline/`
+- `backward-compatibility-testing/output/fixed/`

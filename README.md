@@ -2,10 +2,17 @@
 
 Automation harnesses for Specmatic labs live in lab-named folders in this repo.
 
+Current automation scope validates CLI/runtime behavior and generated artifacts.
+It does not automate or validate Specmatic Studio flows.
+
 Current labs:
 
 - [`api-coverage`](api-coverage/)
   README: [`api-coverage/README.md`](api-coverage/README.md)
+- [`api-resiliency-testing`](api-resiliency-testing/)
+  README: [`api-resiliency-testing/README.md`](api-resiliency-testing/README.md)
+- [`backward-compatibility-testing`](backward-compatibility-testing/)
+  README: [`backward-compatibility-testing/README.md`](backward-compatibility-testing/README.md)
 
 Setup the sibling upstream labs checkout and Docker images from the repo root with:
 
@@ -35,6 +42,14 @@ Refresh an individual lab report from previously captured artifacts without reru
 
 ```bash
 python3 api-coverage/run.py --refresh-report
+```
+
+```bash
+python3 api-resiliency-testing/run.py --refresh-report
+```
+
+```bash
+python3 backward-compatibility-testing/run.py --refresh-report
 ```
 
 Outputs are written to:

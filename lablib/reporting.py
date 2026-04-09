@@ -29,6 +29,10 @@ def render_html(payload: dict[str, Any]) -> str:
     )
     phases = "".join(render_phase(phase) for phase in phases_with_ids)
     failure_index_html = render_failure_index(failed_assertions)
+    consolidated_href = escape(payload.get("navigation", {}).get("consolidatedReportHref", "../../output/consolidated-report.html"))
+    back_link_html = (
+        f'<p class="back-link"><a href="{consolidated_href}">Back to consolidated report</a></p>'
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -177,6 +181,15 @@ def render_html(payload: dict[str, Any]) -> str:
     }}
     .failure-group h3 {{
       margin-bottom: 8px;
+    }}
+    .back-link {{
+      margin-top: 14px;
+      margin-bottom: 0;
+    }}
+    .back-link a {{
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
     }}
     .category-summary table {{
       width: 100%;
@@ -329,6 +342,7 @@ def render_html(payload: dict[str, Any]) -> str:
       <h1>{title}</h1>
       <p>{escape(payload['lab']['description'])}</p>
       <p class="meta">Generated at {generated_at}</p>
+      {back_link_html}
       <div class="grid">
         <section class="panel">
           <h2>Summary</h2>
@@ -339,6 +353,7 @@ def render_html(payload: dict[str, Any]) -> str:
           <ul>
             <li><strong>Lab folder:</strong> {escape(payload['lab']['labPath'])}</li>
             <li><strong>Spec file:</strong> {escape(payload['lab']['specPath'])}</li>
+            <li><strong>Original README:</strong> <a href="{escape(payload['lab']['readmeHref'])}" target="_blank" rel="noopener noreferrer">{escape(payload['lab']['readmeHref'])}</a></li>
             <li><strong>Local output:</strong> {escape(payload['lab']['outputPath'])}</li>
           </ul>
         </section>
@@ -458,7 +473,7 @@ def render_artifacts_section(artifacts: list[dict[str, Any]]) -> str:
     )
     return (
         "<details class=\"artifacts-block\">"
-        "<summary><h3>Artifacts</h3></summary>"
+        "<summary><h3>Artifacts generated</h3></summary>"
         f"<div class=\"artifacts\">{artifact_links}</div>"
         "</details>"
     )
@@ -609,6 +624,7 @@ def build_report(
     description: str,
     lab_path: Path,
     spec_path: Path,
+    readme_path: Path,
     output_path: Path,
     phases: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -621,6 +637,8 @@ def build_report(
         if assertion["status"] != "passed"
     )
 
+    readme_href = f"https://github.com/specmatic/labs/blob/main/{lab_path.name}/README.md"
+
     return {
         "generatedAt": datetime.now(UTC).isoformat(),
         "status": overall_status,
@@ -629,6 +647,8 @@ def build_report(
             "description": description,
             "labPath": str(lab_path),
             "specPath": str(spec_path),
+            "readmePath": str(readme_path),
+            "readmeHref": readme_href,
             "outputPath": str(output_path),
         },
         "summary": [
