@@ -6,6 +6,8 @@ from html import escape
 import json
 import os
 from pathlib import Path
+import re
+import subprocess
 import sys
 from typing import Any
 
@@ -56,6 +58,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    labs_git_ref = upstream_labs_git_ref()
 
     setup_payload: dict[str, Any] | None = None
     if args.refresh_report:
@@ -138,6 +141,10 @@ def main() -> int:
             {"label": "Labs failed", "value": failed},
         ],
         "setup": setup_payload,
+        "environment": {
+            "specmaticVersion": detect_shared_specmatic_version(lab_results),
+            "labsGitRef": labs_git_ref,
+        },
         "labs": lab_results,
     }
     write_consolidated_report(consolidated)
@@ -164,9 +171,54 @@ def report_duration_seconds(report: dict[str, Any] | None) -> float:
     return sum(phase.get("command", {}).get("durationSeconds", 0.0) for phase in report.get("phases", []))
 
 
+def extract_specmatic_version(report_json_path: Path) -> str:
+    output_dir = report_json_path.parent
+    for command_log in sorted(output_dir.glob("*/command.log")):
+        text = command_log.read_text(encoding="utf-8", errors="ignore")
+        enterprise_match = re.search(r"Specmatic Enterprise v([^\s]+)", text)
+        core_match = re.search(r"Specmatic Core v([^\s]+)", text)
+        versions: list[str] = []
+        if enterprise_match:
+            versions.append(f"Enterprise {enterprise_match.group(1)}")
+        if core_match:
+            versions.append(f"Core {core_match.group(1)}")
+        if versions:
+            return " / ".join(versions)
+    return "n/a"
+
+
+def upstream_labs_git_ref() -> str:
+    labs_dir = ROOT.parent / "labs"
+    try:
+        branch = subprocess.check_output(
+            ["git", "-C", str(labs_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+        ).strip()
+        short_sha = subprocess.check_output(
+            ["git", "-C", str(labs_dir), "rev-parse", "--short", "HEAD"],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "n/a"
+    return f"{branch}@{short_sha}"
+
+
 def write_consolidated_report(payload: dict[str, Any]) -> None:
     CONSOLIDATED_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     CONSOLIDATED_HTML_PATH.write_text(render_consolidated_html(payload), encoding="utf-8")
+
+
+def detect_shared_specmatic_version(lab_results: list[dict[str, Any]]) -> str:
+    versions = [
+        extract_specmatic_version(Path(lab["reportJsonPath"]))
+        for lab in lab_results
+        if lab.get("reportJsonPath")
+    ]
+    versions = [version for version in versions if version != "n/a"]
+    if not versions:
+        return "n/a"
+    unique_versions = sorted(set(versions))
+    return unique_versions[0] if len(unique_versions) == 1 else " / ".join(unique_versions)
 
 
 def render_consolidated_html(payload: dict[str, Any]) -> str:
@@ -186,6 +238,14 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
         )
 
     lab_rows = "".join(render_lab_row(lab) for lab in payload.get("labs", []))
+    environment = payload.get("environment", {})
+    footer_html = (
+        "<footer class=\"panel footer-panel\">"
+        "<h2>Run Environment</h2>"
+        f"<p><strong>Specmatic:</strong> {escape(str(environment.get('specmaticVersion', 'n/a')))}</p>"
+        f"<p><strong>Labs git ref:</strong> {escape(str(environment.get('labsGitRef', 'n/a')))}</p>"
+        "</footer>"
+    )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -211,6 +271,9 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
       padding: 18px;
       margin-top: 18px;
       box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .footer-panel p:last-child {{
+      margin-bottom: 0;
     }}
     .status {{
       display: inline-block;
@@ -264,6 +327,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
         </tbody>
       </table>
     </section>
+    {footer_html}
   </main>
 </body>
 </html>

@@ -18,10 +18,18 @@ def write_html(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(render_html(payload), encoding="utf-8")
 
 
+def format_display_datetime(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
 def render_html(payload: dict[str, Any]) -> str:
     phases_with_ids, failed_assertions = assign_assertion_ids(payload.get("phases", []))
     title = escape(payload["lab"]["name"])
-    generated_at = escape(payload["generatedAt"])
+    generated_at = escape(format_display_datetime(payload["generatedAt"]))
     overall_status = escape(payload["status"].upper())
     summary_items = "".join(
         f"<li><strong>{escape(item['label'])}:</strong> {escape(str(item['value']))}</li>"
@@ -241,6 +249,38 @@ def render_html(payload: dict[str, Any]) -> str:
     .phase-block {{
       margin-top: 18px;
     }}
+    .phase-block.pass {{
+      border-color: rgba(31, 122, 77, 0.5);
+      box-shadow: 0 14px 40px rgba(31, 122, 77, 0.1);
+    }}
+    .phase-block.fail {{
+      border-color: rgba(171, 46, 46, 0.5);
+      box-shadow: 0 14px 40px rgba(171, 46, 46, 0.1);
+    }}
+    .phase-block.pass > summary {{
+      color: var(--pass);
+    }}
+    .phase-block.fail > summary {{
+      color: var(--fail);
+    }}
+    .assertion-section.pass {{
+      border-top-color: rgba(31, 122, 77, 0.35);
+      background: rgba(31, 122, 77, 0.03);
+      border-radius: 12px;
+      padding: 12px 12px 0;
+    }}
+    .assertion-section.fail {{
+      border-top-color: rgba(171, 46, 46, 0.35);
+      background: rgba(171, 46, 46, 0.03);
+      border-radius: 12px;
+      padding: 12px 12px 0;
+    }}
+    .assertion-section.pass > summary {{
+      color: var(--pass);
+    }}
+    .assertion-section.fail > summary {{
+      color: var(--fail);
+    }}
     .phase-block > summary,
     .assertion-section > summary,
     .console-block > summary,
@@ -388,6 +428,7 @@ def render_phase(phase: dict[str, Any]) -> str:
     assertions = render_assertion_sections(phase)
     category_summary = render_category_summary(phase)
     artifacts_html = render_artifacts_section(phase.get("artifacts", []))
+    phase_css = "pass" if phase["status"] == "passed" else "fail"
     command_html = ""
     command = phase.get("command")
     if command:
@@ -407,7 +448,7 @@ def render_phase(phase: dict[str, Any]) -> str:
         fix_html = f"<h3>What Changed</h3><ul>{fix_items}</ul>"
 
     return (
-        f"<details class=\"panel phase-block\">"
+        f"<details class=\"panel phase-block {phase_css}\">"
         f"<summary><div class=\"summary-row\"><div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase['status'].upper())}</div><h2>{escape(phase['name'])}</h2></div></summary>"
         f"<p class=\"toggle-hint\">Click the section title to expand or collapse details.</p>"
         f"<p>{escape(phase['description'])}</p>"
@@ -456,8 +497,9 @@ def render_assertion_sections(phase: dict[str, Any]) -> str:
 def render_assertion_section(phase_name: str, category: str, assertions: list[dict[str, Any]]) -> str:
     items = "".join(render_assertion(assertion) for assertion in assertions)
     section_id = category_section_id(phase_name, category)
+    section_status = "pass" if all(assertion["status"] == "passed" for assertion in assertions) else "fail"
     return (
-        f"<details id=\"{escape(section_id)}\" class=\"assertion-section\">"
+        f"<details id=\"{escape(section_id)}\" class=\"assertion-section {section_status}\">"
         f"<summary><h3>{escape(category_title(category))}</h3></summary>"
         f"<ul class=\"assertions\">{items}</ul>"
         f"</details>"

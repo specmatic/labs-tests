@@ -34,6 +34,7 @@ class ArtifactSpec:
 class ReadmeStructureSpec:
     required_h2_prefixes: tuple[str, ...]
     additional_h2_prefixes: tuple[str, ...] = ()
+    enforce_required_order: bool = True
 
 
 @dataclass
@@ -268,6 +269,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         assertions.extend(phase.extra_assertions(context))
 
     assertions.extend(evaluate_readme_assertions(context))
+    assertions.extend(evaluate_runtime_summary_drift(context))
     if phase.include_readme_structure_checks and spec.readme_structure is not None:
         assertions.extend(validate_readme_structure(context.readme_text, spec.readme_structure))
 
@@ -532,6 +534,30 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
     return evaluated
 
 
+def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
+    readme_text = context.readme_text
+    console_output = strip_ansi(context.command_result.combined_output)
+    normalized_readme = normalize_space(readme_text)
+    assertions: list[dict[str, Any]] = []
+
+    runtime_summary = extract_tests_run_summary(console_output)
+    if runtime_summary is not None:
+        assertions.append(
+            assert_condition(
+                normalize_space(runtime_summary) in normalized_readme,
+                "README includes the exact observed runtime test summary.",
+                "README does not include the exact observed runtime test summary.",
+                category="readme",
+                details=[
+                    detail("Observed runtime summary", runtime_summary),
+                    detail("Seen in README", normalize_space(runtime_summary) in normalized_readme),
+                ],
+            )
+        )
+
+    return assertions
+
+
 def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) -> list[dict[str, Any]]:
     headings = [(len(m.group(1)), m.group(2).strip()) for m in HEADING_RE.finditer(readme_text)]
     assertions: list[dict[str, Any]] = []
@@ -562,7 +588,38 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
                 ],
             )
         )
+
+    if structure.enforce_required_order:
+        required_positions: list[tuple[str, int]] = []
+        for prefix in structure.required_h2_prefixes:
+            for index, (level, text) in enumerate(headings):
+                if level == 2 and text.startswith(prefix):
+                    required_positions.append((prefix, index))
+                    break
+
+        actual_prefixes = [prefix for prefix, _ in required_positions]
+        actual_positions = [position for _, position in required_positions]
+        order_is_correct = actual_positions == sorted(actual_positions) and actual_prefixes == list(structure.required_h2_prefixes)
+        assertions.append(
+            assert_condition(
+                order_is_correct,
+                "README required sections appear in the expected order.",
+                "README required sections do not appear in the expected order.",
+                category="readme",
+                details=[
+                    detail("Expected order", " -> ".join(structure.required_h2_prefixes)),
+                    detail("Actual found order", " -> ".join(actual_prefixes) or "(none)"),
+                ],
+            )
+        )
     return assertions
+
+
+def extract_tests_run_summary(console_output: str) -> str | None:
+    match = re.search(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", console_output)
+    if not match:
+        return None
+    return match.group(0)
 
 
 def extract_operations(context: ValidationContext) -> list[dict[str, Any]]:
