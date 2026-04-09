@@ -13,6 +13,11 @@ LAB_NAMES = [
     "api-coverage",
     "api-resiliency-testing",
     "backward-compatibility-testing",
+    "overlays",
+    "workflow-in-same-spec",
+    "quick-start-api-testing",
+    "schema-design",
+    "response-templating",
 ]
 
 

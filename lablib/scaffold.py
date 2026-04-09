@@ -774,6 +774,100 @@ def build_coverage_assertions(
     return assertions
 
 
+def build_test_summary_assertions(
+    context: ValidationContext,
+    *,
+    expected_ctrf: dict[str, int],
+    expected_console: dict[str, int],
+) -> list[dict[str, Any]]:
+    ctrf = context.artifacts["ctrf-report.json"]["json"]
+    html_text = first_html_artifact(context.artifacts)["text"]
+    html_report = parse_html_embedded_report(html_text)
+    ctrf_summary = ctrf["results"]["summary"]
+    html_summary = html_report["results"]["summary"]
+    console_summary = extract_tests_run_summary(context.command_result.combined_output)
+    expected_console_summary = (
+        f"Tests run: {expected_console['tests']}, "
+        f"Successes: {expected_console['successes']}, "
+        f"Failures: {expected_console['failures']}, "
+        f"Errors: {expected_console['errors']}"
+    )
+
+    assertions: list[dict[str, Any]] = []
+    for field, expected_value in expected_ctrf.items():
+        actual_ctrf = ctrf_summary.get(field, 0)
+        actual_html = html_summary.get(field, 0)
+        assertions.append(
+            assert_equal(
+                actual_ctrf,
+                expected_value,
+                f"CTRF summary field '{field}' matched expected value {expected_value}.",
+                f"CTRF summary field '{field}' expected {expected_value}, got {actual_ctrf}.",
+                category="report",
+                details=[
+                    detail("Field", field),
+                    detail("Expected", expected_value),
+                    detail("Actual", actual_ctrf),
+                ],
+            )
+        )
+        assertions.append(
+            assert_equal(
+                actual_html,
+                expected_value,
+                f"Embedded Specmatic HTML summary field '{field}' matched expected value {expected_value}.",
+                f"Embedded Specmatic HTML summary field '{field}' expected {expected_value}, got {actual_html}.",
+                category="report",
+                details=[
+                    detail("Field", field),
+                    detail("Expected", expected_value),
+                    detail("Actual", actual_html),
+                ],
+            )
+        )
+
+    assertions.append(
+        assert_equal(
+            console_summary,
+            expected_console_summary,
+            f"Console summary matched '{expected_console_summary}'.",
+            f"Console summary did not match '{expected_console_summary}'.",
+            category="console",
+            details=[
+                detail("Expected console summary", expected_console_summary),
+                detail("Actual console summary", console_summary or "(missing)"),
+            ],
+        )
+    )
+    assertions.append(
+        assert_equal(
+            len(ctrf["results"].get("tests", [])),
+            expected_ctrf["tests"],
+            f"CTRF test list contained {expected_ctrf['tests']} entries as expected.",
+            f"CTRF test list expected {expected_ctrf['tests']} entries, got {len(ctrf['results'].get('tests', []))}.",
+            category="artifacts",
+            details=[
+                detail("Expected CTRF tests", expected_ctrf["tests"]),
+                detail("Actual CTRF tests", len(ctrf["results"].get("tests", []))),
+            ],
+        )
+    )
+    assertions.append(
+        assert_equal(
+            len(html_report["results"].get("tests", [])),
+            expected_ctrf["tests"],
+            f"Embedded Specmatic HTML report contained {expected_ctrf['tests']} test entries as expected.",
+            f"Embedded Specmatic HTML report expected {expected_ctrf['tests']} test entries, got {len(html_report['results'].get('tests', []))}.",
+            category="artifacts",
+            details=[
+                detail("Expected HTML tests", expected_ctrf["tests"]),
+                detail("Actual HTML tests", len(html_report["results"].get("tests", []))),
+            ],
+        )
+    )
+    return assertions
+
+
 def compare_console_coverage_with_reports(
     console_output: str,
     coverage_report: dict[str, Any],
