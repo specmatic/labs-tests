@@ -211,31 +211,34 @@ def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_file
     phases: list[dict[str, Any]] = []
     for phase in spec.phases:
         target_dir = spec.output_dir / phase_dir_name(phase)
-        ensure_artifact_set_exists(spec, phase, target_dir)
-        artifacts = load_copied_artifacts(spec, phase, target_dir)
-        command_output = (target_dir / "command.log").read_text(encoding="utf-8")
         command_info = previous_commands.get(phase.name, {})
-        result = CommandResult(
-            command=spec.command,
-            cwd=str(spec.upstream_lab),
-            exit_code=command_info.get("exitCode", phase.expected_exit_code),
-            stdout=command_output,
-            stderr="",
-            started_at="",
-            finished_at="",
-            duration_seconds=command_info.get("durationSeconds", 0.0),
-        )
-        artifacts["command.log"] = {"path": target_dir / "command.log", "text": command_output, "kind": "text"}
-        context = ValidationContext(
-            lab=spec,
-            phase=phase,
-            target_dir=target_dir,
-            command_result=result,
-            readme_text=readme_text,
-            artifacts=artifacts,
-            original_files=original_files,
-        )
-        phases.append(build_phase_result(context))
+        try:
+            ensure_artifact_set_exists(spec, phase, target_dir)
+            artifacts = load_copied_artifacts(spec, phase, target_dir)
+            command_output = (target_dir / "command.log").read_text(encoding="utf-8")
+            result = CommandResult(
+                command=spec.command,
+                cwd=str(spec.upstream_lab),
+                exit_code=command_info.get("exitCode", phase.expected_exit_code),
+                stdout=command_output,
+                stderr="",
+                started_at="",
+                finished_at="",
+                duration_seconds=command_info.get("durationSeconds", 0.0),
+            )
+            artifacts["command.log"] = {"path": target_dir / "command.log", "text": command_output, "kind": "text"}
+            context = ValidationContext(
+                lab=spec,
+                phase=phase,
+                target_dir=target_dir,
+                command_result=result,
+                readme_text=readme_text,
+                artifacts=artifacts,
+                original_files=original_files,
+            )
+            phases.append(build_phase_result(context))
+        except FileNotFoundError as exc:
+            phases.append(build_missing_artifact_phase_result(spec, phase, target_dir, command_info, exc))
     return phases
 
 
@@ -452,6 +455,58 @@ def ensure_artifact_set_exists(spec: LabSpec, phase: PhaseSpec, target_dir: Path
         )
 
 
+def build_missing_artifact_phase_result(
+    spec: LabSpec,
+    phase: PhaseSpec,
+    target_dir: Path,
+    command_info: dict[str, Any],
+    error: FileNotFoundError,
+) -> dict[str, Any]:
+    available_artifacts = build_existing_artifact_links(spec, phase, target_dir)
+    command_log_path = target_dir / "command.log"
+    console_snippet = command_log_path.read_text(encoding="utf-8") if command_log_path.exists() else ""
+    return {
+        "name": phase.name,
+        "description": phase.description,
+        "status": "failed",
+        "command": {
+            "display": " ".join(spec.command),
+            "exitCode": command_info.get("exitCode", "n/a"),
+            "durationSeconds": round(command_info.get("durationSeconds", 0.0), 2),
+        },
+        "assertions": [
+            {
+                "status": "failed",
+                "message": "Refresh-only mode could not rebuild this phase because saved artifacts are incomplete.",
+                "category": "artifacts",
+                "details": [
+                    detail("Reason", str(error)),
+                    detail(
+                        "How to fix",
+                        "Rerun this lab without --refresh-report to regenerate the missing artifacts, then refresh the report again.",
+                    ),
+                    detail("Phase output folder", target_dir),
+                ],
+            }
+        ],
+        "artifacts": available_artifacts,
+        "consoleSnippet": shorten_text_block(console_snippet),
+        "fixSummary": list(phase.fix_summary),
+    }
+
+
+def build_existing_artifact_links(spec: LabSpec, phase: PhaseSpec, target_dir: Path) -> list[dict[str, str]]:
+    links: list[dict[str, str]] = []
+    command_log = target_dir / "command.log"
+    if command_log.exists():
+        links.append({"label": "command.log", "href": f"{target_dir.name}/command.log"})
+    for artifact in all_artifact_specs(spec, phase):
+        artifact_path = target_dir / artifact.target_relpath
+        if artifact_path.exists():
+            links.append({"label": artifact.label, "href": f"{target_dir.name}/{artifact.target_relpath}"})
+    return links
+
+
 def load_previous_phase_commands(output_dir: Path) -> dict[str, dict[str, Any]]:
     report_path = output_dir / "report.json"
     if not report_path.exists():
@@ -480,7 +535,11 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def shorten_console_output(result: CommandResult) -> str:
-    lines = [line for line in result.combined_output.splitlines() if line.strip()]
+    return shorten_text_block(result.combined_output)
+
+
+def shorten_text_block(text: str) -> str:
+    lines = [line for line in text.splitlines() if line.strip()]
     if len(lines) <= 80:
         return "\n".join(lines)
     head = "\n".join(lines[:45])

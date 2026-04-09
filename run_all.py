@@ -320,6 +320,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
             <th>Time (s)</th>
             <th>Reports</th>
             <th>Failures</th>
+            <th>Total tests</th>
           </tr>
         </thead>
         <tbody>
@@ -336,6 +337,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
 
 def render_lab_row(lab: dict[str, Any]) -> str:
     failures = next((item["value"] for item in lab.get("summary", []) if item["label"] == "Failures"), "n/a")
+    total_tests = next((item["value"] for item in lab.get("summary", []) if item["label"] == "Validations"), "n/a")
     json_link = relative_link(CONSOLIDATED_HTML_PATH.parent, Path(lab["reportJsonPath"]))
     html_link = relative_link(CONSOLIDATED_HTML_PATH.parent, Path(lab["reportHtmlPath"]))
     return (
@@ -346,6 +348,7 @@ def render_lab_row(lab: dict[str, Any]) -> str:
         f"<td>{escape(str(lab.get('durationSeconds', 'n/a')))}</td>"
         f"<td><a href=\"{escape(json_link)}\">json</a> / <a href=\"{escape(html_link)}\">html</a></td>"
         f"<td>{escape(str(failures))}</td>"
+        f"<td>{escape(str(total_tests))}</td>"
         "</tr>"
     )
 

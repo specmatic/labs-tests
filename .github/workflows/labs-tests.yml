@@ -68,18 +68,20 @@ jobs:
           print(f"- Labs failed: `{summary.get('Labs failed', 0)}`")
           print("- Reports artifact: `specmatic-labs-reports`")
           print("")
-          print("| Lab | Status | Time (s) | Exit Code | Failures |")
-          print("| --- | --- | ---: | ---: | ---: |")
+          print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")
+          print("| --- | --- | ---: | ---: | ---: | ---: |")
           for lab in payload.get("labs", []):
               failures = "n/a"
+              validations = "n/a"
               for item in lab.get("summary", []):
                   if item.get("label") == "Failures":
                       failures = item.get("value", "n/a")
-                      break
+                  if item.get("label") == "Validations":
+                      validations = item.get("value", "n/a")
               print(
                   f"| {lab.get('name', 'unknown')} | {lab.get('status', 'unknown')} | "
                   f"{lab.get('durationSeconds', 'n/a')} | {lab.get('exitCode', 'n/a')} | "
-                  f"{failures} |"
+                  f"{failures} | {validations} |"
               )
           PY
 
@@ -94,6 +96,11 @@ jobs:
             api-coverage/output/
             api-resiliency-testing/output/
             backward-compatibility-testing/output/
+            overlays/output/
+            quick-start-api-testing/output/
+            response-templating/output/
+            schema-design/output/
+            workflow-in-same-spec/output/
 
       - name: Fail workflow when any lab fails
         if: steps.run_labs.outputs.exit_code != '0'

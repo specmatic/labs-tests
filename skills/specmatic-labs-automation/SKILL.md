@@ -197,6 +197,7 @@ Requirements:
 - do not modify upstream lab files
 - rebuild `report.json` and `report.html` from captured artifacts and logs
 - preserve the same validations as a normal run
+- if required saved artifacts are missing, do not crash the runner; generate a failed phase/report entry that explains what is missing and how to regenerate it
 
 ## Consolidated report expectations
 
