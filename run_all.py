@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lablib.command_runner import run_command
+from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
 from lablib.workspace_setup import run_setup
 
 
@@ -154,8 +155,11 @@ def main() -> int:
         "labs": lab_results,
     }
     write_consolidated_report(consolidated)
+    generate_labs_comparison(ROOT)
     print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
+    print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
+    print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
     return 0 if consolidated["status"] == "passed" else 1
 
 

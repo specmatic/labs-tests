@@ -58,6 +58,12 @@ Refresh all available lab reports and the consolidated report from existing capt
 python3 run_all.py --refresh-report
 ```
 
+Generate a root-level similarities/differences report across all automated labs:
+
+```bash
+python3 compare_labs.py
+```
+
 Refresh an individual lab report from previously captured artifacts without rerunning the lab:
 
 ```bash
@@ -116,6 +122,8 @@ Outputs are written to:
 
 - `output/consolidated-report.json`
 - `output/consolidated-report.html`
+- `output/labs-comparison.json`
+- `output/labs-comparison.html`
 - `output/setup-output.json`
 
 GitHub Actions workflow:
