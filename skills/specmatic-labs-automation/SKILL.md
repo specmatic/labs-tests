@@ -210,7 +210,7 @@ Requirements:
 
 ## CI consistency rules
 
-- For git-based labs that compare against a base branch inside Docker, do not depend on a symbolic ref like `origin/main` being available inside the container. Resolve the base revision on the host with `git rev-parse` and pass the commit SHA into the tool instead.
+- For git-based labs that compare against a base branch inside Docker, do not depend on a symbolic ref like `origin/main` being available inside the container. Resolve the base revision on the host with `git rev-parse`, create a stable internal ref such as `refs/labs-tests/base-main` with `git update-ref`, and pass that ref into the tool instead of a raw SHA.
 - When Specmatic emits multiple report layers for the same phase, do not assume they all use the same counting semantics. Validate each layer against its actual meaning.
 - In particular, do not force top-level `specmatic.html` totals to equal CTRF `tests` if `specmatic.html` excludes skipped tests. Compare:
   - `success`, `failed`, `errors`, and `skipped` to their expected values
