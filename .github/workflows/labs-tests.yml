@@ -13,7 +13,7 @@ permissions:
 jobs:
   run-labs:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out labs-tests
@@ -32,7 +32,7 @@ jobs:
       - name: Run all lab harnesses
         id: run_labs
         shell: bash
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
           set +e
           start_time=$(date +%s)

@@ -93,6 +93,6 @@ GitHub Actions workflow:
 - `.github/workflows/labs-tests.yml`
 - runs `python3 run_all.py --refresh-labs --force`
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
-- uses a 20-minute timeout for the workflow job and the main lab execution step
+- uses a 30-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report.json`
 - uploads all generated reports as the `specmatic-labs-reports` artifact
