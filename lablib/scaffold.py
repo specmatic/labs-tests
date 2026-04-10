@@ -357,8 +357,8 @@ def build_artifact_assertions(context: ValidationContext) -> list[dict[str, Any]
             assertions.append(
                 assert_condition(
                     artifact_path.exists(),
-                    "Specmatic HTML report (index.html) was generated.",
-                    "Specmatic HTML report (index.html) was not generated.",
+                    "Specmatic HTML report was generated.",
+                    "Specmatic HTML report was not generated.",
                     category="report",
                     details=[
                         detail("Artifact label", artifact.label),
@@ -569,7 +569,11 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
 
     normalized_readme = normalize_space(readme_text)
     normalized_console = normalize_space(result.combined_output)
-    statuses_by_path = {item["path"]: item["coverageStatus"] for item in operations}
+    statuses_by_path = {
+        operation_identity(item): item.get("coverageStatus")
+        for item in operations
+        if operation_identity(item) is not None
+    }
     evaluated: list[dict[str, Any]] = []
 
     for item in readme_assertions:
@@ -713,8 +717,23 @@ def extract_operations(context: ValidationContext) -> list[dict[str, Any]]:
     html_artifact = first_html_artifact(context.artifacts)
     if html_artifact is None:
         return []
-    report = parse_html_embedded_report(html_artifact["text"])
+    try:
+        report = parse_html_embedded_report(html_artifact["text"])
+    except ValueError:
+        return []
     return report["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
+
+
+def operation_identity(operation: dict[str, Any]) -> str | None:
+    if "path" in operation:
+        return operation["path"]
+    if "channel" in operation:
+        action = operation.get("action")
+        channel = operation.get("channel")
+        return f"{channel}:{action}" if action else str(channel)
+    if "operation" in operation:
+        return str(operation["operation"])
+    return None
 
 
 def first_html_artifact(artifacts: dict[str, dict[str, Any]]) -> dict[str, Any] | None:

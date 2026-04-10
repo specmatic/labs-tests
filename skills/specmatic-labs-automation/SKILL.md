@@ -59,6 +59,12 @@ Default verification sources:
 - generated Specmatic HTML report
 - upstream lab README
 
+Be careful about report layout variants:
+
+- synchronous HTTP labs often emit reports under `build/reports/specmatic/test/...`
+- async labs may emit reports under `build/reports/specmatic/async/...`
+- MCP-style labs may emit HTML reports that are human-readable only and do not embed a `const report = ...` payload
+
 Validate all relevant layers when applicable:
 
 - command exit code
@@ -101,6 +107,8 @@ Add explicit validations for:
 - total console exercised count vs total Specmatic HTML results
 
 If the runtime sources disagree, keep the failure. Do not normalize away the mismatch.
+
+If an HTML report does not contain an embedded Specmatic payload, do not crash shared parsing logic. Fall back to JSON artifacts or skip HTML-structure-dependent comparisons for that lab while still asserting that the HTML file exists.
 
 ## README drift rules
 

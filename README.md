@@ -11,14 +11,24 @@ Current labs:
   README: [`api-coverage/README.md`](api-coverage/README.md)
 - [`api-resiliency-testing`](api-resiliency-testing/)
   README: [`api-resiliency-testing/README.md`](api-resiliency-testing/README.md)
+- [`api-security-schemes`](api-security-schemes/)
+  README: [`api-security-schemes/README.md`](api-security-schemes/README.md)
 - [`backward-compatibility-testing`](backward-compatibility-testing/)
   README: [`backward-compatibility-testing/README.md`](backward-compatibility-testing/README.md)
+- [`continuous-integration`](continuous-integration/)
+  README: [`continuous-integration/README.md`](continuous-integration/README.md)
+- [`mcp-auto-test`](mcp-auto-test/)
+  README: [`mcp-auto-test/README.md`](mcp-auto-test/README.md)
 - [`overlays`](overlays/)
   README: [`overlays/README.md`](overlays/README.md)
 - [`workflow-in-same-spec`](workflow-in-same-spec/)
   README: [`workflow-in-same-spec/README.md`](workflow-in-same-spec/README.md)
 - [`quick-start-api-testing`](quick-start-api-testing/)
   README: [`quick-start-api-testing/README.md`](quick-start-api-testing/README.md)
+- [`quick-start-async-contract-testing`](quick-start-async-contract-testing/)
+  README: [`quick-start-async-contract-testing/README.md`](quick-start-async-contract-testing/README.md)
+- [`quick-start-contract-testing`](quick-start-contract-testing/)
+  README: [`quick-start-contract-testing/README.md`](quick-start-contract-testing/README.md)
 - [`schema-design`](schema-design/)
   README: [`schema-design/README.md`](schema-design/README.md)
 - [`response-templating`](response-templating/)
@@ -59,7 +69,19 @@ python3 api-resiliency-testing/run.py --refresh-report
 ```
 
 ```bash
+python3 api-security-schemes/run.py --refresh-report
+```
+
+```bash
 python3 backward-compatibility-testing/run.py --refresh-report
+```
+
+```bash
+python3 continuous-integration/run.py --refresh-report
+```
+
+```bash
+python3 mcp-auto-test/run.py --refresh-report
 ```
 
 ```bash
@@ -72,6 +94,14 @@ python3 workflow-in-same-spec/run.py --refresh-report
 
 ```bash
 python3 quick-start-api-testing/run.py --refresh-report
+```
+
+```bash
+python3 quick-start-async-contract-testing/run.py --refresh-report
+```
+
+```bash
+python3 quick-start-contract-testing/run.py --refresh-report
 ```
 
 ```bash

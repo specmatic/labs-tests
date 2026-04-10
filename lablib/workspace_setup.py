@@ -12,10 +12,15 @@ UPSTREAM_LABS = ROOT.parent / "labs"
 LAB_NAMES = [
     "api-coverage",
     "api-resiliency-testing",
+    "api-security-schemes",
     "backward-compatibility-testing",
+    "continuous-integration",
+    "mcp-auto-test",
     "overlays",
     "workflow-in-same-spec",
     "quick-start-api-testing",
+    "quick-start-async-contract-testing",
+    "quick-start-contract-testing",
     "schema-design",
     "response-templating",
 ]
