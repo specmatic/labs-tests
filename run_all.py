@@ -132,6 +132,9 @@ def main() -> int:
 
     passed = sum(1 for item in lab_results if item["status"] == "passed")
     failed = len(lab_results) - passed
+    total_runtime_seconds = round(sum(item.get("durationSeconds", 0.0) for item in lab_results), 2)
+    total_failures = sum(summary_value(item, "Failures") for item in lab_results)
+    total_tests = sum(summary_value(item, "Validations") for item in lab_results)
     consolidated = {
         "generatedAt": datetime.now(UTC).isoformat(),
         "status": "passed" if failed == 0 else "failed",
@@ -139,6 +142,9 @@ def main() -> int:
             {"label": "Labs discovered", "value": len(lab_results)},
             {"label": "Labs passed", "value": passed},
             {"label": "Labs failed", "value": failed},
+            {"label": "Total run time (s)", "value": total_runtime_seconds},
+            {"label": "Total failures", "value": total_failures},
+            {"label": "Total tests", "value": total_tests},
         ],
         "setup": setup_payload,
         "environment": {
@@ -169,6 +175,16 @@ def report_duration_seconds(report: dict[str, Any] | None) -> float:
     if not report:
         return 0.0
     return sum(phase.get("command", {}).get("durationSeconds", 0.0) for phase in report.get("phases", []))
+
+
+def summary_value(lab: dict[str, Any], label: str) -> int:
+    for item in lab.get("summary", []):
+        if item.get("label") == label:
+            try:
+                return int(item.get("value", 0))
+            except (TypeError, ValueError):
+                return 0
+    return 0
 
 
 def extract_specmatic_version(report_json_path: Path) -> str:
@@ -222,9 +238,11 @@ def detect_shared_specmatic_version(lab_results: list[dict[str, Any]]) -> str:
 
 
 def render_consolidated_html(payload: dict[str, Any]) -> str:
+    top_summary_labels = {"Labs discovered", "Labs passed", "Labs failed"}
     summary_items = "".join(
         f"<li><strong>{escape(item['label'])}:</strong> {escape(str(item['value']))}</li>"
         for item in payload.get("summary", [])
+        if item.get("label") in top_summary_labels
     )
     setup_html = ""
     if payload.get("setup"):
@@ -238,6 +256,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
         )
 
     lab_rows = "".join(render_lab_row(lab) for lab in payload.get("labs", []))
+    totals_row = render_totals_row(payload)
     environment = payload.get("environment", {})
     footer_html = (
         "<footer class=\"panel footer-panel\">"
@@ -325,6 +344,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
         </thead>
         <tbody>
           {lab_rows}
+          {totals_row}
         </tbody>
       </table>
     </section>
@@ -349,6 +369,21 @@ def render_lab_row(lab: dict[str, Any]) -> str:
         f"<td><a href=\"{escape(json_link)}\">json</a> / <a href=\"{escape(html_link)}\">html</a></td>"
         f"<td>{escape(str(failures))}</td>"
         f"<td>{escape(str(total_tests))}</td>"
+        "</tr>"
+    )
+
+
+def render_totals_row(payload: dict[str, Any]) -> str:
+    summary = {item["label"]: item["value"] for item in payload.get("summary", [])}
+    return (
+        "<tr>"
+        "<td><strong>Total</strong></td>"
+        "<td></td>"
+        "<td></td>"
+        f"<td><strong>{escape(str(summary.get('Total run time (s)', 'n/a')))}</strong></td>"
+        "<td></td>"
+        f"<td><strong>{escape(str(summary.get('Total failures', 'n/a')))}</strong></td>"
+        f"<td><strong>{escape(str(summary.get('Total tests', 'n/a')))}</strong></td>"
         "</tr>"
     )
 
