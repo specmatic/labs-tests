@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +100,7 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 expected_console_phrases=(
                     "Verdict for spec /workspace/backward-compatibility-testing/products.yaml:",
-                    "(COMPATIBLE) The spec is backward compatible with the corresponding spec from origin/main",
+                    "(COMPATIBLE) The spec is backward compatible with the corresponding spec from",
                 ),
                 readme_assertions=tuple(fixed_readme_assertions()),
                 file_transforms={"products": set_fixed_contract},
@@ -116,6 +117,7 @@ def build_lab_spec() -> LabSpec:
 def build_lab_command() -> list[str]:
     workspace_root = UPSTREAM_LAB.parent
     license_file = workspace_root / "license.txt"
+    base_revision = resolve_base_revision()
     command = [
         "docker",
         "run",
@@ -137,12 +139,22 @@ def build_lab_command() -> list[str]:
             "specmatic/enterprise:latest",
             "backward-compatibility-check",
             "--base-branch",
-            "origin/main",
+            base_revision,
             "--target-path",
             "backward-compatibility-testing/products.yaml",
         ]
     )
     return command
+
+
+def resolve_base_revision() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(UPSTREAM_LAB.parent), "rev-parse", "origin/main"],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "origin/main"
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:

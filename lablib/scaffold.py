@@ -353,6 +353,20 @@ def build_artifact_assertions(context: ValidationContext) -> list[dict[str, Any]
                 ],
             )
         )
+        if artifact.label == "specmatic-report.html":
+            assertions.append(
+                assert_condition(
+                    artifact_path.exists(),
+                    "Specmatic HTML report (index.html) was generated.",
+                    "Specmatic HTML report (index.html) was not generated.",
+                    category="report",
+                    details=[
+                        detail("Artifact label", artifact.label),
+                        detail("Expected artifact path", artifact_path),
+                        detail("Exists", artifact_path.exists()),
+                    ],
+                )
+            )
         if artifact.kind == "json":
             assertions.append(
                 assert_condition(

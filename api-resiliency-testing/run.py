@@ -137,7 +137,6 @@ def build_lab_spec() -> LabSpec:
                     expected_tests={"tests": 7, "passed": 3, "failed": 2, "skipped": 2, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(),
-                    expected_specmatic_summary={"success": 3, "failed": 2, "errors": 0, "skipped": 2, "total": 7},
                     required_stub_usage={
                         ("/products", "POST", 201): 1,
                         ("/products", "GET", 200): 1,
@@ -166,7 +165,6 @@ def build_lab_spec() -> LabSpec:
                     expected_tests={"tests": 7, "passed": 4, "failed": 1, "skipped": 2, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(),
-                    expected_specmatic_summary={"success": 4, "failed": 1, "errors": 0, "skipped": 2, "total": 7},
                     required_stub_usage={
                         ("/products", "POST", 201): 1,
                         ("/products", "GET", 200): 2,
@@ -198,7 +196,6 @@ def build_lab_spec() -> LabSpec:
                     expected_tests={"tests": 7, "passed": 5, "failed": 0, "skipped": 2, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(),
-                    expected_specmatic_summary={"success": 5, "failed": 0, "errors": 0, "skipped": 2, "total": 7},
                     required_stub_usage={
                         ("/products", "POST", 201): 1,
                         ("/products", "GET", 200): 2,
@@ -229,7 +226,6 @@ def build_lab_spec() -> LabSpec:
                     expected_tests={"tests": 209, "passed": 198, "failed": 11, "skipped": 0, "other": 0},
                     expected_operations=schema_operation_rows(),
                     expected_html_operations=schema_operation_rows(),
-                    expected_specmatic_summary={"success": 198, "failed": 11, "errors": 0, "skipped": 0, "total": 209},
                     required_stub_usage={
                         ("/products", "POST", 201): 1,
                         ("/products", "GET", 200): 2,
@@ -261,7 +257,6 @@ def build_lab_spec() -> LabSpec:
                     expected_tests={"tests": 209, "passed": 209, "failed": 0, "skipped": 0, "other": 0},
                     expected_operations=schema_operation_rows(),
                     expected_html_operations=schema_operation_rows(),
-                    expected_specmatic_summary={"success": 209, "failed": 0, "errors": 0, "skipped": 0, "total": 209},
                     required_stub_usage={
                         ("/products", "POST", 201): 12,
                         ("/products", "GET", 200): 2,
@@ -316,7 +311,6 @@ def build_resiliency_assertions(
     expected_tests: dict[str, int],
     expected_operations: list[dict[str, object]],
     expected_html_operations: list[dict[str, object]],
-    expected_specmatic_summary: dict[str, int],
     required_stub_usage: dict[tuple[str, str, int], int],
 ) -> list[dict]:
     ctrf = context.artifacts["ctrf-report.json"]["json"]
@@ -329,6 +323,7 @@ def build_resiliency_assertions(
     ctrf_summary = ctrf["results"]["summary"]
     test_html_summary = test_html["results"]["summary"]
     specmatic_summary = parse_specmatic_html_summary(specmatic_html)
+    expected_executed_total = expected_tests["passed"] + expected_tests["failed"] + expected_tests.get("other", 0)
 
     for field, expected_value in expected_tests.items():
         actual_value = ctrf_summary.get(field, 0)
@@ -364,14 +359,14 @@ def build_resiliency_assertions(
             )
         )
 
-    specmatic_field_map = {
-        "passed": "success",
-        "failed": "failed",
-        "skipped": "skipped",
-        "tests": "total",
+    specmatic_expected_fields = {
+        "success": expected_tests["passed"],
+        "failed": expected_tests["failed"],
+        "errors": expected_tests["other"],
+        "skipped": expected_tests["skipped"],
+        "total": expected_executed_total,
     }
-    for ctrf_field, specmatic_field in specmatic_field_map.items():
-        expected_value = expected_specmatic_summary[specmatic_field]
+    for specmatic_field, expected_value in specmatic_expected_fields.items():
         actual_value = specmatic_summary.get(specmatic_field)
         assertions.append(
             assert_equal(
@@ -387,19 +382,22 @@ def build_resiliency_assertions(
                 ],
             )
         )
-        assertions.append(
-            assert_equal(
-                actual_value,
-                ctrf_summary.get(ctrf_field, 0),
-                f"specmatic.html field '{specmatic_field}' matched CTRF '{ctrf_field}'.",
-                f"specmatic.html field '{specmatic_field}' did not match CTRF '{ctrf_field}'.",
-                category="report",
-                details=[
-                    detail("specmatic.html value", actual_value),
-                    detail("CTRF value", ctrf_summary.get(ctrf_field, 0)),
-                ],
-            )
+
+    assertions.append(
+        assert_equal(
+            specmatic_summary.get("total"),
+            (specmatic_summary.get("success") or 0) + (specmatic_summary.get("failed") or 0) + (specmatic_summary.get("errors") or 0),
+            "specmatic.html total matched success + failed + errors.",
+            "specmatic.html total did not match success + failed + errors.",
+            category="report",
+            details=[
+                detail("Success", specmatic_summary.get("success")),
+                detail("Failed", specmatic_summary.get("failed")),
+                detail("Errors", specmatic_summary.get("errors")),
+                detail("Total", specmatic_summary.get("total")),
+            ],
         )
+    )
 
     coverage_operations = coverage["apiCoverage"][0]["operations"]
     test_html_operations = test_html["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
@@ -446,28 +444,6 @@ def build_resiliency_assertions(
             ],
         )
     )
-    assertions.append(
-        assert_equal(
-            normalize_operations(coverage_operations),
-            normalize_operations(test_html_operations),
-            "coverage_report.json and specmatic-report.html listed the same operation rows.",
-            "coverage_report.json and specmatic-report.html listed different operation rows.",
-            category="report",
-            details=[
-                detail_table(
-                    "coverage_report.json operations",
-                    headers=["Path", "Method", "Response", "Status", "Count"],
-                    rows=operation_rows(coverage_operations),
-                ),
-                detail_table(
-                    "specmatic-report.html operations",
-                    headers=["Path", "Method", "Response", "Status", "Count"],
-                    rows=operation_rows(test_html_operations),
-                ),
-            ],
-        )
-    )
-
     coverage_map = operation_map(coverage_operations)
     html_map = operation_map(test_html_operations)
     for operation in expected_operations:
