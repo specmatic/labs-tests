@@ -6,6 +6,7 @@ from pathlib import Path
 import queue
 import subprocess
 import threading
+import time
 from typing import Sequence
 
 
@@ -33,6 +34,7 @@ def run_command(
     *,
     stream_output: bool = False,
     stream_prefix: str = "",
+    idle_heartbeat_seconds: float = 30.0,
 ) -> CommandResult:
     started = datetime.now(UTC)
     if not stream_output:
@@ -82,16 +84,23 @@ def run_command(
 
     completed_streams = 0
     prefix = f"{stream_prefix} " if stream_prefix else ""
+    last_output_at = time.monotonic()
     while completed_streams < 2:
-        label, line = output_queue.get()
+        try:
+            label, line = output_queue.get(timeout=idle_heartbeat_seconds)
+        except queue.Empty:
+            elapsed = int(time.monotonic() - last_output_at)
+            print(f"{prefix}[idle] waiting for command output for {elapsed}s...", flush=True)
+            continue
         if line is None:
             completed_streams += 1
             continue
+        last_output_at = time.monotonic()
         if label == "stdout":
             stdout_lines.append(line)
         else:
             stderr_lines.append(line)
-        print(f"{prefix}{line}", end="")
+        print(f"{prefix}{line}", end="", flush=True)
 
     stdout_thread.join()
     stderr_thread.join()
