@@ -17,10 +17,18 @@ Current labs:
   README: [`backward-compatibility-testing/README.md`](backward-compatibility-testing/README.md)
 - [`continuous-integration`](continuous-integration/)
   README: [`continuous-integration/README.md`](continuous-integration/README.md)
+- [`dictionary`](dictionary/)
+  README: [`dictionary/README.md`](dictionary/README.md)
+- [`external-examples`](external-examples/)
+  README: [`external-examples/README.md`](external-examples/README.md)
+- [`filters`](filters/)
+  README: [`filters/README.md`](filters/README.md)
 - [`mcp-auto-test`](mcp-auto-test/)
   README: [`mcp-auto-test/README.md`](mcp-auto-test/README.md)
 - [`overlays`](overlays/)
   README: [`overlays/README.md`](overlays/README.md)
+- [`partial-examples`](partial-examples/)
+  README: [`partial-examples/README.md`](partial-examples/README.md)
 - [`workflow-in-same-spec`](workflow-in-same-spec/)
   README: [`workflow-in-same-spec/README.md`](workflow-in-same-spec/README.md)
 - [`quick-start-api-testing`](quick-start-api-testing/)
@@ -31,6 +39,8 @@ Current labs:
   README: [`quick-start-contract-testing/README.md`](quick-start-contract-testing/README.md)
 - [`schema-design`](schema-design/)
   README: [`schema-design/README.md`](schema-design/README.md)
+- [`schema-resiliency-testing`](schema-resiliency-testing/)
+  README: [`schema-resiliency-testing/README.md`](schema-resiliency-testing/README.md)
 - [`response-templating`](response-templating/)
   README: [`response-templating/README.md`](response-templating/README.md)
 
@@ -87,6 +97,18 @@ python3 continuous-integration/run.py --refresh-report
 ```
 
 ```bash
+python3 dictionary/run.py --refresh-report
+```
+
+```bash
+python3 external-examples/run.py --refresh-report
+```
+
+```bash
+python3 filters/run.py --refresh-report
+```
+
+```bash
 python3 mcp-auto-test/run.py --refresh-report
 ```
 
@@ -99,6 +121,10 @@ python3 workflow-in-same-spec/run.py --refresh-report
 ```
 
 ```bash
+python3 partial-examples/run.py --refresh-report
+```
+
+```bash
 python3 quick-start-api-testing/run.py --refresh-report
 ```
 
@@ -108,6 +134,10 @@ python3 quick-start-async-contract-testing/run.py --refresh-report
 
 ```bash
 python3 quick-start-contract-testing/run.py --refresh-report
+```
+
+```bash
+python3 schema-resiliency-testing/run.py --refresh-report
 ```
 
 ```bash

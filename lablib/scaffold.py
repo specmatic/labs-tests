@@ -78,7 +78,7 @@ class ValidationContext:
     command_result: CommandResult
     readme_text: str
     artifacts: dict[str, dict[str, Any]]
-    original_files: dict[str, str]
+    original_files: dict[str, str | None]
 
 
 def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -114,7 +114,10 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     spec.output_dir.mkdir(parents=True, exist_ok=True)
     readme_text = spec.readme_path.read_text(encoding="utf-8")
-    original_files = {alias: path.read_text(encoding="utf-8") for alias, path in spec.files.items()}
+    original_files = {
+        alias: path.read_text(encoding="utf-8") if path.exists() else None
+        for alias, path in spec.files.items()
+    }
 
     if args.refresh_report:
         print("Refreshing the report from existing captured artifacts...")
@@ -175,7 +178,7 @@ def execute_phase(
     spec: LabSpec,
     phase: PhaseSpec,
     readme_text: str,
-    original_files: dict[str, str],
+    original_files: dict[str, str | None],
 ) -> dict[str, Any]:
     target_dir = spec.output_dir / phase_dir_name(phase)
     if target_dir.exists():
@@ -206,7 +209,7 @@ def execute_phase(
     return build_phase_result(context)
 
 
-def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_files: dict[str, str]) -> list[dict[str, Any]]:
+def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_files: dict[str, str | None]) -> list[dict[str, Any]]:
     previous_commands = load_previous_phase_commands(spec.output_dir)
     phases: list[dict[str, Any]] = []
     for phase in spec.phases:
@@ -448,16 +451,28 @@ def all_artifact_specs(spec: LabSpec, phase: PhaseSpec) -> tuple[ArtifactSpec, .
     return tuple(spec.common_artifact_specs) + tuple(phase.artifact_specs)
 
 
-def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str, str]) -> None:
+def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str, str | None]) -> None:
     for alias, path in spec.files.items():
         transform = phase.file_transforms.get(alias)
-        content = original_files[alias] if transform is None else transform(original_files[alias])
+        original_content = original_files[alias]
+        content = original_content if transform is None else transform(original_content or "")
+        if content is None:
+            if path.exists():
+                path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
 
-def restore_original_files(spec: LabSpec, original_files: dict[str, str]) -> None:
+def restore_original_files(spec: LabSpec, original_files: dict[str, str | None]) -> None:
     for alias, path in spec.files.items():
-        path.write_text(original_files[alias], encoding="utf-8")
+        original_content = original_files[alias]
+        if original_content is None:
+            if path.exists():
+                path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(original_content, encoding="utf-8")
 
 
 def ensure_artifact_set_exists(spec: LabSpec, phase: PhaseSpec, target_dir: Path) -> None:

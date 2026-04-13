@@ -64,6 +64,8 @@ Be careful about report layout variants:
 - synchronous HTTP labs often emit reports under `build/reports/specmatic/test/...`
 - async labs may emit reports under `build/reports/specmatic/async/...`
 - MCP-style labs may emit HTML reports that are human-readable only and do not embed a `const report = ...` payload
+- some validation-only labs do not emit Specmatic reports at all; in those cases, rely on console output plus captured source/example snapshots instead of forcing artifact assertions that the lab never generates
+- some labs create new files only in the fixed state, such as generated dictionaries or newly added external examples; the scaffold should manage those as first-class lab files and restore/delete them when the run completes
 
 Validate all relevant layers when applicable:
 
@@ -215,6 +217,28 @@ Requirements:
 - run or refresh each lab
 - write root consolidated JSON and HTML reports
 - link correctly to per-lab reports using paths relative to `output/consolidated-report.html`
+
+## Close-out requirements
+
+After adding or changing any lab automation, refresh all affected project artifacts before considering the task complete.
+
+Always update:
+
+- the changed lab's `README.md`
+- the root `README.md` when the set of automated labs or supported commands changes
+- the changed lab's `output/report.json`
+- the changed lab's `output/report.html`
+- root `output/consolidated-report.json`
+- root `output/consolidated-report.html`
+- root comparison outputs when lab inventory or comparison inputs changed:
+  - `output/labs-comparison.json`
+  - `output/labs-comparison.html`
+
+Preferred close-out command from the repo root:
+
+- `python3 run_all.py --refresh-report`
+
+Use that refresh step even when implementation work was completed earlier in the session, so READMEs and generated reports do not drift.
 
 ## CI consistency rules
 
