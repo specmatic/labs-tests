@@ -13,18 +13,28 @@ Current labs:
   README: [`api-resiliency-testing/README.md`](api-resiliency-testing/README.md)
 - [`api-security-schemes`](api-security-schemes/)
   README: [`api-security-schemes/README.md`](api-security-schemes/README.md)
+- [`async-event-flow`](async-event-flow/)
+  README: [`async-event-flow/README.md`](async-event-flow/README.md)
 - [`backward-compatibility-testing`](backward-compatibility-testing/)
   README: [`backward-compatibility-testing/README.md`](backward-compatibility-testing/README.md)
 - [`continuous-integration`](continuous-integration/)
   README: [`continuous-integration/README.md`](continuous-integration/README.md)
+- [`data-adapters`](data-adapters/)
+  README: [`data-adapters/README.md`](data-adapters/README.md)
 - [`dictionary`](dictionary/)
   README: [`dictionary/README.md`](dictionary/README.md)
 - [`external-examples`](external-examples/)
   README: [`external-examples/README.md`](external-examples/README.md)
 - [`filters`](filters/)
   README: [`filters/README.md`](filters/README.md)
+- [`kafka-avro`](kafka-avro/)
+  README: [`kafka-avro/README.md`](kafka-avro/README.md)
+- [`kafka-sqs-retry-dlq`](kafka-sqs-retry-dlq/)
+  README: [`kafka-sqs-retry-dlq/README.md`](kafka-sqs-retry-dlq/README.md)
 - [`mcp-auto-test`](mcp-auto-test/)
   README: [`mcp-auto-test/README.md`](mcp-auto-test/README.md)
+- [`order-bff`](order-bff/)
+  README: [`order-bff/README.md`](order-bff/README.md)
 - [`overlays`](overlays/)
   README: [`overlays/README.md`](overlays/README.md)
 - [`partial-examples`](partial-examples/)
@@ -37,6 +47,8 @@ Current labs:
   README: [`quick-start-async-contract-testing/README.md`](quick-start-async-contract-testing/README.md)
 - [`quick-start-contract-testing`](quick-start-contract-testing/)
   README: [`quick-start-contract-testing/README.md`](quick-start-contract-testing/README.md)
+- [`quick-start-mock`](quick-start-mock/)
+  README: [`quick-start-mock/README.md`](quick-start-mock/README.md)
 - [`schema-design`](schema-design/)
   README: [`schema-design/README.md`](schema-design/README.md)
 - [`schema-resiliency-testing`](schema-resiliency-testing/)
@@ -89,11 +101,19 @@ python3 api-security-schemes/run.py --refresh-report
 ```
 
 ```bash
+python3 async-event-flow/run.py --refresh-report
+```
+
+```bash
 python3 backward-compatibility-testing/run.py --refresh-report
 ```
 
 ```bash
 python3 continuous-integration/run.py --refresh-report
+```
+
+```bash
+python3 data-adapters/run.py --refresh-report
 ```
 
 ```bash
@@ -109,7 +129,19 @@ python3 filters/run.py --refresh-report
 ```
 
 ```bash
+python3 kafka-avro/run.py --refresh-report
+```
+
+```bash
+python3 kafka-sqs-retry-dlq/run.py --refresh-report
+```
+
+```bash
 python3 mcp-auto-test/run.py --refresh-report
+```
+
+```bash
+python3 order-bff/run.py --refresh-report
 ```
 
 ```bash
@@ -134,6 +166,10 @@ python3 quick-start-async-contract-testing/run.py --refresh-report
 
 ```bash
 python3 quick-start-contract-testing/run.py --refresh-report
+```
+
+```bash
+python3 quick-start-mock/run.py --refresh-report
 ```
 
 ```bash
@@ -163,4 +199,4 @@ GitHub Actions workflow:
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
 - uses a 30-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report.json`
-- uploads all generated reports as the `specmatic-labs-reports` artifact
+- uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact

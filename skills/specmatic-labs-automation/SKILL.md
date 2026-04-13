@@ -218,6 +218,14 @@ Requirements:
 - write root consolidated JSON and HTML reports
 - link correctly to per-lab reports using paths relative to `output/consolidated-report.html`
 
+CI artifact upload must also follow discovery rather than a hardcoded lab list.
+
+Rules:
+
+- GitHub Actions report archiving must upload `output/` plus every top-level lab `output/` folder using a wildcard such as `*/output/`
+- do not hardcode only the labs that existed at one point in time, because new lab reports will then be missing from the archived artifact and consolidated report links will fail for downloaded reports
+- after adding a new lab harness, verify that its `output/report.json` and `output/report.html` are both included by the artifact upload pattern
+
 ## Close-out requirements
 
 After adding or changing any lab automation, refresh all affected project artifacts before considering the task complete.
@@ -239,6 +247,11 @@ Preferred close-out command from the repo root:
 - `python3 run_all.py --refresh-report`
 
 Use that refresh step even when implementation work was completed earlier in the session, so READMEs and generated reports do not drift.
+
+Before closing a task that changes the automated lab inventory, also check:
+
+- the GitHub Actions workflow artifact upload still archives every lab report
+- the new lab folder is tracked in git; locally generated reports alone are not enough for CI to discover a new harness
 
 ## CI consistency rules
 

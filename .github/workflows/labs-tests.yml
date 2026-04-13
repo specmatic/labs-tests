@@ -107,14 +107,7 @@ jobs:
           if-no-files-found: error
           path: |
             output/
-            api-coverage/output/
-            api-resiliency-testing/output/
-            backward-compatibility-testing/output/
-            overlays/output/
-            quick-start-api-testing/output/
-            response-templating/output/
-            schema-design/output/
-            workflow-in-same-spec/output/
+            */output/
 
       - name: Fail workflow when any lab fails
         if: steps.run_labs.outputs.exit_code != '0'
