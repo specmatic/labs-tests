@@ -27,6 +27,7 @@ def generate_labs_comparison(root: Path | None = None) -> dict[str, Any]:
         "summary": build_summary(labs),
         "commonalities": build_commonalities(labs),
         "differences": build_differences(labs),
+        "validationMatrix": build_validation_matrix(labs),
         "labs": labs,
     }
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -255,6 +256,49 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
+    rows = [
+        {
+            "label": "README has required H2s",
+            "cells": [readme_has_required_h2s(lab) for lab in labs],
+        },
+        {
+            "label": "README has Studio section",
+            "cells": [lab["readme"]["hasStudioSection"] for lab in labs],
+        },
+        {
+            "label": "README has troubleshooting",
+            "cells": [lab["readme"]["hasTroubleshooting"] for lab in labs],
+        },
+        {
+            "label": "README has pass criteria",
+            "cells": [lab["readme"]["hasPassCriteria"] for lab in labs],
+        },
+        {
+            "label": "Artifacts generated",
+            "cells": [bool(lab["artifacts"]["labels"]) for lab in labs],
+        },
+        {
+            "label": "Coverage artifact generated",
+            "cells": ["coverage" in lab["artifacts"]["families"] for lab in labs],
+        },
+        {
+            "label": "CTRF artifact generated",
+            "cells": ["ctrf" in lab["artifacts"]["families"] for lab in labs],
+        },
+        {
+            "label": "HTML artifact generated",
+            "cells": ["html" in lab["artifacts"]["families"] for lab in labs],
+        },
+        {
+            "label": "Source snapshot artifact generated",
+            "cells": ["source-snapshot" in lab["artifacts"]["families"] for lab in labs],
+        },
+    ]
+    return {"columns": columns, "rows": rows}
+
+
 def render_comparison_html(payload: dict[str, Any]) -> str:
     summary_rows = "".join(
         f"<tr><th>{escape(item['label'])}</th><td>{escape(format_value(item['value']))}</td></tr>"
@@ -276,6 +320,12 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         f"<tr><td>{render_lab_link(item['lab'], item['labHref'])}</td><td>{escape(item['commandType'])}</td><td><code>{escape(item['command'])}</code></td><td>{escape(item['setupType'])}</td></tr>"
         for item in payload.get("differences", {}).get("executionDifferences", [])
     )
+    matrix = payload.get("validationMatrix", {"columns": [], "rows": []})
+    matrix_header = "".join(
+        f"<th class='matrix-lab'>{render_lab_link(column['name'], column['href'])}</th>"
+        for column in matrix.get("columns", [])
+    )
+    matrix_rows = "".join(render_validation_matrix_row(row) for row in matrix.get("rows", []))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -326,6 +376,48 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .muted {{
       color: #5f6b74;
     }}
+    .matrix-wrap {{
+      overflow-x: auto;
+    }}
+    table.matrix {{
+      min-width: max-content;
+    }}
+    .matrix th,
+    .matrix td {{
+      text-align: center;
+      padding: 8px 10px;
+    }}
+    .matrix thead th {{
+      position: sticky;
+      top: 0;
+      background: #fffdf8;
+      z-index: 1;
+      vertical-align: bottom;
+    }}
+    .matrix .row-label {{
+      text-align: left;
+      position: sticky;
+      left: 0;
+      background: #fffdf8;
+      z-index: 2;
+      min-width: 240px;
+    }}
+    .matrix .matrix-lab {{
+      min-width: 120px;
+      max-width: 120px;
+      white-space: normal;
+    }}
+    .matrix-cell {{
+      font-size: 1.05rem;
+      font-weight: 700;
+      line-height: 1;
+    }}
+    .matrix-cell.yes {{
+      color: #1f7a3b;
+    }}
+    .matrix-cell.no {{
+      color: #b42318;
+    }}
   </style>
 </head>
 <body>
@@ -372,6 +464,21 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         <tbody>{lab_rows}</tbody>
       </table>
     </section>
+    <section class="panel">
+      <h2>Validation Matrix</h2>
+      <p class="muted">Green tick means the validation is present for that lab. Red cross means it is absent.</p>
+      <div class="matrix-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="row-label">Validation</th>
+              {matrix_header}
+            </tr>
+          </thead>
+          <tbody>{matrix_rows}</tbody>
+        </table>
+      </div>
+    </section>
   </main>
 </body>
 </html>
@@ -417,12 +524,32 @@ def render_lab_link(name: str, href: str) -> str:
     return f"<a href='{escape(href)}' target='_blank' rel='noreferrer'><strong>{escape(name)}</strong></a>"
 
 
+def render_validation_matrix_row(row: dict[str, Any]) -> str:
+    cells = "".join(render_matrix_cell(bool(cell), row["label"]) for cell in row["cells"])
+    return f"<tr><th class='row-label'>{escape(row['label'])}</th>{cells}</tr>"
+
+
+def render_matrix_cell(present: bool, validation_label: str) -> str:
+    symbol = "&#10003;" if present else "&#10007;"
+    state = "yes" if present else "no"
+    title = "present" if present else "absent"
+    return f"<td title='{escape(validation_label)} is {title}'><span class='matrix-cell {state}' aria-label='{escape(title)}'>{symbol}</span></td>"
+
+
 def render_bullets(items: list[str]) -> str:
     return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in items) + "</ul>"
 
 
 def format_setup_types(setup_types: list[str]) -> str:
     return " + ".join(setup_types) if setup_types else "unknown"
+
+
+def readme_has_required_h2s(lab: dict[str, Any]) -> bool:
+    required = lab["readme"]["requiredH2"]
+    actual = [heading.lower() for heading in lab["readme"]["actualH2"]]
+    if not required:
+        return False
+    return all(any(actual_heading == requirement.lower() or actual_heading.startswith(requirement.lower()) for actual_heading in actual) for requirement in required)
 
 
 def format_value(value: Any) -> str:
