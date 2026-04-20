@@ -16,6 +16,7 @@ OUTPUT_DIR = ROOT / "output"
 COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+CODE_BLOCK_RE = re.compile(r"```(?:bash|sh|shell)?\s*\n(.*?)```", re.DOTALL | re.MULTILINE)
 
 
 def generate_labs_comparison(root: Path | None = None) -> dict[str, Any]:
@@ -37,7 +38,6 @@ def generate_labs_comparison(root: Path | None = None) -> dict[str, Any]:
 def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     module = load_lab_module(lab_dir / "run.py")
     spec = module.build_lab_spec()
-    command = list(spec.command)
     common_artifacts = [artifact_profile(artifact) for artifact in spec.common_artifact_specs]
     phase_artifacts = []
     for phase in spec.phases:
@@ -46,17 +46,19 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     upstream_readme_text = spec.readme_path.read_text(encoding="utf-8")
     headings = extract_headings(upstream_readme_text)
     h2_headings = [heading["text"] for heading in headings if heading["level"] == 2]
-    command_type = classify_command(command)
+    readme_command = extract_primary_command(upstream_readme_text) or list(spec.command)
+    command_type = classify_command(readme_command)
+    setup_types = detect_setup_types(readme_command)
     artifact_labels = sorted({artifact["label"] for artifact in [*common_artifacts, *phase_artifacts]})
     artifact_kinds = sorted({artifact["kind"] for artifact in [*common_artifacts, *phase_artifacts]})
-    setup_signals = detect_setup_signals(spec.upstream_lab, command, upstream_readme_text)
 
     return {
         "name": spec.name,
+        "href": f"https://github.com/specmatic/labs/blob/main/{spec.upstream_lab.name}/README.md",
         "description": spec.description,
-        "command": command,
+        "command": readme_command,
         "commandType": command_type,
-        "setup": setup_signals,
+        "setup": detect_setup_signals(spec.upstream_lab, readme_command, upstream_readme_text, setup_types),
         "filesUnderTest": {alias: str(path.relative_to(spec.upstream_lab)) for alias, path in spec.files.items()},
         "phases": [
             {
@@ -121,7 +123,18 @@ def extract_headings(text: str) -> list[dict[str, Any]]:
     return [{"level": len(match.group(1)), "text": match.group(2).strip()} for match in HEADING_RE.finditer(text)]
 
 
+def extract_primary_command(readme_text: str) -> list[str]:
+    for block in CODE_BLOCK_RE.finditer(readme_text):
+        lines = [line.strip() for line in block.group(1).splitlines() if line.strip()]
+        for line in lines:
+            if line.startswith(("docker ", "python ", "python3 ", "chmod ", "git ", "curl ")):
+                return line.split()
+    return []
+
+
 def classify_command(command: list[str]) -> str:
+    if command and command[0].startswith("python"):
+        return "python"
     if command[:2] == ["docker", "compose"]:
         if "--profile" in command:
             return "docker-compose-profile"
@@ -131,16 +144,21 @@ def classify_command(command: list[str]) -> str:
     return "other"
 
 
-def detect_setup_signals(upstream_lab: Path, command: list[str], readme_text: str) -> dict[str, Any]:
-    compose_file = upstream_lab / "docker-compose.yaml"
-    setup_type = classify_command(command)
-    compose_text = compose_file.read_text(encoding="utf-8") if compose_file.exists() else ""
+def detect_setup_types(command: list[str]) -> list[str]:
+    command_type = classify_command(command)
+    return [command_type] if command_type != "other" else []
+
+
+def detect_setup_signals(upstream_lab: Path, command: list[str], readme_text: str, setup_types: list[str]) -> dict[str, Any]:
     return {
-        "type": setup_type,
-        "usesDockerCompose": setup_type.startswith("docker-compose"),
-        "usesDockerRun": setup_type == "docker-run",
-        "hasComposeFile": compose_file.exists(),
-        "hasStudioProfile": "--profile studio" in readme_text or "studio:" in compose_text,
+        "type": setup_types[0] if setup_types else classify_command(command),
+        "types": setup_types,
+        "display": format_setup_types(setup_types),
+        "usesPython": "python" in setup_types,
+        "usesDockerCompose": any(setup_type.startswith("docker-compose") for setup_type in setup_types),
+        "usesDockerRun": "docker-run" in setup_types,
+        "hasComposeFile": (upstream_lab / "docker-compose.yaml").exists(),
+        "hasStudioProfile": "--profile studio" in readme_text,
         "hasBuildFlag": "--build" in command,
         "hasAbortOnExit": "--abort-on-container-exit" in command,
     }
@@ -163,7 +181,7 @@ def detect_artifact_families(labels: list[str]) -> list[str]:
 
 def build_summary(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     command_types = Counter(lab["commandType"] for lab in labs)
-    setup_types = Counter(lab["setup"]["type"] for lab in labs)
+    setup_types = Counter(lab["setup"]["display"] for lab in labs)
     return [
         {"label": "Labs compared", "value": len(labs)},
         {"label": "Execution styles", "value": dict(command_types)},
@@ -215,9 +233,10 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
         "executionDifferences": [
             {
                 "lab": lab["name"],
+                "labHref": lab["href"],
                 "commandType": lab["commandType"],
                 "command": " ".join(lab["command"]),
-                "setupType": lab["setup"]["type"],
+                "setupType": lab["setup"]["display"],
             }
             for lab in labs
         ],
@@ -254,7 +273,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     )
     lab_rows = "".join(render_lab_comparison_row(lab) for lab in payload.get("labs", []))
     difference_rows = "".join(
-        f"<tr><td>{escape(item['lab'])}</td><td>{escape(item['commandType'])}</td><td><code>{escape(item['command'])}</code></td><td>{escape(item['setupType'])}</td></tr>"
+        f"<tr><td>{render_lab_link(item['lab'], item['labHref'])}</td><td>{escape(item['commandType'])}</td><td><code>{escape(item['command'])}</code></td><td>{escape(item['setupType'])}</td></tr>"
         for item in payload.get("differences", {}).get("executionDifferences", [])
     )
     return f"""<!DOCTYPE html>
@@ -371,8 +390,9 @@ def render_lab_comparison_row(lab: dict[str, Any]) -> str:
         f"Command type: {lab['commandType']}",
     ]
     setup_bits = [
-        f"Type: {lab['setup']['type']}",
+        f"Type: {lab['setup']['display']}",
         f"Compose file: {'yes' if lab['setup']['hasComposeFile'] else 'no'}",
+        f"Python entrypoint: {'yes' if lab['setup']['usesPython'] else 'no'}",
         f"Build flag: {'yes' if lab['setup']['hasBuildFlag'] else 'no'}",
         f"Abort on exit: {'yes' if lab['setup']['hasAbortOnExit'] else 'no'}",
     ]
@@ -383,7 +403,7 @@ def render_lab_comparison_row(lab: dict[str, Any]) -> str:
     file_bits = ", ".join(f"{alias}: {path}" for alias, path in lab["filesUnderTest"].items())
     return (
         "<tr>"
-        f"<td><strong>{escape(lab['name'])}</strong><br><span class='muted'>{escape(lab['description'])}</span></td>"
+        f"<td>{render_lab_link(lab['name'], lab['href'])}<br><span class='muted'>{escape(lab['description'])}</span></td>"
         f"<td>{render_bullets(readme_bits)}</td>"
         f"<td>{render_bullets(approach_bits)}</td>"
         f"<td>{render_bullets(setup_bits)}</td>"
@@ -393,8 +413,16 @@ def render_lab_comparison_row(lab: dict[str, Any]) -> str:
     )
 
 
+def render_lab_link(name: str, href: str) -> str:
+    return f"<a href='{escape(href)}' target='_blank' rel='noreferrer'><strong>{escape(name)}</strong></a>"
+
+
 def render_bullets(items: list[str]) -> str:
     return "<ul>" + "".join(f"<li>{escape(item)}</li>" for item in items) + "</ul>"
+
+
+def format_setup_types(setup_types: list[str]) -> str:
+    return " + ".join(setup_types) if setup_types else "unknown"
 
 
 def format_value(value: Any) -> str:
