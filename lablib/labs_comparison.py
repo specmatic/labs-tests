@@ -23,6 +23,18 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
+SHARED_README_H2_SEQUENCE = (
+    "Files in this lab",
+    "Lab Rules",
+    "Next step",
+    "Objective",
+    "Prerequisites",
+    "Specmatic references",
+    "Time required to complete this lab",
+    "Lab Time",
+    "What you learned",
+    "Why this lab matters",
+)
 
 
 def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | None = None) -> dict[str, Any]:
@@ -385,18 +397,17 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
-    shared_h1 = most_common_value([lab["readme"]["h1"] for lab in labs if lab["readme"]["h1"]])
-    shared_h2 = most_common_value([tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"]])
-    common_required_h2_sets = [set(lab["readme"]["requiredH2"]) for lab in labs if lab["readme"]["requiredH2"]]
-    common_required_h2 = set.intersection(*common_required_h2_sets) if common_required_h2_sets else set()
-    artifact_label_counts = Counter(label for lab in labs for label in lab["artifacts"]["generatedLabels"])
-    common_phase_prefix = longest_common_prefix([lab["phaseSignature"] for lab in labs if lab["phaseSignature"]])
-    rows = [
-        {"kind": "group", "label": "Similarities", "section": "similarities", "cells": [None] * len(labs)},
+    shared_h2 = tuple(SHARED_README_H2_SEQUENCE)
+    common_required_h2 = list(SHARED_README_H2_SEQUENCE)
+    extra_h2_by_lab = {
+        lab["name"]: [section for section in lab["readme"]["actualH2"] if section not in shared_h2]
+        for lab in labs
+    }
+    row_definitions = [
         {
             "label": "README starts with a top-level H1 title",
             "tooltip": {
-                "summary": ["Both READMEs start with an H1."],
+                "summary": ["Every compared README starts with an H1 title."],
                 "details": build_h1_details(labs),
             },
             "cells": [bool(lab["readme"]["h1"]) for lab in labs],
@@ -407,41 +418,25 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [tuple(lab["readme"]["actualH2"]) == shared_h2 for lab in labs],
         },
         {
-            "label": "README includes all shared required H2 sections",
-            "tooltip": {
-                "summary": ["Both READMEs include the shared required H2 sections."],
-                "details": build_shared_section_details(common_required_h2),
-            },
-            "cells": [common_required_h2.issubset(set(lab["readme"]["actualH2"])) for lab in labs],
-        },
-        {
             "label": "README uses H3 headings for lab-specific implementation steps",
             "tooltip": {
                 "summary": ["Lab-specific walkthrough steps belong in H3 headings."],
-                "details": build_h3_details(labs),
+                "details": build_h3_details(labs, extra_h2_by_lab),
             },
-            "cells": [lab["readme"]["h3Count"] > 0 for lab in labs],
+            "cells": [lab["readme"]["h3Count"] > 0 and not extra_h2_by_lab[lab["name"]] for lab in labs],
         },
         {
-            "label": "README phase sequence starts with the same shared opening phase",
+            "label": "README shows the baseline console run before implementation",
             "tooltip": {
-                "summary": ["Both labs start with the same opening phase pattern."],
-                "details": build_phase_prefix_details(common_phase_prefix, labs),
-            },
-            "cells": [tuple(lab["phaseSignature"][: len(common_phase_prefix)]) == common_phase_prefix for lab in labs] if common_phase_prefix else [False for _ in labs],
-        },
-        {
-            "label": "README includes a shell console section before the implementation steps",
-            "tooltip": {
-                "summary": ["Both READMEs include a shell console section before the implementation starts."],
+                "summary": ["Every compared README includes a shell console section before the implementation starts."],
                 "details": build_console_section_details(labs, "opening"),
             },
             "cells": [bool(lab["readme"]["openingShellConsoleSection"]) for lab in labs],
         },
         {
-            "label": "README includes a shell console section after the implementation steps",
+            "label": "README shows the final console run after implementation",
             "tooltip": {
-                "summary": ["Both READMEs end with a shell console section after the implementation."],
+                "summary": ["Every compared README includes a shell console section after the implementation."],
                 "details": build_console_section_details(labs, "closing"),
             },
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
@@ -478,46 +473,13 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             },
             "cells": ["specmatic-report.html" in lab["artifacts"]["generatedLabels"] for lab in labs],
         },
-        {"kind": "group", "label": "Differences", "section": "differences", "cells": [None] * len(labs)},
         {
-            "label": "README H1 is lab-specific",
+            "label": "README does not keep extra, unwanted, or out-of-sequence implementation sections at H2 level",
             "tooltip": {
-                "summary": ["Each lab uses its own H1 title text."],
-                "details": build_h1_details(labs),
-            },
-            "cells": [True for _ in labs],
-        },
-        {
-            "label": "README H2 sequence is lab-specific",
-            "tooltip": {
-                "summary": ["Each lab uses its own ordered H2 outline."],
-                "details": build_h2_sequence_difference_details(labs),
-            },
-            "cells": [True for _ in labs],
-        },
-        {
-            "label": "README has lab-specific H2 sections",
-            "tooltip": {
-                "summary": ["Each lab adds sections beyond the shared H2 scaffold."],
+                "summary": ["Lab-specific walkthrough sections should move from H2 to H3."],
                 "details": build_lab_specific_h2_details(labs, common_required_h2),
             },
-            "cells": [bool(set(lab["readme"]["actualH2"]) - common_required_h2) for lab in labs],
-        },
-        {
-            "label": "README phase sequence is lab-specific",
-            "tooltip": {
-                "summary": ["Each lab defines its own phase flow."],
-                "details": build_phase_details(labs),
-            },
-            "cells": [True for _ in labs],
-        },
-        {
-            "label": "Generated artifacts include lab-specific extra files",
-            "tooltip": {
-                "summary": ["Each lab may generate extra files beyond the shared report outputs."],
-                "details": build_lab_specific_artifact_details(labs, artifact_label_counts),
-            },
-            "cells": [any(artifact_label_counts[label] == 1 for label in lab["artifacts"]["generatedLabels"]) for lab in labs],
+            "cells": [not extra_h2_by_lab[lab["name"]] for lab in labs],
         },
         {
             "label": "Generated artifacts do not include unexpected extra files",
@@ -528,7 +490,16 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
         },
     ]
+    rows = [add_row_status_prefix(index, row) for index, row in enumerate(row_definitions, start=1)]
     return {"columns": columns, "rows": rows}
+
+
+def add_row_status_prefix(index: int, row: dict[str, Any]) -> dict[str, Any]:
+    passed = all(bool(cell) for cell in row["cells"])
+    row_copy = dict(row)
+    row_copy["index"] = index
+    row_copy["overallPassed"] = passed
+    return row_copy
 
 
 def render_comparison_html(payload: dict[str, Any]) -> str:
@@ -622,6 +593,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     }}
     .matrix-wrap {{
       overflow-x: auto;
+    }}
+    .matrix-caption {{
+      caption-side: top;
+      text-align: left;
+      font-weight: 700;
+      color: #182126;
+      padding: 0 0 12px;
     }}
     table.matrix {{
       min-width: max-content;
@@ -771,6 +749,26 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       border-radius: 12px;
       background: #fffdf9;
     }}
+    .matrix-tooltip-section-attention {{
+      border-color: #f0b39f;
+      background: #fff6f3;
+    }}
+    .matrix-tooltip-section-attention .matrix-tooltip-section-title {{
+      color: #b42318;
+    }}
+    .matrix-tooltip-section-attention .matrix-tooltip-section-note {{
+      color: #8f2d1f;
+    }}
+    .matrix-tooltip-section-ok {{
+      border-color: #9bd3a9;
+      background: #f6fff8;
+    }}
+    .matrix-tooltip-section-ok .matrix-tooltip-section-title {{
+      color: #1f7a3b;
+    }}
+    .matrix-tooltip-section-ok .matrix-tooltip-section-note {{
+      color: #245b34;
+    }}
     .matrix-tooltip-section:first-child {{
       margin-top: 0;
     }}
@@ -808,53 +806,70 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       vertical-align: top;
       word-break: break-word;
     }}
-    .matrix-group th {{
-      text-align: left;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: none;
-    }}
-    .matrix-group-label {{
-      display: inline-block;
-      padding: 0.18rem 0.65rem;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.5);
-    }}
-    .matrix-group-similarities th {{
-      background: linear-gradient(90deg, #eaf7ee, #f6fff8);
-      color: #1f7a3b;
-      border-top: 2px solid #9bd3a9;
-      border-bottom: 2px solid #9bd3a9;
-    }}
-    .matrix-group-differences th {{
-      background: linear-gradient(90deg, #fff1ea, #fffaf7);
-      color: #b42318;
-      border-top: 2px solid #f0b39f;
-      border-bottom: 2px solid #f0b39f;
-    }}
-    .matrix-legend {{
-      display: inline-block;
-      margin-left: 0.6rem;
-      padding: 0.2rem 0.55rem;
-      border-radius: 999px;
-      font-size: 0.85rem;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }}
-    .matrix-legend-similarity {{
-      background: #eaf7ee;
-      color: #1f7a3b;
-      border: 1px solid #9bd3a9;
-    }}
-    .matrix-legend-difference {{
-      background: #fff1ea;
-      color: #b42318;
-      border: 1px solid #f0b39f;
-    }}
     .matrix .matrix-lab {{
       min-width: 120px;
       max-width: 120px;
       white-space: normal;
+    }}
+    .matrix-row-status {{
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.32rem;
+      width: 104px;
+      margin-right: 0.55rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-align: center;
+      white-space: nowrap;
+      cursor: pointer;
+      background: transparent;
+      box-sizing: border-box;
+    }}
+    .matrix-row-status-info {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 0.95rem;
+      height: 0.95rem;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      font-size: 0.72em;
+      font-weight: 700;
+      line-height: 1;
+      opacity: 0.85;
+    }}
+    .matrix-row-status-text {{
+      display: inline-block;
+      min-width: 46px;
+      text-align: center;
+    }}
+    .matrix-row-status.pass {{
+      background: #eaf7ee;
+      color: #1f7a3b;
+      border: 1px solid #9bd3a9;
+    }}
+    .matrix-row-status.fail {{
+      background: #fff1ea;
+      color: #b42318;
+      border: 1px solid #f0b39f;
+    }}
+    .matrix-row-status:hover,
+    .matrix-row-status:focus {{
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(20, 90, 122, 0.12);
+      border-color: #145a7a;
+    }}
+    .matrix-row-number {{
+      color: #5f6b74;
+      margin-right: 0.35rem;
+      white-space: nowrap;
     }}
     .matrix-cell {{
       font-size: 1.05rem;
@@ -921,10 +936,11 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       </table>
     </section>
     <section class="panel">
-      <h2>README Similarities and Differences Matrix</h2>
-      <p class="muted">Green tick means the validation is present for that lab. Red cross means it is absent. <span class="matrix-legend matrix-legend-similarity">Similarities: shared structure.</span><span class="matrix-legend matrix-legend-difference">Differences: lab-specific deltas.</span></p>
+      <h2>README Validation Matrix</h2>
+      <p class="muted">Each row is one validation. A green <strong>Pass</strong> prefix means every compared lab passed that validation. A red <strong>Failed</strong> prefix means at least one compared lab failed it.</p>
       <div class="matrix-wrap">
         <table class="matrix">
+          <caption class="matrix-caption">README, console, and generated-report checks against the README source of truth</caption>
           <thead>
             <tr>
               <th class="row-label">Validation</th>
@@ -1097,6 +1113,12 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           (detailsData.sections || []).forEach((section) => {{
             const sectionContainer = document.createElement('div');
             sectionContainer.className = 'matrix-tooltip-section';
+            if (section.tone === 'attention') {{
+              sectionContainer.classList.add('matrix-tooltip-section-attention');
+            }}
+            if (section.tone === 'ok') {{
+              sectionContainer.classList.add('matrix-tooltip-section-ok');
+            }}
             container.appendChild(sectionContainer);
             renderDetailsBlock(sectionContainer, section, false);
           }});
@@ -1190,13 +1212,25 @@ def render_lab_link(name: str, href: str) -> str:
 
 
 def render_validation_matrix_row(row: dict[str, Any]) -> str:
-    if row.get("kind") == "group":
-        section_class = f" matrix-group-{escape(row.get('section', ''))}" if row.get("section") else ""
-        group_label = escape(row["label"])
-        return f"<tr class='matrix-group{section_class}'><th class='row-label' colspan='{len(row.get('cells', [])) + 1}'><span class='matrix-group-label'>{group_label}</span></th></tr>"
     tooltip_attrs = render_matrix_trigger_attrs(row.get("tooltip", {}), row["label"])
     cells = "".join(render_matrix_cell(bool(cell), row["label"]) for cell in row["cells"])
-    return f"<tr><th class='row-label'><span class='matrix-row-label'><span class='matrix-row-title'>{escape(row['label'])}</span><button type='button' class='tooltip-trigger' aria-expanded='false' aria-label='Show details for {escape(row['label'])}'{tooltip_attrs}>i</button></span></th>{cells}</tr>"
+    status_class = "pass" if row.get("overallPassed") else "fail"
+    status_text = "Pass" if row.get("overallPassed") else "Failed"
+    status_symbol = "&#10003;" if row.get("overallPassed") else "&#10007;"
+    return (
+        "<tr>"
+        "<th class='row-label'>"
+        "<span class='matrix-row-label'>"
+        "<span class='matrix-row-title'>"
+        f"<button type='button' class='matrix-row-status tooltip-trigger {status_class}' aria-expanded='false' aria-label='Show details for {escape(row['label'])}'{tooltip_attrs}><span aria-hidden='true'>{status_symbol}</span><span class='matrix-row-status-text'>{status_text}</span><span class='matrix-row-status-info' aria-hidden='true'>i</span></button>"
+        f"<span class='matrix-row-number'>{row.get('index', '')}.</span>"
+        f"{escape(row['label'])}"
+        "</span>"
+        "</span>"
+        "</th>"
+        f"{cells}"
+        "</tr>"
+    )
 
 
 def render_matrix_cell(present: bool, validation_label: str) -> str:
@@ -1223,26 +1257,35 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
         "rows": [[lab["name"], lab["readme"]["h1"] or "(missing)"] for lab in labs],
     }
 
-
-def build_shared_section_details(common_required_h2: set[str]) -> dict[str, Any]:
+def build_h3_details(labs: list[dict[str, Any]], extra_h2_by_lab: dict[str, list[str]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "H3 headings",
+                        "note": "These are the implementation-step headings already using H3.",
+                        "items": lab["readme"]["actualH3"] or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "H2 sections to convert to H3",
+                        "tone": "attention",
+                        "note": "These walkthrough sections are still at H2 level and should move to H3.",
+                        "items": extra_h2_by_lab[lab["name"]] or ["(none)"],
+                    },
+                ],
+            }
+        )
     return {
-        "type": "bullets",
-        "title": "Shared required H2 sections",
-        "items": sorted(common_required_h2) or ["(no common required H2 sections found)"],
-        "note": "These are the shared H2 sections that should appear in every compared README.",
-    }
-
-
-def build_h3_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "type": "table",
+        "type": "sections",
         "title": "H3 implementation steps",
-        "headers": ["Lab", "H3 count", "H3 headings"],
-        "rows": [
-            [lab["name"], str(lab["readme"]["h3Count"]), ", ".join(lab["readme"]["actualH3"]) or "(none)"]
-            for lab in labs
-        ],
-        "note": "H3 sections are where the lab-specific implementation steps belong.",
+        "note": "Lab-specific implementation steps belong in H3 headings. Any extra H2 sections should be converted to H3.",
+        "sections": sections,
     }
 
 
@@ -1257,18 +1300,36 @@ def build_phase_prefix_details(common_phase_prefix: tuple[str, ...], labs: list[
 
 
 def build_console_section_details(labs: list[dict[str, Any]], which: str) -> dict[str, Any]:
-    entries = []
+    sections = []
     for lab in labs:
         section = lab["readme"]["openingShellConsoleSection"] if which == "opening" else lab["readme"]["closingShellConsoleSection"]
-        entries.append([lab["name"], section.get("summary") or "(missing)"])
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "README section",
+                        "note": "This is the README heading that contains the console block.",
+                        "items": [section.get("heading") or "(missing)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Console run",
+                        "note": "This is the shell command shown in the README.",
+                        "items": [section.get("command") or "(missing)"],
+                    },
+                ],
+            }
+        )
     title = "Opening console sections" if which == "opening" else "Closing console sections"
-    note = "These console blocks show the before/after command flow in the README."
+    note = "These console blocks show the baseline and final command flow in the README."
     return {
-        "type": "table",
+        "type": "sections",
         "title": title,
-        "headers": ["Lab", "Console section"],
-        "rows": entries,
         "note": note,
+        "sections": sections,
     }
 
 
@@ -1298,29 +1359,19 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
     }
 
 
-def build_h2_sequence_difference_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2: list[str] | tuple[str, ...] | set[str]) -> dict[str, Any]:
     return {
         "type": "table",
-        "title": "Lab-specific H2 outlines",
-        "headers": ["Lab", "Ordered H2 outline"],
-        "rows": [[lab["name"], " -> ".join(lab["readme"]["actualH2"]) or "(missing)"] for lab in labs],
-        "note": "The H2 outline is the lab-specific shape of the README.",
-    }
-
-
-def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2: set[str]) -> dict[str, Any]:
-    return {
-        "type": "table",
-        "title": "Lab-specific H2 sections",
-        "headers": ["Lab", "Extra H2 sections"],
+        "title": "H2 sections that should be H3",
+        "headers": ["Lab", "H2 sections to convert to H3"],
         "rows": [
             [
                 lab["name"],
-                ", ".join(sorted(set(lab["readme"]["actualH2"]) - common_required_h2)) or "(none)",
+                ", ".join([section for section in lab["readme"]["actualH2"] if section not in common_required_h2]) or "(none)",
             ]
             for lab in labs
         ],
-        "note": "These are the sections that should be compared against the shared scaffold.",
+        "note": "These H2 sections are lab-specific walkthrough content. They should be changed to H3 in the lab README.",
     }
 
 
@@ -1360,33 +1411,77 @@ def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: set[str]) -> dict[str, Any]:
-    shared_scaffold = sorted(common_required_h2) or ["(no shared required H2 sections found)"]
+def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: list[str] | tuple[str, ...] | set[str]) -> dict[str, Any]:
+    shared_scaffold = list(common_required_h2) or ["(no shared required H2 sections configured)"]
     lab_sections = []
     for lab in labs:
-        extra_sections = [section for section in lab["readme"]["actualH2"] if section not in common_required_h2]
+        actual_h2 = list(lab["readme"]["actualH2"])
+        actual_h2_set = set(actual_h2)
+        expected_h2_set = set(common_required_h2)
+        extra_sections = [section for section in actual_h2 if section not in expected_h2_set]
+        missing_sections = [section for section in common_required_h2 if section not in actual_h2_set]
+        incorrect_order_sections = []
+        actual_positions = {section: index for index, section in enumerate(actual_h2)}
+        previous_position = -1
+        for section in common_required_h2:
+            if section not in actual_positions:
+                continue
+            current_position = actual_positions[section]
+            if current_position < previous_position:
+                incorrect_order_sections.append(section)
+            else:
+                previous_position = current_position
         lab_sections.append(
             {
-                "type": "bullets",
+                "type": "sections",
                 "title": lab["name"],
-                "note": "Extra H2 sections in this README.",
-                "items": extra_sections or ["(none)"],
+                "note": "These are the concrete README heading changes needed for this lab.",
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Keep as H2",
+                        "tone": "ok",
+                        "note": "These shared H2 sections should remain at H2 level in this order.",
+                        "items": shared_scaffold,
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Move to H3",
+                        "tone": "attention",
+                        "note": "These H2 sections are lab-specific walkthrough content and should move to H3.",
+                        "items": extra_sections or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Add as H2",
+                        "tone": "attention",
+                        "note": "These shared H2 sections are missing and should be added at H2 level.",
+                        "items": missing_sections or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Fix H2 order",
+                        "tone": "attention",
+                        "note": "These shared H2 sections appear out of sequence and should be reordered.",
+                        "items": incorrect_order_sections or ["(none)"],
+                    },
+                ],
             }
         )
     return {
         "summary": [
-            "Both READMEs share the same H2 scaffold.",
-            "The lab-specific H2 sections are broken out below.",
+            "Every compared README should use the configured H2 sequence after the H1 title.",
+            "Any extra, unwanted, or out-of-sequence H2 section is treated as a failure.",
         ],
         "details": {
             "type": "sections",
-            "title": "H2 scaffold and differences",
-            "note": "Keep the shared H2 sequence stable. Move lab-specific walkthrough steps into H3 headings.",
+            "title": "Configured shared H2 sequence and README differences",
+            "note": "The shared H2 sequence is configurable in one place. Keep that sequence stable and move lab-specific walkthrough steps into H3 headings.",
             "sections": [
                 {
                     "type": "bullets",
-                    "title": "Shared scaffold",
-                    "note": "These H2 sections appear in every compared README.",
+                    "title": "Configured shared H2 sequence",
+                    "note": "These H2 sections should appear in this exact order after the H1 title.",
                     "items": shared_scaffold,
                 },
                 *lab_sections,
