@@ -202,8 +202,11 @@ Validation focus:
 - the upstream lab `README.md` is the source of truth
 - the console output from the automated lab run should match the README
 - the generated CTRF JSON and sibling Specmatic HTML report should match the README and console output
+- when a README documents commands, it should provide command sections for Windows, macOS, and Linux
+- OS-specific command sections should use appropriate fenced block languages such as `shell`/`bash` for macOS and Linux, and `powershell`/`cmd` for Windows
+- when a README shows console output that includes file-system paths, it should provide equivalent output sections for Windows, macOS, and Linux
 - copied source snapshots such as `specmatic.yaml`, example JSON files, or service source files may still be archived for inspection, but they should not drive pass/fail assertions by themselves
-- the shared comparison H2 template is configured in `lablib/labs_comparison.py` as `SHARED_README_H2_SEQUENCE`, so the expected README order can be updated in one place
+- the shared comparison H2 template is configured in [`lablib/readme_expectations.py`](/Users/anand.bagmar/projects/specmatic/labs-tests/lablib/readme_expectations.py) as `EXPECTED_README_H2_SEQUENCE`, so the expected README order can be updated in one place
 
 When a command or validation fails, the message should always say:
 

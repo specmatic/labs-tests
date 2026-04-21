@@ -21,6 +21,7 @@ CONSOLE_COVERAGE_ROW_RE = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
+PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|/(?:[^\s`]+))")
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
@@ -355,6 +356,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
 
     assertions.extend(evaluate_readme_assertions(context))
     assertions.extend(evaluate_readme_console_structure(context))
+    assertions.extend(evaluate_readme_os_documentation(context))
     assertions.extend(evaluate_runtime_summary_drift(context))
     if phase.include_readme_structure_checks and spec.readme_structure is not None:
         assertions.extend(validate_readme_structure(context.readme_text, spec.readme_structure))
@@ -821,6 +823,53 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
     return assertions
 
 
+def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[str, Any]]:
+    profile = analyze_readme_os_documentation(context.readme_text)
+    assertions: list[dict[str, Any]] = []
+
+    if profile["hasCommands"]:
+        assertions.append(
+            assert_condition(
+                not profile["missingCommandOs"],
+                "README provides OS-specific command sections for Windows, macOS, and Linux.",
+                "README does not provide OS-specific command sections for every OS. Impact: readers on some platforms will not know which command to run. Action required: add command sections for the missing OS variants in appropriate fenced code blocks.",
+                category="readme",
+                details=[detail("Missing OS command sections", ", ".join(profile["missingCommandOs"]) or "(none)")],
+            )
+        )
+        assertions.append(
+            assert_condition(
+                not profile["commandLanguageIssues"],
+                "README uses OS-appropriate fenced block languages for documented commands.",
+                "README uses non-standard fenced block languages for some OS-specific commands. Impact: readers may not understand which shell to use and syntax highlighting becomes misleading. Action required: use shell/bash for macOS and Linux commands, and powershell/cmd for Windows commands.",
+                category="readme",
+                details=[
+                    detail(
+                        "Fence language issues",
+                        ", ".join(
+                            f"{item['os']} -> {item['heading']} uses {item['language']}"
+                            for item in profile["commandLanguageIssues"]
+                        )
+                        or "(none)",
+                    )
+                ],
+            )
+        )
+
+    if profile["hasPathOutputs"]:
+        assertions.append(
+            assert_condition(
+                not profile["missingOutputOs"],
+                "README provides OS-specific output sections when console output shows paths.",
+                "README does not provide OS-specific output sections for path-based console output. Impact: readers may not know what equivalent output should look like on their OS. Action required: add Windows, macOS, and Linux output examples when paths are shown.",
+                category="readme",
+                details=[detail("Missing OS output sections", ", ".join(profile["missingOutputOs"]) or "(none)")],
+            )
+        )
+
+    return assertions
+
+
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
     has_report_artifacts = (
         "ctrf-report.json" in context.artifacts
@@ -995,9 +1044,84 @@ def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
                 "body": body,
                 "preview": preview,
                 "is_console": is_console,
+                "line": line_number_for_index(readme_text, match.start()),
             }
         )
     return blocks
+
+
+def line_number_for_index(text: str, index: int) -> int:
+    return text.count("\n", 0, index) + 1
+
+
+def heading_before_line_text(readme_text: str, line_number: int) -> str:
+    headings = [(m.group(2).strip(), line_number_for_index(readme_text, m.start())) for m in HEADING_RE.finditer(readme_text)]
+    before = [text for text, line in headings if line <= line_number]
+    return before[-1] if before else ""
+
+
+def collect_preceding_context(readme_text: str, line_number: int, window: int = 4) -> str:
+    lines = readme_text.splitlines()
+    start = max(0, line_number - 1 - window)
+    return "\n".join(line.strip() for line in lines[start : max(0, line_number - 1)] if line.strip())
+
+
+def os_targets_from_text(text: str) -> set[str]:
+    lowered = text.lower()
+    targets: set[str] = set()
+    if any(token in lowered for token in ("windows", "powershell", "cmd", "git bash")):
+        targets.add("Windows")
+    if any(token in lowered for token in ("macos", "mac os", "mac ")) or "mac/linux" in lowered or "linux/mac" in lowered:
+        targets.add("macOS")
+    if any(token in lowered for token in ("linux", "ubuntu", "debian", "fedora")) or "mac/linux" in lowered or "linux/mac" in lowered:
+        targets.add("Linux")
+    if "unix" in lowered:
+        targets.update({"macOS", "Linux"})
+    return targets
+
+
+def is_output_block_with_paths(block: dict[str, Any]) -> bool:
+    return not block["is_console"] and bool(PATH_LIKE_RE.search(block["body"]))
+
+
+def is_command_language_appropriate(os_name: str, language: str) -> bool:
+    normalized = language.lower()
+    if os_name in {"macOS", "Linux"}:
+        return normalized in {"shell", "bash", "sh", "zsh"}
+    if os_name == "Windows":
+        return normalized in {"powershell", "ps1", "cmd", "bat", "shell", "bash", "sh"}
+    return False
+
+
+def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
+    command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
+    output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
+    command_language_issues: list[dict[str, str]] = []
+    has_commands = False
+    has_path_outputs = False
+
+    for block in extract_console_blocks(readme_text):
+        heading_text = heading_before_line_text(readme_text, block["line"])
+        context_text = " ".join(filter(None, [heading_text, collect_preceding_context(readme_text, block["line"])]))
+        os_targets = os_targets_from_text(context_text)
+        if block["is_console"]:
+            has_commands = True
+            for os_name in os_targets:
+                command_coverage[os_name].append({"heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
+                if not is_command_language_appropriate(os_name, block["language"] or ""):
+                    command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
+        elif is_output_block_with_paths(block):
+            has_path_outputs = True
+            for os_name in os_targets:
+                output_coverage[os_name].append({"heading": heading_text or "(no heading)"})
+
+    return {
+        "hasCommands": has_commands,
+        "missingCommandOs": [os_name for os_name, entries in command_coverage.items() if has_commands and not entries],
+        "commandLanguageIssues": command_language_issues,
+        "hasPathOutputs": has_path_outputs,
+        "missingOutputOs": [os_name for os_name, entries in output_coverage.items() if has_path_outputs and not entries],
+    }
 
 
 def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:

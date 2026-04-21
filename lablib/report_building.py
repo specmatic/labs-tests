@@ -56,6 +56,7 @@ def load_lab_results_from_snapshots(lab_names: list[str] | None = None, labs_out
         lab_results.append(
             {
                 "name": lab,
+                "readmeHref": upstream_readme_href(lab),
                 "status": lab_report.get("status", "failed"),
                 "exitCode": 0 if lab_report.get("status") == "passed" else 1,
                 "durationSeconds": round(report_duration_seconds(lab_report), 2),
@@ -126,6 +127,10 @@ def extract_specmatic_version(report_json_path: Path) -> str:
         if versions:
             return " / ".join(versions)
     return "n/a"
+
+
+def upstream_readme_href(lab_name: str) -> str:
+    return f"https://github.com/specmatic/labs/blob/main/{lab_name}/README.md"
 
 
 def upstream_labs_git_ref() -> str:

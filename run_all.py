@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from lablib.command_runner import run_command
 from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
-from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref
+from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref, upstream_readme_href
 from lablib.workspace_setup import (
     run_setup,
     setup_failure_action_lines,
@@ -154,6 +154,7 @@ def main() -> int:
         lab_results.append(
             {
                 "name": lab,
+                "readmeHref": upstream_readme_href(lab),
                 "status": (lab_report or {}).get("status", "failed"),
                 "exitCode": result.exit_code,
                 "durationSeconds": duration_seconds,
@@ -415,9 +416,10 @@ def render_lab_row(lab: dict[str, Any]) -> str:
     total_tests = next((item["value"] for item in lab.get("summary", []) if item["label"] == "Validations"), "n/a")
     json_link = relative_link(CONSOLIDATED_HTML_PATH.parent, Path(lab["reportJsonPath"]))
     html_link = relative_link(CONSOLIDATED_HTML_PATH.parent, Path(lab["reportHtmlPath"]))
+    readme_href = escape(str(lab.get("readmeHref", upstream_readme_href(lab["name"]))))
     return (
         "<tr>"
-        f"<td>{escape(lab['name'])}</td>"
+        f"<td><a href=\"{readme_href}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(lab['name'])}</a></td>"
         f"<td>{escape(lab['status'])}</td>"
         f"<td>{escape(str(lab['exitCode']))}</td>"
         f"<td>{escape(str(lab.get('durationSeconds', 'n/a')))}</td>"

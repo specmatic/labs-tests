@@ -10,6 +10,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from lablib.readme_expectations import EXPECTED_README_H2_SEQUENCE
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
@@ -21,20 +23,10 @@ LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
+PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|/(?:[^\s`]+))")
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
-SHARED_README_H2_SEQUENCE = (
-    "Files in this lab",
-    "Lab Rules",
-    "Next step",
-    "Objective",
-    "Prerequisites",
-    "Specmatic references",
-    "Time required to complete this lab",
-    "Lab Time",
-    "What you learned",
-    "Why this lab matters",
-)
 
 
 def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | None = None) -> dict[str, Any]:
@@ -97,6 +89,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     shell_console_blocks = [block for block in code_blocks if looks_like_console_block(block) and block["language"] in {"shell", "bash", "sh"}]
     console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
     shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
+    os_documentation = analyze_readme_os_documentation(upstream_readme_text, headings, code_blocks)
     additional_artifacts = sorted(
         label
         for label in generated_artifact_labels
@@ -154,6 +147,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "closingShellConsoleSection": shell_console_sections[-1] if shell_console_sections else {},
             "shellConsoleSections": shell_console_sections,
             "filesSectionText": extract_heading_section_text(upstream_readme_text, "Files in this lab", level=2),
+            "osDocumentation": os_documentation,
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -280,6 +274,97 @@ def summarize_console_section(heading: str, command: str) -> str:
     if heading and command:
         return f"{heading}: {command}"
     return heading or command
+
+
+def os_targets_from_text(text: str) -> set[str]:
+    lowered = text.lower()
+    targets: set[str] = set()
+    if any(token in lowered for token in ("windows", "powershell", "cmd", "git bash")):
+        targets.add("Windows")
+    if any(token in lowered for token in ("macos", "mac os", "mac ")) or "mac/linux" in lowered or "linux/mac" in lowered:
+        targets.add("macOS")
+    if any(token in lowered for token in ("linux", "ubuntu", "debian", "fedora")) or "mac/linux" in lowered or "linux/mac" in lowered:
+        targets.add("Linux")
+    if "unix" in lowered:
+        targets.update({"macOS", "Linux"})
+    return targets
+
+
+def collect_preceding_context(readme_text: str, line_number: int, window: int = 4) -> str:
+    lines = readme_text.splitlines()
+    start = max(0, line_number - 1 - window)
+    return "\n".join(line.strip() for line in lines[start : max(0, line_number - 1)] if line.strip())
+
+
+def is_output_block_with_paths(block: dict[str, Any]) -> bool:
+    return not looks_like_console_block(block) and bool(PATH_LIKE_RE.search(block["body"]))
+
+
+def is_command_language_appropriate(os_name: str, language: str) -> bool:
+    normalized = language.lower()
+    if os_name in {"macOS", "Linux"}:
+        return normalized in {"shell", "bash", "sh", "zsh"}
+    if os_name == "Windows":
+        return normalized in {"powershell", "ps1", "cmd", "bat", "shell", "bash", "sh"}
+    return False
+
+
+def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, Any]], code_blocks: list[dict[str, Any]]) -> dict[str, Any]:
+    command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
+    output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
+    command_language_issues: list[dict[str, str]] = []
+    has_commands = False
+    has_path_outputs = False
+
+    for block in code_blocks:
+        heading = heading_before_line(headings, block["line"])
+        context_text = " ".join(
+            filter(
+                None,
+                [
+                    heading["text"] if heading else "",
+                    collect_preceding_context(readme_text, block["line"]),
+                ],
+            )
+        )
+        os_targets = os_targets_from_text(context_text)
+        if looks_like_console_block(block):
+            has_commands = True
+            for os_name in os_targets:
+                command_coverage[os_name].append(
+                    {
+                        "heading": heading["text"] if heading else "(no heading)",
+                        "language": block["language"] or "(none)",
+                        "preview": block["preview"] if "preview" in block else next((line.strip() for line in block["body"].splitlines() if line.strip()), ""),
+                    }
+                )
+                if not is_command_language_appropriate(os_name, block["language"] or ""):
+                    command_language_issues.append(
+                        {
+                            "os": os_name,
+                            "heading": heading["text"] if heading else "(no heading)",
+                            "language": block["language"] or "(none)",
+                        }
+                    )
+        elif is_output_block_with_paths(block):
+            has_path_outputs = True
+            for os_name in os_targets:
+                output_coverage[os_name].append(
+                    {
+                        "heading": heading["text"] if heading else "(no heading)",
+                        "language": block["language"] or "(none)",
+                    }
+                )
+
+    return {
+        "hasCommands": has_commands,
+        "missingCommandOs": [os_name for os_name, entries in command_coverage.items() if has_commands and not entries],
+        "commandCoverage": command_coverage,
+        "commandLanguageIssues": command_language_issues,
+        "hasPathOutputs": has_path_outputs,
+        "missingOutputOs": [os_name for os_name, entries in output_coverage.items() if has_path_outputs and not entries],
+        "outputCoverage": output_coverage,
+    }
 
 
 def extract_primary_command(readme_text: str) -> list[str]:
@@ -422,8 +507,8 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
-    shared_h2 = tuple(SHARED_README_H2_SEQUENCE)
-    common_required_h2 = list(SHARED_README_H2_SEQUENCE)
+    shared_h2 = tuple(EXPECTED_README_H2_SEQUENCE)
+    common_required_h2 = list(EXPECTED_README_H2_SEQUENCE)
     extra_h2_by_lab = {
         lab["name"]: [section for section in lab["readme"]["actualH2"] if section not in shared_h2]
         for lab in labs
@@ -457,6 +542,30 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_execution_command_details(labs),
             },
             "cells": [bool(lab["command"]) and lab["commandType"] != "other" for lab in labs],
+        },
+        {
+            "label": "README provides OS-specific command sections for Windows, macOS, and Linux when commands are documented",
+            "tooltip": {
+                "summary": ["When a README documents commands, it should show how to run them on Windows, macOS, and Linux."],
+                "details": build_os_command_coverage_details(labs),
+            },
+            "cells": [
+                (not lab["readme"]["osDocumentation"]["hasCommands"])
+                or not lab["readme"]["osDocumentation"]["missingCommandOs"]
+                for lab in labs
+            ],
+        },
+        {
+            "label": "README uses OS-appropriate fenced block languages for documented commands",
+            "tooltip": {
+                "summary": ["OS-specific command sections should use a matching fenced code language such as shell/bash for macOS/Linux or powershell/cmd for Windows."],
+                "details": build_os_command_language_details(labs),
+            },
+            "cells": [
+                (not lab["readme"]["osDocumentation"]["hasCommands"])
+                or not lab["readme"]["osDocumentation"]["commandLanguageIssues"]
+                for lab in labs
+            ],
         },
         {
             "label": "README includes a Prerequisites section",
@@ -513,6 +622,18 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
         },
         {
+            "label": "README provides OS-specific output sections when console output shows paths",
+            "tooltip": {
+                "summary": ["If a README shows console output with file-system paths, it should provide equivalent output sections for Windows, macOS, and Linux."],
+                "details": build_os_output_coverage_details(labs),
+            },
+            "cells": [
+                (not lab["readme"]["osDocumentation"]["hasPathOutputs"])
+                or not lab["readme"]["osDocumentation"]["missingOutputOs"]
+                for lab in labs
+            ],
+        },
+        {
             "label": "README console sections all use shell fenced blocks",
             "tooltip": {
                 "summary": ["All console examples use shell-style fences."],
@@ -551,12 +672,16 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["readme"]["hasPassCriteria"] for lab in labs],
         },
         {
-            "label": "Implementation phase flow starts with the baseline mismatch step",
+            "label": "Implementation phase flow starts with the README baseline or intended-failure step",
             "tooltip": {
-                "summary": ["Every compared implementation should begin with the baseline mismatch phase before the fix flow starts."],
+                "summary": ["Every compared implementation should begin with the baseline phase described in the README before the fix flow starts."],
                 "details": build_phase_start_details(labs),
             },
-            "cells": [bool(lab["phaseSignature"]) and lab["phaseSignature"][0] == "Baseline mismatch" for lab in labs],
+            "cells": [
+                bool(lab["readme"]["openingShellConsoleSection"].get("heading"))
+                and "baseline" in lab["readme"]["openingShellConsoleSection"].get("heading", "").lower()
+                for lab in labs
+            ],
         },
         {
             "label": "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
@@ -1399,6 +1524,86 @@ def build_execution_command_details(labs: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def build_os_command_coverage_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        os_doc = lab["readme"]["osDocumentation"]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Command sections found",
+                        "note": "These OS-specific command sections were detected in the README.",
+                        "items": [
+                            f"{os_name}: "
+                            + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
+                            for os_name, entries in os_doc["commandCoverage"].items()
+                        ]
+                        if os_doc["hasCommands"]
+                        else ["No command sections found in the README."],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Add command sections",
+                        "tone": "attention" if os_doc["missingCommandOs"] else "ok",
+                        "note": "These OS-specific command variants are still missing.",
+                        "items": os_doc["missingCommandOs"] or ["(none)"],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "OS-specific command coverage",
+        "note": "When commands are documented, the README should show Windows, macOS, and Linux variants.",
+        "sections": sections,
+    }
+
+
+def build_os_command_language_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        os_doc = lab["readme"]["osDocumentation"]
+        issues = [
+            f"{issue['os']}: '{issue['heading']}' uses ```{issue['language']}```"
+            for issue in os_doc["commandLanguageIssues"]
+        ]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Fence language issues",
+                        "tone": "attention" if issues else "ok",
+                        "note": "These command sections should use an OS-appropriate fenced code language.",
+                        "items": issues or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "attention" if issues else "ok",
+                        "items": (
+                            ["Use ```shell```/```bash``` for macOS and Linux sections, and ```powershell``` or ```cmd``` for Windows sections."]
+                            if issues
+                            else ["No change needed."]
+                        ),
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "OS-specific command fence languages",
+        "note": "OS-specific command sections should use fenced block languages that match the shell the reader is expected to use.",
+        "sections": sections,
+    }
+
+
 def build_files_under_test_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
@@ -1487,8 +1692,8 @@ def build_readme_section_presence_details(
 def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
-        first_phase = lab["phaseSignature"][0] if lab["phaseSignature"] else "(missing)"
-        ok = bool(lab["phaseSignature"]) and lab["phaseSignature"][0] == "Baseline mismatch"
+        first_phase = lab["readme"]["openingShellConsoleSection"].get("heading") or "(missing)"
+        ok = bool(first_phase) and "baseline" in first_phase.lower()
         sections.append(
             {
                 "type": "sections",
@@ -1506,7 +1711,7 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                         "items": [
                             "No change needed."
                             if ok
-                            else "Start the implementation flow with the 'Baseline mismatch' phase."
+                            else "Move the README baseline or intended-failure step to the start of the implementation flow."
                         ],
                     },
                 ],
@@ -1515,7 +1720,7 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "type": "sections",
         "title": "Implementation phase starts",
-        "note": "The first phase should be the baseline mismatch step so the documented before/after flow stays consistent.",
+        "note": "The first implementation phase should be the README's baseline or intended-failure step so the documented before/after flow stays consistent.",
         "sections": sections,
     }
 
@@ -1614,6 +1819,45 @@ def build_console_section_details(labs: list[dict[str, Any]], which: str) -> dic
         "type": "sections",
         "title": title,
         "note": note,
+        "sections": sections,
+    }
+
+
+def build_os_output_coverage_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        os_doc = lab["readme"]["osDocumentation"]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Path-based output sections found",
+                        "note": "These OS-specific output sections were detected for console output that shows file-system paths.",
+                        "items": [
+                            f"{os_name}: "
+                            + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
+                            for os_name, entries in os_doc["outputCoverage"].items()
+                        ]
+                        if os_doc["hasPathOutputs"]
+                        else ["No path-based console output sections detected."],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Add output sections",
+                        "tone": "attention" if os_doc["missingOutputOs"] else "ok",
+                        "note": "These OS-specific output variants are still missing.",
+                        "items": os_doc["missingOutputOs"] or ["(none)"],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "OS-specific output coverage",
+        "note": "When console output includes file-system paths, the README should provide equivalent output examples for Windows, macOS, and Linux.",
         "sections": sections,
     }
 
@@ -1854,8 +2098,9 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
     snapshot_root = snapshot.get("root")
     for index, phase in enumerate(report_phases):
         phase_path = phase_artifact_root(snapshot_root, phase)
-        console_summary = extract_tests_run_summary(phase.get("consoleSnippet", ""))
-        readme_summary = readme_summaries[index] if index < len(readme_summaries) else None
+        console_summary = extract_phase_command_log_summary(phase_path) or extract_tests_run_summary(phase.get("consoleSnippet", ""))
+        readme_summary = readme_summaries[index]["summary"] if index < len(readme_summaries) else None
+        readme_phase_name = readme_summaries[index]["heading"] if index < len(readme_summaries) else None
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -1876,7 +2121,7 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
         all_consistent = all_consistent and consistent
         comparisons.append(
             {
-                "phase": phase.get("name", f"Phase {index + 1}"),
+                "phase": readme_phase_name or phase.get("name", f"Phase {index + 1}"),
                 "readme": readme_summary or "(missing)",
                 "console": console_summary or "(missing)",
                 "ctrf": format_tests_run_counts_short(ctrf_summary) if ctrf_summary else "(missing)",
@@ -1902,13 +2147,35 @@ def load_lab_report_snapshot(lab_name: str) -> dict[str, Any] | None:
     return report
 
 
-def extract_tests_run_summaries(readme_text: str) -> list[str]:
-    return re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", readme_text)
+def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
+    summaries: list[dict[str, str]] = []
+    headings = extract_headings(readme_text)
+    pattern = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
+    for match in pattern.finditer(readme_text):
+        line = line_number_for_index(readme_text, match.start())
+        heading = heading_before_line(headings, line)
+        summaries.append(
+            {
+                "heading": heading["text"] if heading else "",
+                "summary": match.group(0),
+            }
+        )
+    return summaries
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:
-    matches = re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", console_output)
+    clean_output = ANSI_ESCAPE_RE.sub("", console_output)
+    matches = re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", clean_output)
     return matches[-1] if matches else None
+
+
+def extract_phase_command_log_summary(phase_path: Path | None) -> str | None:
+    if phase_path is None:
+        return None
+    command_log = phase_path / "command.log"
+    if not command_log.exists():
+        return None
+    return extract_tests_run_summary(command_log.read_text(encoding="utf-8", errors="ignore"))
 
 
 def phase_artifact_root(snapshot_root: Any, phase: dict[str, Any]) -> Path | None:
@@ -1924,9 +2191,10 @@ def phase_artifact_root(snapshot_root: Any, phase: dict[str, Any]) -> Path | Non
 def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
     if not summary_text:
         return None
+    clean_summary = ANSI_ESCAPE_RE.sub("", summary_text)
     match = re.search(
         r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
-        summary_text,
+        clean_summary,
     )
     if not match:
         return None

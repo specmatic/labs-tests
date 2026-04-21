@@ -131,6 +131,9 @@ Rules:
 - add failures when important runtime details are missing from the README
 - prefer exact observed details over README wording when they differ
 - when a README mismatch fails, explain the runtime impact and the README change needed to resolve it
+- when a README documents commands, require OS-specific command sections for Windows, macOS, and Linux
+- require OS-appropriate fenced block languages for those command sections: `shell`/`bash` for macOS and Linux, `powershell`/`cmd` for Windows
+- when a README shows console output with file-system paths, require equivalent output sections for Windows, macOS, and Linux
 
 Example: if runtime shows `422 Unprocessable Entity` but README omits it, that should fail.
 
@@ -192,7 +195,7 @@ Important rules:
 - normal Docker-based lab runs should also do a best-effort runtime cleanup before the first phase and again after the lab completes, so stale containers, networks, or volumes do not leak into later results
 - the upstream lab `README.md` is the source of truth; the console output and generated CTRF/Specmatic HTML reports should match it
 - copied source snapshots such as specs, examples, and service files may be archived for inspection, but they should not be treated as primary pass/fail assertions on their own
-- the shared README H2 comparison template should live in one editable constant, so changing the expected sequence does not require updating comparison logic in multiple places
+- the shared README H2 comparison template should live in one editable constant, so changing the expected sequence does not require updating comparison logic in multiple places; the current location is `lablib/readme_expectations.py` as `EXPECTED_README_H2_SEQUENCE`
 
 Current command expectations:
 
