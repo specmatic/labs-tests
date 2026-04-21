@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+import os
 import queue
 import subprocess
 import threading
 import time
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 @dataclass
@@ -32,11 +33,15 @@ def run_command(
     command: Sequence[str],
     cwd: Path,
     *,
+    env: Mapping[str, str] | None = None,
     stream_output: bool = False,
     stream_prefix: str = "",
     idle_heartbeat_seconds: float = 30.0,
 ) -> CommandResult:
     started = datetime.now(UTC)
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
     if not stream_output:
         completed = subprocess.run(
             list(command),
@@ -44,6 +49,7 @@ def run_command(
             capture_output=True,
             text=True,
             check=False,
+            env=process_env,
         )
         finished = datetime.now(UTC)
         return CommandResult(
@@ -63,6 +69,7 @@ def run_command(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=process_env,
     )
 
     stdout_lines: list[str] = []

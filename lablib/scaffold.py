@@ -21,7 +21,8 @@ CONSOLE_COVERAGE_ROW_RE = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
-PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|/(?:[^\s`]+))")
+PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
+CONSOLE_FENCE_LANGUAGES = {"shell", "bash", "sh", "zsh", "powershell", "ps1", "cmd", "bat"}
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
@@ -69,6 +70,7 @@ class LabSpec:
     output_dir: Path
     command: list[str]
     phases: tuple[PhaseSpec, ...]
+    command_env: dict[str, str] = field(default_factory=dict)
     common_artifact_specs: tuple[ArtifactSpec, ...] = ()
     readme_structure: ReadmeStructureSpec | None = None
     setup_failure_message: str = (
@@ -249,7 +251,13 @@ def execute_phase(
         spec.clear_reports(spec)
 
     print(f"{phase.name}: starting verification...")
-    result = run_command(spec.command, spec.upstream_lab, stream_output=True, stream_prefix=f"[{phase_dir_name(phase)}]")
+    result = run_command(
+        spec.command,
+        spec.upstream_lab,
+        env=spec.command_env,
+        stream_output=True,
+        stream_prefix=f"[{phase_dir_name(phase)}]",
+    )
     try:
         artifacts = capture_artifacts(spec, phase, target_dir)
     except FileNotFoundError as exc:
@@ -774,7 +782,7 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
 def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[str, Any]]:
     readme_text = context.readme_text
     blocks = extract_console_blocks(readme_text)
-    shell_blocks = [block for block in blocks if block["is_console"] and block["language"] in {"shell", "bash", "sh"}]
+    shell_blocks = [block for block in blocks if block["is_console"] and block["language"] in CONSOLE_FENCE_LANGUAGES]
     console_blocks = [block for block in blocks if block["is_console"]]
 
     assertions: list[dict[str, Any]] = []
@@ -792,15 +800,15 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
     )
     assertions.append(
         assert_condition(
-            bool(console_blocks) and all(block["language"] in {"shell", "bash", "sh"} for block in console_blocks),
-            "All console-like README blocks use shell syntax.",
-            "Some console-like README blocks do not use shell syntax.",
+            bool(console_blocks) and all(block["language"] in CONSOLE_FENCE_LANGUAGES for block in console_blocks),
+            "All console-like README blocks use shell or OS-appropriate command syntax.",
+            "Some console-like README blocks do not use shell or OS-appropriate command syntax.",
             category="readme",
             details=[
                 detail("Console-like block count", len(console_blocks)),
                 detail(
                     "Non-shell console blocks",
-                    ", ".join(block["preview"] for block in console_blocks if block["language"] not in {"shell", "bash", "sh"}) or "(none)",
+                    ", ".join(block["preview"] for block in console_blocks if block["language"] not in CONSOLE_FENCE_LANGUAGES) or "(none)",
                 ),
             ],
         )
@@ -858,13 +866,14 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
     has_report_artifacts = (
         "ctrf-report.json" in context.artifacts
-        or "coverage_report.json" in context.artifacts
         or first_html_artifact(context.artifacts) is not None
     )
     if not has_report_artifacts:
         return []
 
-    readme_summary = extract_tests_run_summary(context.readme_text)
+    readme_summaries = extract_tests_run_summaries(context.readme_text)
+    phase_index = next((index for index, phase in enumerate(context.lab.phases) if phase is context.phase), 0)
+    readme_summary = readme_summaries[phase_index]["summary"] if phase_index < len(readme_summaries) else None
     console_summary = extract_tests_run_summary(context.command_result.combined_output)
     assertions: list[dict[str, Any]] = []
 
@@ -974,8 +983,9 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
     )
 
     for prefix in (*structure.required_h2_prefixes, *structure.additional_h2_prefixes):
-        at_level = [text for level, text in headings if level == 2 and text.startswith(prefix)]
-        wrong_level = [f"h{level} {text}" for level, text in headings if level != 2 and text.startswith(prefix)]
+        normalized_prefix = normalize_heading_text(prefix)
+        at_level = [text for level, text in headings if level == 2 and normalize_heading_text(text).startswith(normalized_prefix)]
+        wrong_level = [f"h{level} {text}" for level, text in headings if level != 2 and normalize_heading_text(text).startswith(normalized_prefix)]
         assertions.append(
             assert_condition(
                 bool(at_level),
@@ -992,8 +1002,9 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
     if structure.enforce_required_order:
         required_positions: list[tuple[str, int]] = []
         for prefix in structure.required_h2_prefixes:
+            normalized_prefix = normalize_heading_text(prefix)
             for index, (level, text) in enumerate(headings):
-                if level == 2 and text.startswith(prefix):
+                if level == 2 and normalize_heading_text(text).startswith(normalized_prefix):
                     required_positions.append((prefix, index))
                     break
 
@@ -1013,6 +1024,10 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
             )
         )
     return assertions
+
+
+def normalize_heading_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("`", "")).strip().lower()
 
 
 def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
@@ -1065,8 +1080,13 @@ def os_targets_from_text(text: str) -> set[str]:
     return targets
 
 
-def is_output_block_with_paths(block: dict[str, Any]) -> bool:
-    return not block["is_console"] and bool(PATH_LIKE_RE.search(block["body"]))
+def is_output_block_with_paths(block: dict[str, Any], context_text: str) -> bool:
+    if block["is_console"] or not PATH_LIKE_RE.search(block["body"]):
+        return False
+    lowered_context = context_text.lower()
+    output_languages = {"terminaloutput", "output", "text", "log"}
+    output_markers = ("expected output", "output", "result", "console output", "example output")
+    return block["language"] in output_languages or any(marker in lowered_context for marker in output_markers)
 
 
 def is_command_language_appropriate(os_name: str, language: str) -> bool:
@@ -1095,7 +1115,7 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                 command_coverage[os_name].append({"heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
                 if not is_command_language_appropriate(os_name, block["language"] or ""):
                     command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
-        elif is_output_block_with_paths(block):
+        elif is_output_block_with_paths(block, context_text):
             has_path_outputs = True
             for os_name in os_targets:
                 output_coverage[os_name].append({"heading": heading_text or "(no heading)"})
@@ -1123,10 +1143,22 @@ def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:
 
 def extract_tests_run_summary(console_output: str) -> str | None:
     clean_output = strip_ansi(console_output)
-    match = re.search(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", clean_output)
-    if not match:
-        return None
-    return match.group(0)
+    matches = re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", clean_output)
+    return matches[-1] if matches else None
+
+
+def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
+    summaries: list[dict[str, str]] = []
+    pattern = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
+    for match in pattern.finditer(readme_text):
+        line = line_number_for_index(readme_text, match.start())
+        summaries.append(
+            {
+                "heading": heading_before_line_text(readme_text, line),
+                "summary": match.group(0),
+            }
+        )
+    return summaries
 
 
 def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | None:
@@ -1198,7 +1230,6 @@ def build_coverage_assertions(
     expected_operations: dict[str, str],
     forbidden_operation_statuses: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
-    coverage = context.artifacts["coverage_report.json"]["json"]
     ctrf = context.artifacts["ctrf-report.json"]["json"]
     html_text = first_html_artifact(context.artifacts)["text"]
     html_report = parse_html_embedded_report(html_text)
@@ -1238,19 +1269,6 @@ def build_coverage_assertions(
     )
     assertions.append(
         assert_equal(
-            len(coverage["apiCoverage"][0]["operations"]),
-            len(expected_operations),
-            f"coverage_report.json contained {len(expected_operations)} operations as expected.",
-            f"coverage_report.json expected {len(expected_operations)} operations, got {len(coverage['apiCoverage'][0]['operations'])}.",
-            category="artifacts",
-            details=[
-                detail("Expected operations", len(expected_operations)),
-                detail("Actual operations", len(coverage["apiCoverage"][0]["operations"])),
-            ],
-        )
-    )
-    assertions.append(
-        assert_equal(
             len(html_report["results"].get("tests", [])),
             expected_tests["tests"],
             f"Embedded Specmatic HTML report contained {expected_tests['tests']} test entries as expected.",
@@ -1276,7 +1294,7 @@ def build_coverage_assertions(
         )
     )
 
-    operations = coverage["apiCoverage"][0]["operations"]
+    operations = html_report["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
     by_path = {item["path"]: item["coverageStatus"] for item in operations}
     for path, expected_status in expected_operations.items():
         actual_status = by_path.get(path)
@@ -1310,7 +1328,7 @@ def build_coverage_assertions(
             )
         )
 
-    assertions.extend(compare_console_coverage_with_reports(command_output, coverage, html_text))
+    assertions.extend(compare_console_coverage_with_reports(command_output, html_text))
     return assertions
 
 
@@ -1410,30 +1428,15 @@ def build_test_summary_assertions(
 
 def compare_console_coverage_with_reports(
     console_output: str,
-    coverage_report: dict[str, Any],
     html_report_text: str,
 ) -> list[dict[str, Any]]:
     console_rows = parse_console_coverage_rows(console_output)
-    report_rows = parse_coverage_report_rows(coverage_report)
     html_rows = parse_html_report_rows(normalize_html_report_text(html_report_text))
     normalized_html = normalize_html_report_text(html_report_text)
     console_summary = parse_console_coverage_summary(console_output)
     html_summary = parse_html_coverage_summary(normalized_html)
 
     assertions: list[dict[str, Any]] = []
-    assertions.append(
-        assert_equal(
-            console_rows,
-            report_rows,
-            "Console coverage summary matched the JSON coverage report summary.",
-            "Console coverage summary did not match the JSON coverage report summary.",
-            category="report",
-            details=[
-                detail("Console coverage rows", format_coverage_rows(console_rows)),
-                detail("Coverage report rows", format_coverage_rows(report_rows)),
-            ],
-        )
-    )
     assertions.append(
         assert_equal(
             console_summary,
@@ -1475,22 +1478,6 @@ def compare_console_coverage_with_reports(
     )
     assertions.append(
         assert_equal(
-            extract_row_counts(report_rows),
-            extract_row_counts(html_rows),
-            "Coverage report counts matched the generated Specmatic HTML results counts for every operation.",
-            "Coverage report counts did not match the generated Specmatic HTML results counts for one or more operations.",
-            category="report",
-            details=[
-                detail_table(
-                    "Coverage report vs HTML results",
-                    headers=["Path", "Method", "Response", "coverage_report.json count", "Specmatic HTML Results"],
-                    rows=build_count_comparison_rows(report_rows, html_rows),
-                ),
-            ],
-        )
-    )
-    assertions.append(
-        assert_equal(
             sum(row["count"] for row in console_rows),
             sum(row["count"] for row in html_rows),
             "Total console exercised count matched the total number of Specmatic HTML results.",
@@ -1522,21 +1509,36 @@ def compare_console_coverage_with_reports(
 def parse_console_coverage_rows(console_output: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line in strip_ansi(console_output).splitlines():
-        cleaned = line
-        if "| |" in cleaned:
-            cleaned = cleaned.split("| ", 1)[1]
-        cleaned = cleaned.strip()
-        match = CONSOLE_COVERAGE_ROW_RE.match(cleaned)
-        if not match:
+        if "| covered" not in line and "| not implemented" not in line and "| missing in spec" not in line:
+            continue
+        cleaned = line.split("| |", 1)[-1] if "| |" in line else line
+        parts = [part.strip() for part in cleaned.split("|")]
+        if len(parts) < 9:
+            continue
+        coverage = parts[0]
+        path = parts[1]
+        method = parts[2]
+        response = parts[4]
+        status = parts[6].replace("*", "").strip()
+        result = parts[7]
+        count = 0
+        match = re.match(r"(?P<count>\d+)[a-z]+$", result)
+        if match:
+            count = int(match.group("count"))
+        if not coverage.endswith("%") or not path.startswith("/") or method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            continue
+        try:
+            response_code = int(response)
+        except ValueError:
             continue
         rows.append(
             {
-                "coverage": match.group("coverage"),
-                "path": match.group("path").strip(),
-                "method": match.group("method").strip(),
-                "response": int(match.group("response")),
-                "count": int(match.group("count")),
-                "status": match.group("status").strip(),
+                "coverage": coverage,
+                "path": path,
+                "method": method,
+                "response": response_code,
+                "count": count,
+                "status": status,
             }
         )
     return rows
@@ -1579,7 +1581,7 @@ def parse_html_report_rows(html_text: str) -> list[dict[str, Any]]:
 
 def parse_console_coverage_summary(console_output: str) -> dict[str, Any]:
     clean_output = strip_ansi(console_output)
-    match = re.search(r"\|\s*(\d+%) API Coverage reported from (\d+) Operations\s*\|", clean_output)
+    match = re.search(r"\|\s*(\d+%) API Coverage reported from (\d+) operations eligible for coverage\s*\|", clean_output, re.IGNORECASE)
     if not match:
         return {"coverage": None, "operations": None}
     return {"coverage": match.group(1), "operations": int(match.group(2))}
@@ -1588,8 +1590,9 @@ def parse_console_coverage_summary(console_output: str) -> dict[str, Any]:
 def parse_html_coverage_summary(html_text: str) -> dict[str, Any]:
     report = parse_html_embedded_report(html_text)
     operations = report["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
-    total_operations = len(operations)
-    covered_operations = sum(1 for operation in operations if operation["coverageStatus"] == "covered")
+    eligible_operations = [operation for operation in operations if operation["coverageStatus"] != "missing in spec"]
+    total_operations = len(eligible_operations)
+    covered_operations = sum(1 for operation in eligible_operations if operation["coverageStatus"] == "covered")
     return {
         "coverage": f"{int((covered_operations / total_operations) * 100)}%" if total_operations else None,
         "operations": total_operations if total_operations else None,

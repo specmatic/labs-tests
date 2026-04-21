@@ -70,7 +70,7 @@ def build_lab_spec() -> LabSpec:
                 "1. Start mock + UI",
                 "2. Trigger the mismatch from browser (intentional failure)",
                 "3. Cleanup",
-                "4. Configure hooks in specmatic.yaml",
+                "4. Configure hooks in `specmatic.yaml`",
                 "5. Ensure hook scripts are executable",
                 "6. Restart mock + UI",
                 "7. Trigger the matching request/response from browser",

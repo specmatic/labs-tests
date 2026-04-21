@@ -23,7 +23,7 @@ LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
-PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|/(?:[^\s`]+))")
+PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
@@ -78,11 +78,11 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     command_type = classify_command(readme_command)
     setup_types = detect_setup_types(readme_command)
     artifact_labels = sorted({artifact["label"] for artifact in [*common_artifacts, *phase_artifacts]})
+    generated_artifact_profiles = [artifact for artifact in [*common_artifacts, *phase_artifacts] if artifact["origin"] == "generated"]
     generated_artifact_labels = sorted(
         {
             artifact["label"]
-            for artifact in [*common_artifacts, *phase_artifacts]
-            if artifact["origin"] == "generated"
+            for artifact in generated_artifact_profiles
         }
     )
     artifact_kinds = sorted({artifact["kind"] for artifact in [*common_artifacts, *phase_artifacts]})
@@ -91,9 +91,9 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
     os_documentation = analyze_readme_os_documentation(upstream_readme_text, headings, code_blocks)
     additional_artifacts = sorted(
-        label
-        for label in generated_artifact_labels
-        if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
+        artifact["target"]
+        for artifact in generated_artifact_profiles
+        if artifact["label"] not in REPORT_ARTIFACT_LABELS and artifact["label"] not in IGNORED_ARTIFACT_LABELS
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
     test_count_consistency = build_test_count_consistency_profile(spec.name, upstream_readme_text, report_snapshot)

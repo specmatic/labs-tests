@@ -59,13 +59,6 @@ def build_lab_spec() -> LabSpec:
         command=LAB_COMMAND,
         common_artifact_specs=(
             ArtifactSpec(
-                label="coverage_report.json",
-                source_relpath="build/reports/specmatic/coverage_report.json",
-                target_relpath="coverage_report.json",
-                kind="json",
-                expected_top_level_keys=("apiCoverage",),
-            ),
-            ArtifactSpec(
                 label="ctrf-report.json",
                 source_relpath="build/reports/specmatic/test/ctrf/ctrf-report.json",
                 target_relpath="ctrf-report.json",
@@ -78,20 +71,6 @@ def build_lab_spec() -> LabSpec:
                 target_relpath="specmatic/test/html/index.html",
                 kind="html",
                 expected_markers=("const report =", "specmaticConfig", "<html"),
-            ),
-            ArtifactSpec(
-                label="specmatic.html",
-                source_relpath="build/reports/specmatic/html/index.html",
-                target_relpath="specmatic.html",
-                kind="html",
-                expected_markers=("Specmatic Report", "Contract Test Results", "<html"),
-            ),
-            ArtifactSpec(
-                label="stub_usage_report.json",
-                source_relpath="build/reports/specmatic/stub_usage_report.json",
-                target_relpath="stub_usage_report.json",
-                kind="json",
-                expected_top_level_keys=("stubUsage",),
             ),
         ),
         readme_structure=ReadmeStructureSpec(
@@ -134,13 +113,9 @@ def build_lab_spec() -> LabSpec:
                 include_readme_structure_checks=True,
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 7, "passed": 3, "failed": 2, "skipped": 2, "other": 0},
+                    expected_tests={"tests": 5, "passed": 3, "failed": 2, "other": 0},
                     expected_operations=baseline_operation_rows(),
-                    expected_html_operations=baseline_html_operation_rows(),
-                    required_stub_usage={
-                        ("/products", "POST", 201): 1,
-                        ("/products", "GET", 200): 1,
-                    },
+                    expected_html_operations=baseline_html_operation_rows(post_202_status="not implemented", post_202_count=1, get_429_status="not implemented", get_429_count=1),
                 ),
             ),
             PhaseSpec(
@@ -162,13 +137,9 @@ def build_lab_spec() -> LabSpec:
                 file_transforms={"timeout_get": set_timeout_get_fixed},
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 7, "passed": 4, "failed": 1, "skipped": 2, "other": 0},
+                    expected_tests={"tests": 5, "passed": 4, "failed": 1, "other": 0},
                     expected_operations=baseline_operation_rows(),
-                    expected_html_operations=baseline_html_operation_rows(),
-                    required_stub_usage={
-                        ("/products", "POST", 201): 1,
-                        ("/products", "GET", 200): 2,
-                    },
+                    expected_html_operations=baseline_html_operation_rows(post_202_status="not implemented", post_202_count=1, get_429_status="covered", get_429_count=1),
                 ),
             ),
             PhaseSpec(
@@ -193,13 +164,9 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 7, "passed": 5, "failed": 0, "skipped": 2, "other": 0},
+                    expected_tests={"tests": 5, "passed": 5, "failed": 0, "other": 0},
                     expected_operations=baseline_operation_rows(),
-                    expected_html_operations=baseline_html_operation_rows(),
-                    required_stub_usage={
-                        ("/products", "POST", 201): 1,
-                        ("/products", "GET", 200): 2,
-                    },
+                    expected_html_operations=baseline_html_operation_rows(post_202_status="covered", post_202_count=1, get_429_status="covered", get_429_count=1),
                 ),
             ),
             PhaseSpec(
@@ -208,7 +175,7 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=1,
                 output_dir_name="task-c-mismatch",
                 expected_console_phrases=(
-                    "Tests run: 209, Successes: 198, Failures: 11, Errors: 0",
+                    "Tests run: 249, Successes: 238, Failures: 11, Errors: 0",
                     "Scenario: POST /products -> 202/202 with the request from the example 'test_accepted_product_request' where REQUEST.BODY contains all the keys AND the key type is set to 'food' from enum AND inventory is set to the smallest possible value '1' has FAILED",
                 ),
                 readme_assertions=tuple(task_c_mismatch_readme_assertions()),
@@ -223,13 +190,9 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 209, "passed": 198, "failed": 11, "skipped": 0, "other": 0},
+                    expected_tests={"tests": 249, "passed": 238, "failed": 11, "other": 0},
                     expected_operations=schema_operation_rows(),
-                    expected_html_operations=schema_operation_rows(),
-                    required_stub_usage={
-                        ("/products", "POST", 201): 1,
-                        ("/products", "GET", 200): 2,
-                    },
+                    expected_html_operations=schema_html_operation_rows(),
                 ),
             ),
             PhaseSpec(
@@ -238,7 +201,7 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="final",
                 expected_console_phrases=(
-                    "Tests run: 209, Successes: 209, Failures: 0, Errors: 0",
+                    "Tests run: 249, Successes: 249, Failures: 0, Errors: 0",
                     "Scenario: POST /products -> 202/202 with the request from the example 'test_accepted_product_request' where REQUEST.BODY contains all the keys AND the key type is set to 'food' from enum AND inventory is set to the largest possible value has SUCCEEDED",
                 ),
                 readme_assertions=tuple(final_readme_assertions()),
@@ -254,13 +217,9 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 209, "passed": 209, "failed": 0, "skipped": 0, "other": 0},
+                    expected_tests={"tests": 249, "passed": 249, "failed": 0, "other": 0},
                     expected_operations=schema_operation_rows(),
-                    expected_html_operations=schema_operation_rows(),
-                    required_stub_usage={
-                        ("/products", "POST", 201): 12,
-                        ("/products", "GET", 200): 2,
-                    },
+                    expected_html_operations=schema_html_operation_rows(),
                 ),
             ),
         ),
@@ -286,11 +245,16 @@ def baseline_operation_rows() -> list[dict[str, object]]:
     ]
 
 
-def baseline_html_operation_rows() -> list[dict[str, object]]:
+def baseline_html_operation_rows(*, post_202_status: str, post_202_count: int, get_429_status: str, get_429_count: int) -> list[dict[str, object]]:
     return [
-        *baseline_operation_rows(),
-        {"path": "/products", "method": "POST", "responseCode": 400, "coverageStatus": "not covered", "count": 1},
-        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 400, "coverageStatus": "not covered", "count": 1},
+        {"path": "/products", "method": "POST", "responseCode": 201, "coverageStatus": "covered", "count": 1},
+        {"path": "/products", "method": "POST", "responseCode": 202, "coverageStatus": post_202_status, "count": post_202_count},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 200, "coverageStatus": "covered", "count": 2},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 429, "coverageStatus": get_429_status, "count": get_429_count},
+        {"path": "/products", "method": "POST", "responseCode": 400, "coverageStatus": "not tested", "count": 0},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 400, "coverageStatus": "not tested", "count": 0},
+        {"path": "/monitor/{id}", "method": "GET", "responseCode": 200, "coverageStatus": "not tested", "count": 0},
+        {"path": "/monitor/{id}", "method": "GET", "responseCode": 400, "coverageStatus": "not tested", "count": 0},
     ]
 
 
@@ -305,25 +269,32 @@ def schema_operation_rows() -> list[dict[str, object]]:
     ]
 
 
+def schema_html_operation_rows() -> list[dict[str, object]]:
+    return [
+        {"path": "/products", "method": "POST", "responseCode": 201, "coverageStatus": "covered", "count": 12},
+        {"path": "/products", "method": "POST", "responseCode": 202, "coverageStatus": "covered", "count": 12},
+        {"path": "/products", "method": "POST", "responseCode": 400, "coverageStatus": "covered", "count": 138},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 200, "coverageStatus": "covered", "count": 10},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 429, "coverageStatus": "covered", "count": 1},
+        {"path": "/findAvailableProducts", "method": "GET", "responseCode": 400, "coverageStatus": "covered", "count": 76},
+        {"path": "/monitor/{id}", "method": "GET", "responseCode": 200, "coverageStatus": "not tested", "count": 0},
+        {"path": "/monitor/{id}", "method": "GET", "responseCode": 400, "coverageStatus": "not tested", "count": 0},
+    ]
+
+
 def build_resiliency_assertions(
     context: ValidationContext,
     *,
     expected_tests: dict[str, int],
     expected_operations: list[dict[str, object]],
     expected_html_operations: list[dict[str, object]],
-    required_stub_usage: dict[tuple[str, str, int], int],
 ) -> list[dict]:
     ctrf = context.artifacts["ctrf-report.json"]["json"]
-    coverage = context.artifacts["coverage_report.json"]["json"]
-    stub_usage = context.artifacts["stub_usage_report.json"]["json"]
     test_html = parse_html_embedded_report(context.artifacts["specmatic-report.html"]["text"])
-    specmatic_html = context.artifacts["specmatic.html"]["text"]
 
     assertions: list[dict] = []
     ctrf_summary = ctrf["results"]["summary"]
     test_html_summary = test_html["results"]["summary"]
-    specmatic_summary = parse_specmatic_html_summary(specmatic_html)
-    expected_executed_total = expected_tests["passed"] + expected_tests["failed"] + expected_tests.get("other", 0)
 
     for field, expected_value in expected_tests.items():
         actual_value = ctrf_summary.get(field, 0)
@@ -359,70 +330,7 @@ def build_resiliency_assertions(
             )
         )
 
-    specmatic_expected_fields = {
-        "success": expected_tests["passed"],
-        "failed": expected_tests["failed"],
-        "errors": expected_tests["other"],
-        "skipped": expected_tests["skipped"],
-        "total": expected_executed_total,
-    }
-    for specmatic_field, expected_value in specmatic_expected_fields.items():
-        actual_value = specmatic_summary.get(specmatic_field)
-        assertions.append(
-            assert_equal(
-                actual_value,
-                expected_value,
-                f"specmatic.html summary field '{specmatic_field}' matched expected value {expected_value}.",
-                f"specmatic.html summary field '{specmatic_field}' expected {expected_value}, got {actual_value}.",
-                category="report",
-                details=[
-                    detail("Field", specmatic_field),
-                    detail("Expected", expected_value),
-                    detail("Actual", actual_value),
-                ],
-            )
-        )
-
-    assertions.append(
-        assert_equal(
-            specmatic_summary.get("total"),
-            (specmatic_summary.get("success") or 0) + (specmatic_summary.get("failed") or 0) + (specmatic_summary.get("errors") or 0),
-            "specmatic.html total matched success + failed + errors.",
-            "specmatic.html total did not match success + failed + errors.",
-            category="report",
-            details=[
-                detail("Success", specmatic_summary.get("success")),
-                detail("Failed", specmatic_summary.get("failed")),
-                detail("Errors", specmatic_summary.get("errors")),
-                detail("Total", specmatic_summary.get("total")),
-            ],
-        )
-    )
-
-    coverage_operations = coverage["apiCoverage"][0]["operations"]
     test_html_operations = test_html["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
-
-    assertions.append(
-        assert_equal(
-            normalize_operations(coverage_operations),
-            normalize_operations(expected_operations),
-            "coverage_report.json operations matched the expected runtime results for this phase.",
-            "coverage_report.json operations did not match the expected runtime results for this phase.",
-            category="report",
-            details=[
-                detail_table(
-                    "Expected coverage operations",
-                    headers=["Path", "Method", "Response", "Status", "Count"],
-                    rows=operation_rows(expected_operations),
-                ),
-                detail_table(
-                    "Actual coverage operations",
-                    headers=["Path", "Method", "Response", "Status", "Count"],
-                    rows=operation_rows(coverage_operations),
-                ),
-            ],
-        )
-    )
     assertions.append(
         assert_equal(
             normalize_operations(test_html_operations),
@@ -441,57 +349,6 @@ def build_resiliency_assertions(
                     headers=["Path", "Method", "Response", "Status", "Count"],
                     rows=operation_rows(test_html_operations),
                 ),
-            ],
-        )
-    )
-    coverage_map = operation_map(coverage_operations)
-    html_map = operation_map(test_html_operations)
-    for operation in expected_operations:
-        signature = (operation["path"], operation["method"], operation["responseCode"])
-        assertions.append(
-            assert_equal(
-                coverage_map.get(signature),
-                html_map.get(signature),
-                f"coverage_report.json and specmatic-report.html agree for {signature[1]} {signature[0]} -> {signature[2]}.",
-                f"coverage_report.json and specmatic-report.html disagree for {signature[1]} {signature[0]} -> {signature[2]}.",
-                category="report",
-                details=[
-                    detail("Coverage report entry", coverage_map.get(signature)),
-                    detail("HTML report entry", html_map.get(signature)),
-                ],
-            )
-        )
-
-    stub_usage_map = {
-        (item["path"], item["method"], item["responseCode"]): item["count"]
-        for item in stub_usage["stubUsage"][0]["operations"]
-    }
-    for signature, expected_count in required_stub_usage.items():
-        assertions.append(
-            assert_equal(
-                stub_usage_map.get(signature),
-                expected_count,
-                f"stub_usage_report.json matched the expected downstream count for {signature[1]} {signature[0]} -> {signature[2]}.",
-                f"stub_usage_report.json did not match the expected downstream count for {signature[1]} {signature[0]} -> {signature[2]}.",
-                category="report",
-                details=[
-                    detail("Expected count", expected_count),
-                    detail("Actual count", stub_usage_map.get(signature)),
-                ],
-            )
-        )
-
-    assertions.append(
-        assert_condition(
-            "Specmatic Report" in specmatic_html and "Contract Test Results" in specmatic_html,
-            "specmatic.html rendered the top-level Specmatic summary page.",
-            "specmatic.html did not render the expected top-level Specmatic summary page.",
-            category="report",
-            details=[
-                detail("Success count", specmatic_summary.get("success")),
-                detail("Failed count", specmatic_summary.get("failed")),
-                detail("Skipped count", specmatic_summary.get("skipped")),
-                detail("Total count", specmatic_summary.get("total")),
             ],
         )
     )
@@ -530,31 +387,6 @@ def operation_rows(operations: list[dict[str, object]]) -> list[list[object]]:
             ]
         )
     return rows
-
-
-def operation_map(operations: list[dict[str, object]]) -> dict[tuple[str, str, int], tuple[str, int]]:
-    mapped: dict[tuple[str, str, int], tuple[str, int]] = {}
-    for operation in operations:
-        mapped[(operation["path"], operation["method"], int(operation["responseCode"]))] = (
-            str(operation["coverageStatus"]),
-            int(operation.get("count", len(operation.get("testIds", [])))),
-        )
-    return mapped
-
-
-def parse_specmatic_html_summary(html_text: str) -> dict[str, int | None]:
-    patterns = {
-        "success": r"Success:\s*<span>(\d+)</span>",
-        "failed": r"Failed:\s*<span>(\d+)</span>",
-        "errors": r"Errors:\s*<span>(\d+)</span>",
-        "skipped": r"Skipped:\s*<span>(\d+)</span>",
-        "total": r"Total:\s*<span>(\d+)</span>",
-    }
-    summary: dict[str, int | None] = {}
-    for key, pattern in patterns.items():
-        match = re.search(pattern, html_text)
-        summary[key] = int(match.group(1)) if match else None
-    return summary
 
 
 def set_schema_resiliency_all(content: str) -> str:
@@ -675,7 +507,7 @@ def task_c_mismatch_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 209, Successes: 198, Failures: 11, Errors: 0",
+            "text": "Tests run: 249, Successes: 238, Failures: 11, Errors: 0",
             "success": "README documents the Task C pre-fix summary.",
             "failure": "README is missing the documented Task C pre-fix summary block.",
         },
@@ -698,7 +530,7 @@ def final_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 209, Successes: 209, Failures: 0, Errors: 0",
+            "text": "Tests run: 249, Successes: 249, Failures: 0, Errors: 0",
             "success": "README documents the final passing summary.",
             "failure": "README is missing the documented final passing summary block.",
         },
