@@ -61,25 +61,40 @@ jobs:
           import json
           from pathlib import Path
 
-          report_path = Path("output/consolidated-report.json")
-          if not report_path.exists():
+          report_candidates = [
+              Path("output/consolidated-report/consolidated-report.json"),
+              Path("output/consolidated-report.json"),
+          ]
+          report_path = next((path for path in report_candidates if path.exists()), None)
+          comparison_path = Path("output/consolidated-report/labs-comparison.html")
+
+          if report_path is None:
               print("## Specmatic Labs Tests")
               print("")
-              print("Consolidated report was not generated.")
+              print("[error] The consolidated report was not generated.")
+              print("")
+              print("Impact: the GitHub Actions job summary cannot show lab results without the consolidated JSON payload.")
+              print("")
+              print("[Action required]")
+              print("Inspect the run_all.py logs above and confirm that output/consolidated-report/consolidated-report.json is created before the summary step runs.")
               raise SystemExit(0)
 
           payload = json.loads(report_path.read_text(encoding="utf-8"))
           environment = payload.get("environment", {})
           summary = {item["label"]: item["value"] for item in payload.get("summary", [])}
+          setup = payload.get("setup") or {}
 
           print("## Specmatic Labs Tests")
           print("")
           print(f"- Status: **{payload.get('status', 'unknown').upper()}**")
           print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
           print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
+          print(f"- Setup: `{setup.get('status', 'n/a')}`")
           print(f"- Labs discovered: `{summary.get('Labs discovered', 0)}`")
           print(f"- Labs passed: `{summary.get('Labs passed', 0)}`")
           print(f"- Labs failed: `{summary.get('Labs failed', 0)}`")
+          print(f"- Consolidated report JSON: `{report_path.as_posix()}`")
+          print(f"- Comparison report HTML: `{comparison_path.as_posix()}`" if comparison_path.exists() else "- Comparison report HTML: `not generated`")
           print("- Reports artifact: `specmatic-labs-reports`")
           print("")
           print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")

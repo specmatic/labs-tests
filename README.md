@@ -210,4 +210,5 @@ GitHub Actions workflow:
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
 - uses a 30-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
+- includes the consolidated report path and comparison report path in the GitHub job summary so workflow runs can be checked quickly
 - uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact

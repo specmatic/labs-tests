@@ -243,6 +243,9 @@ CI artifact upload must also follow discovery rather than a hardcoded lab list.
 Rules:
 
 - GitHub Actions report archiving must upload `output/` plus every top-level lab `output/` folder using a wildcard such as `*/output/`
+- GitHub Actions job summary must read the consolidated payload from `output/consolidated-report/consolidated-report.json`
+- when report locations change, update the GitHub Actions summary step in `.github/workflows/labs-tests.yml` in the same change so CI summaries do not silently stop rendering
+- the GitHub Actions summary should mention both the consolidated report and comparison report locations when they are available
 - do not hardcode only the labs that existed at one point in time, because new lab reports will then be missing from the archived artifact and consolidated report links will fail for downloaded reports
 - after adding a new lab harness, verify that its `output/report.json` and `output/report.html` are both included by the artifact upload pattern
 
@@ -271,6 +274,7 @@ Use that refresh step even when implementation work was completed earlier in the
 Before closing a task that changes the automated lab inventory, also check:
 
 - the GitHub Actions workflow artifact upload still archives every lab report
+- the GitHub Actions workflow summary still renders from the current consolidated report path
 - the new lab folder is tracked in git; locally generated reports alone are not enough for CI to discover a new harness
 
 ## CI consistency rules
