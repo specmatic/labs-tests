@@ -77,6 +77,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     artifact_kinds = sorted({artifact["kind"] for artifact in [*common_artifacts, *phase_artifacts]})
     shell_console_blocks = [block for block in code_blocks if looks_like_console_block(block) and block["language"] in {"shell", "bash", "sh"}]
     console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
+    shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
     additional_artifacts = sorted(
         label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
     )
@@ -99,6 +100,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             }
             for phase in spec.phases
         ],
+        "phaseSignature": tuple(phase.name for phase in spec.phases),
         "artifacts": {
             "labels": artifact_labels,
             "kinds": artifact_kinds,
@@ -122,6 +124,9 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "consoleBlockCount": len(console_blocks),
             "hasAtLeastTwoShellConsoleBlocks": len(shell_console_blocks) >= 2,
             "allConsoleBlocksUseShellSyntax": bool(console_blocks) and all(block["language"] in {"shell", "bash", "sh"} for block in console_blocks),
+            "openingShellConsoleSection": shell_console_sections[0] if shell_console_sections else {},
+            "closingShellConsoleSection": shell_console_sections[-1] if shell_console_sections else {},
+            "shellConsoleSections": shell_console_sections,
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -158,26 +163,67 @@ def artifact_profile(artifact: Any) -> dict[str, Any]:
 
 
 def extract_headings(text: str) -> list[dict[str, Any]]:
-    return [{"level": len(match.group(1)), "text": match.group(2).strip()} for match in HEADING_RE.finditer(text)]
+    return [
+        {
+            "line": line_number_for_index(text, match.start()),
+            "level": len(match.group(1)),
+            "text": match.group(2).strip(),
+        }
+        for match in HEADING_RE.finditer(text)
+    ]
 
 
-def extract_fenced_code_blocks(readme_text: str) -> list[dict[str, str]]:
-    blocks: list[dict[str, str]] = []
+def extract_fenced_code_blocks(readme_text: str) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
     for match in FENCED_CODE_BLOCK_RE.finditer(readme_text):
         blocks.append(
             {
                 "language": (match.group("lang") or "").strip().lower(),
                 "body": match.group("body").strip(),
+                "line": line_number_for_index(readme_text, match.start()),
             }
         )
     return blocks
 
 
-def looks_like_console_block(block: dict[str, str]) -> bool:
+def line_number_for_index(text: str, index: int) -> int:
+    return text.count("\n", 0, index) + 1
+
+
+def looks_like_console_block(block: dict[str, Any]) -> bool:
     lines = [line.strip() for line in block["body"].splitlines() if line.strip()]
     if not lines:
         return False
     return bool(SHELL_COMMAND_PREFIXES_RE.match(lines[0]))
+
+
+def build_shell_console_sections(headings: list[dict[str, Any]], shell_console_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sections = []
+    for block in shell_console_blocks:
+        heading = heading_before_line(headings, block["line"])
+        first_line = next((line.strip() for line in block["body"].splitlines() if line.strip()), "")
+        sections.append(
+            {
+                "heading": heading["text"] if heading else "",
+                "headingLevel": heading["level"] if heading else 0,
+                "line": block["line"],
+                "language": block["language"],
+                "command": first_line,
+                "summary": summarize_console_section(heading["text"] if heading else "", first_line),
+            }
+        )
+    return sections
+
+
+def heading_before_line(headings: list[dict[str, Any]], line: int) -> dict[str, Any] | None:
+    before = [heading for heading in headings if heading["line"] <= line]
+    return before[-1] if before else None
+
+
+def summarize_console_section(heading: str, command: str) -> str:
+    if heading and command:
+        return f"{heading}: {command}"
+    return heading or command
 
 
 def extract_primary_command(readme_text: str) -> list[str]:
@@ -257,6 +303,7 @@ def build_commonalities(labs: list[dict[str, Any]]) -> dict[str, Any]:
     common_required_h2 = sorted(set.intersection(*required_h2_sets)) if required_h2_sets else []
     artifact_counter = Counter(label for lab in labs for label in lab["artifacts"]["labels"])
     phase_counter = Counter(tuple(phase["name"] for phase in lab["phases"]) for lab in labs)
+    phase_sequences = [lab["phaseSignature"] for lab in labs if lab["phaseSignature"]]
     h1_counter = Counter(lab["readme"]["h1"] for lab in labs if lab["readme"]["h1"])
     h2_counter = Counter(tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"])
     return {
@@ -265,6 +312,7 @@ def build_commonalities(labs: list[dict[str, Any]]) -> dict[str, Any]:
         "commonRequiredReadmeSections": common_required_h2,
         "artifactLabelsUsedByAllLabs": sorted(label for label, count in artifact_counter.items() if count == len(labs)),
         "artifactLabelsUsedByMultipleLabs": sorted(label for label, count in artifact_counter.items() if count > 1),
+        "commonPhasePrefix": list(longest_common_prefix(phase_sequences)),
         "phaseModels": [
             {"phases": list(phases), "count": count}
             for phases, count in sorted(phase_counter.items(), key=lambda item: (-item[1], item[0]))
@@ -273,7 +321,7 @@ def build_commonalities(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "All automated labs use the same scaffolded LabSpec -> JSON report -> HTML report flow.",
             "Each lab keeps its outputs inside a lab-local output directory.",
             "README structure is validated against explicit required H2 sections.",
-            "Most labs follow a two-phase baseline/fixed workflow.",
+            "Every compared lab begins with a baseline mismatch phase.",
         ],
     }
 
@@ -320,37 +368,136 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     shared_h1 = most_common_value([lab["readme"]["h1"] for lab in labs if lab["readme"]["h1"]])
     shared_h2 = most_common_value([tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"]])
+    common_required_h2_sets = [set(lab["readme"]["requiredH2"]) for lab in labs if lab["readme"]["requiredH2"]]
+    common_required_h2 = set.intersection(*common_required_h2_sets) if common_required_h2_sets else set()
+    artifact_label_counts = Counter(label for lab in labs for label in lab["artifacts"]["labels"])
+    common_phase_prefix = longest_common_prefix([lab["phaseSignature"] for lab in labs if lab["phaseSignature"]])
     rows = [
+        {"kind": "group", "label": "Similarities", "section": "similarities", "cells": [None] * len(labs)},
         {
-            "label": "README H1 matches shared title",
-            "cells": [lab["readme"]["h1"] == shared_h1 for lab in labs],
+            "label": "README starts with a top-level H1",
+            "tooltip": {
+                "summary": ["Both READMEs start with an H1."],
+                "details": build_h1_details(labs),
+            },
+            "cells": [bool(lab["readme"]["h1"]) for lab in labs],
         },
         {
-            "label": "README H2 sequence matches shared template",
+            "label": "README H2 sequence follows the source README outline",
+            "tooltip": build_h2_sequence_tooltip(labs, common_required_h2),
             "cells": [tuple(lab["readme"]["actualH2"]) == shared_h2 for lab in labs],
         },
         {
-            "label": "README has H3 implementation steps",
+            "label": "README contains the common required H2 sections",
+            "tooltip": {
+                "summary": ["Both READMEs include the shared required H2 sections."],
+                "details": build_shared_section_details(common_required_h2),
+            },
+            "cells": [common_required_h2.issubset(set(lab["readme"]["actualH2"])) for lab in labs],
+        },
+        {
+            "label": "README has implementation steps in H3 format",
+            "tooltip": {
+                "summary": ["Lab-specific walkthrough steps belong in H3 headings."],
+                "details": build_h3_details(labs),
+            },
             "cells": [lab["readme"]["h3Count"] > 0 for lab in labs],
         },
         {
-            "label": "README has at least 2 shell console sections",
-            "cells": [lab["readme"]["hasAtLeastTwoShellConsoleBlocks"] for lab in labs],
+            "label": "README opening phase is shared across the compared labs",
+            "tooltip": {
+                "summary": ["Both labs start with the same opening phase pattern."],
+                "details": build_phase_prefix_details(common_phase_prefix, labs),
+            },
+            "cells": [tuple(lab["phaseSignature"][: len(common_phase_prefix)]) == common_phase_prefix for lab in labs] if common_phase_prefix else [False for _ in labs],
+        },
+        {
+            "label": "README has an opening shell console section before implementation",
+            "tooltip": {
+                "summary": ["Both READMEs include a shell console section before the implementation starts."],
+                "details": build_console_section_details(labs, "opening"),
+            },
+            "cells": [bool(lab["readme"]["openingShellConsoleSection"]) for lab in labs],
+        },
+        {
+            "label": "README has a closing shell console section after implementation",
+            "tooltip": {
+                "summary": ["Both READMEs end with a shell console section after the implementation."],
+                "details": build_console_section_details(labs, "closing"),
+            },
+            "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
         },
         {
             "label": "All console sections use shell syntax",
+            "tooltip": {
+                "summary": ["All console examples use shell-style fences."],
+                "details": build_shell_console_details(labs),
+            },
             "cells": [lab["readme"]["allConsoleBlocksUseShellSyntax"] for lab in labs],
         },
         {
             "label": "CTRF report available",
+            "tooltip": {
+                "summary": ["Each lab writes ctrf-report.json as the machine-readable test result."],
+                "details": build_artifact_details(labs, "ctrf-report.json"),
+            },
             "cells": ["ctrf-report.json" in lab["artifacts"]["labels"] for lab in labs],
         },
         {
             "label": "Sibling HTML report available",
+            "tooltip": {
+                "summary": ["Each lab writes specmatic-report.html alongside the CTRF JSON output."],
+                "details": build_artifact_details(labs, "specmatic-report.html"),
+            },
             "cells": ["specmatic-report.html" in lab["artifacts"]["labels"] for lab in labs],
+        },
+        {"kind": "group", "label": "Differences", "section": "differences", "cells": [None] * len(labs)},
+        {
+            "label": "README H1 is lab-specific",
+            "tooltip": {
+                "summary": ["Each lab uses its own H1 title text."],
+                "details": build_h1_details(labs),
+            },
+            "cells": [True for _ in labs],
+        },
+        {
+            "label": "README H2 sequence is lab-specific",
+            "tooltip": {
+                "summary": ["Each lab uses its own ordered H2 outline."],
+                "details": build_h2_sequence_difference_details(labs),
+            },
+            "cells": [True for _ in labs],
+        },
+        {
+            "label": "README has lab-specific H2 sections",
+            "tooltip": {
+                "summary": ["Each lab adds sections beyond the shared H2 scaffold."],
+                "details": build_lab_specific_h2_details(labs, common_required_h2),
+            },
+            "cells": [bool(set(lab["readme"]["actualH2"]) - common_required_h2) for lab in labs],
+        },
+        {
+            "label": "README phase sequence is lab-specific",
+            "tooltip": {
+                "summary": ["Each lab defines its own phase flow."],
+                "details": build_phase_details(labs),
+            },
+            "cells": [True for _ in labs],
+        },
+        {
+            "label": "README has lab-specific artifact labels",
+            "tooltip": {
+                "summary": ["Each lab has artifact labels beyond the shared report outputs."],
+                "details": build_lab_specific_artifact_details(labs, artifact_label_counts),
+            },
+            "cells": [any(artifact_label_counts[label] == 1 for label in lab["artifacts"]["labels"]) for lab in labs],
         },
         {
             "label": "No additional artifacts beyond report outputs",
+            "tooltip": {
+                "summary": ["Any extra files beyond the report outputs are treated as deviations."],
+                "details": build_additional_artifact_details(labs),
+            },
             "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
         },
     ]
@@ -365,6 +512,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     common_list = "".join(f"<li>{escape(item)}</li>" for item in payload.get("commonalities", {}).get("sharedCharacteristics", []))
     shared_h1 = payload.get("commonalities", {}).get("sharedReadmeH1", "")
     shared_h2_sequence = payload.get("commonalities", {}).get("sharedReadmeH2Sequence", [])
+    common_phase_prefix = payload.get("commonalities", {}).get("commonPhasePrefix", [])
     common_sections = "".join(
         f"<li>{escape(section)}</li>" for section in payload.get("commonalities", {}).get("commonRequiredReadmeSections", [])
     )
@@ -471,6 +619,189 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       z-index: 2;
       min-width: 240px;
     }}
+    .matrix-row-label {{
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      justify-content: space-between;
+    }}
+    .matrix-row-title {{
+      flex: 1 1 auto;
+      min-width: 0;
+    }}
+    .tooltip-trigger {{
+      appearance: none;
+      border: 1px solid #c8bda9;
+      background: #fff;
+      color: #145a7a;
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      font: inherit;
+      font-size: 0.85rem;
+      line-height: 1.2;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }}
+    .tooltip-trigger:hover,
+    .tooltip-trigger:focus {{
+      border-color: #145a7a;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(20, 90, 122, 0.12);
+    }}
+    .matrix-tooltip {{
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 24px;
+    }}
+    .matrix-tooltip[hidden] {{
+      display: none;
+    }}
+    .matrix-tooltip-backdrop {{
+      position: absolute;
+      inset: 0;
+      background: rgba(24, 33, 38, 0.42);
+    }}
+    .matrix-tooltip-panel {{
+      position: relative;
+      z-index: 1;
+      width: min(720px, calc(100vw - 48px));
+      max-height: min(78vh, 760px);
+      overflow: auto;
+      background: #ffffff;
+      border: 1px solid #c8bda9;
+      border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(35, 31, 25, 0.28);
+      padding: 16px 16px 14px;
+    }}
+    .matrix-tooltip-header {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }}
+    .matrix-tooltip-title {{
+      font-weight: 700;
+      color: #182126;
+    }}
+    .tooltip-close {{
+      appearance: none;
+      border: 1px solid #c8bda9;
+      background: #fffdf8;
+      color: #182126;
+      border-radius: 999px;
+      padding: 0.15rem 0.55rem;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }}
+    .tooltip-close:hover,
+    .tooltip-close:focus {{
+      outline: none;
+      border-color: #145a7a;
+      box-shadow: 0 0 0 2px rgba(20, 90, 122, 0.12);
+    }}
+    .matrix-tooltip ul {{
+      margin: 0;
+      padding-left: 1.2rem;
+      color: #334155;
+    }}
+    .matrix-tooltip li + li {{
+      margin-top: 0.35rem;
+    }}
+    .tooltip-details-toggle {{
+      appearance: none;
+      border: 1px solid #c8bda9;
+      background: #fffdf8;
+      color: #145a7a;
+      border-radius: 999px;
+      padding: 0.35rem 0.7rem;
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-top: 10px;
+    }}
+    .tooltip-details-toggle:hover,
+    .tooltip-details-toggle:focus {{
+      outline: none;
+      border-color: #145a7a;
+      box-shadow: 0 0 0 2px rgba(20, 90, 122, 0.12);
+    }}
+    .matrix-tooltip-details {{
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e2d7c6;
+    }}
+    .matrix-tooltip-details-title {{
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #182126;
+    }}
+    .matrix-tooltip-details-note {{
+      margin: 0 0 10px;
+      color: #5f6b74;
+      font-size: 0.95rem;
+    }}
+    .matrix-tooltip-details table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }}
+    .matrix-tooltip-details th,
+    .matrix-tooltip-details td {{
+      border-bottom: 1px solid #eadfcd;
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    .matrix-group th {{
+      text-align: left;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }}
+    .matrix-group-label {{
+      display: inline-block;
+      padding: 0.18rem 0.65rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.5);
+    }}
+    .matrix-group-similarities th {{
+      background: linear-gradient(90deg, #eaf7ee, #f6fff8);
+      color: #1f7a3b;
+      border-top: 2px solid #9bd3a9;
+      border-bottom: 2px solid #9bd3a9;
+    }}
+    .matrix-group-differences th {{
+      background: linear-gradient(90deg, #fff1ea, #fffaf7);
+      color: #b42318;
+      border-top: 2px solid #f0b39f;
+      border-bottom: 2px solid #f0b39f;
+    }}
+    .matrix-legend {{
+      display: inline-block;
+      margin-left: 0.6rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }}
+    .matrix-legend-similarity {{
+      background: #eaf7ee;
+      color: #1f7a3b;
+      border: 1px solid #9bd3a9;
+    }}
+    .matrix-legend-difference {{
+      background: #fff1ea;
+      color: #b42318;
+      border: 1px solid #f0b39f;
+    }}
     .matrix .matrix-lab {{
       min-width: 120px;
       max-width: 120px;
@@ -505,6 +836,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       <p>{escape(shared_h1) or '(no common H1 found)'}</p>
       <h3>Shared README H2 Sequence</h3>
       <ul>{''.join(f'<li>{escape(section)}</li>' for section in shared_h2_sequence) or '<li>(no common H2 sequence found)</li>'}</ul>
+      <h3>Common Phase Prefix</h3>
+      <ul>{''.join(f'<li>{escape(phase)}</li>' for phase in common_phase_prefix) or '<li>(no shared opening phase found)</li>'}</ul>
       <h3>Common README Sections</h3>
       <ul>{common_sections}</ul>
       <h3>Repeated Artifact Labels</h3>
@@ -539,8 +872,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       </table>
     </section>
     <section class="panel">
-      <h2>Validation Matrix</h2>
-      <p class="muted">Green tick means the validation is present for that lab. Red cross means it is absent.</p>
+      <h2>README Similarities and Differences Matrix</h2>
+      <p class="muted">Green tick means the validation is present for that lab. Red cross means it is absent. <span class="matrix-legend matrix-legend-similarity">Similarities: shared structure.</span><span class="matrix-legend matrix-legend-difference">Differences: lab-specific deltas.</span></p>
       <div class="matrix-wrap">
         <table class="matrix">
           <thead>
@@ -554,6 +887,182 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       </div>
     </section>
   </main>
+    <div id="matrix-tooltip-modal" class="matrix-tooltip" hidden>
+    <div class="matrix-tooltip-backdrop" data-modal-close="true" aria-hidden="true"></div>
+    <div class="matrix-tooltip-panel" role="dialog" aria-modal="true" aria-labelledby="matrix-tooltip-title">
+      <div class="matrix-tooltip-header">
+        <div id="matrix-tooltip-title" class="matrix-tooltip-title">What this means</div>
+        <button type="button" class="tooltip-close" data-modal-close="true" aria-label="Close tooltip">Close</button>
+      </div>
+      <ul id="matrix-tooltip-summary"></ul>
+      <button id="matrix-tooltip-details-toggle" type="button" class="tooltip-details-toggle" hidden>View details</button>
+      <div id="matrix-tooltip-details" class="matrix-tooltip-details" hidden></div>
+    </div>
+  </div>
+  <script>
+    (() => {{
+      const modal = document.getElementById('matrix-tooltip-modal');
+      const title = document.getElementById('matrix-tooltip-title');
+      const summary = document.getElementById('matrix-tooltip-summary');
+      const details = document.getElementById('matrix-tooltip-details');
+      const detailsToggle = document.getElementById('matrix-tooltip-details-toggle');
+      let activeTooltip = null;
+      let activeTrigger = null;
+      const closeAll = () => {{
+        const triggerToFocus = activeTrigger;
+        document.querySelectorAll('.tooltip-trigger').forEach((trigger) => {{
+          trigger.setAttribute('aria-expanded', 'false');
+        }});
+        if (modal) {{
+          modal.hidden = true;
+        }}
+        if (summary) {{
+          summary.innerHTML = '';
+        }}
+        if (details) {{
+          details.hidden = true;
+          details.innerHTML = '';
+        }}
+        if (detailsToggle) {{
+          detailsToggle.hidden = true;
+          detailsToggle.textContent = 'View details';
+        }}
+        activeTooltip = null;
+        activeTrigger = null;
+        document.body.style.overflow = '';
+        return triggerToFocus;
+      }};
+      document.addEventListener('click', (event) => {{
+        const target = event.target;
+        const trigger = target.closest ? target.closest('.tooltip-trigger') : null;
+        const closeButton = target.closest ? target.closest('[data-modal-close="true"]') : null;
+        if (trigger) {{
+          closeAll();
+          if (!modal || !title || !summary || !details || !detailsToggle) return;
+          const tooltipJson = trigger.getAttribute('data-tooltip-json') || '';
+          if (!tooltipJson) return;
+          const tooltip = JSON.parse(tooltipJson);
+          activeTooltip = tooltip;
+          activeTrigger = trigger;
+          title.textContent = tooltip.title || 'What this means';
+          renderBulletList(summary, tooltip.summary || ['(no summary available)']);
+          renderDetails(details, tooltip.details || null);
+          details.hidden = true;
+          detailsToggle.hidden = !tooltip.details;
+          detailsToggle.textContent = 'View details';
+          detailsToggle.setAttribute('aria-expanded', 'false');
+          modal.hidden = false;
+          document.body.style.overflow = 'hidden';
+          trigger.setAttribute('aria-expanded', 'true');
+          const closeControl = modal.querySelector('.tooltip-close');
+          if (closeControl) {{
+            closeControl.focus();
+          }}
+          return;
+        }}
+        if (closeButton) {{
+          const triggerControl = closeAll();
+          if (triggerControl) {{
+            triggerControl.focus();
+          }}
+          return;
+        }}
+        if (target === detailsToggle) {{
+          if (!details || !detailsToggle || !activeTooltip) return;
+          const isHidden = details.hidden;
+          if (isHidden) {{
+            renderDetails(details, activeTooltip.details || null);
+            details.hidden = false;
+            detailsToggle.textContent = 'Hide details';
+            detailsToggle.setAttribute('aria-expanded', 'true');
+          }} else {{
+            details.hidden = true;
+            detailsToggle.textContent = 'View details';
+            detailsToggle.setAttribute('aria-expanded', 'false');
+          }}
+          return;
+        }}
+        if (target === modal) {{
+          const triggerControl = closeAll();
+          if (triggerControl) {{
+            triggerControl.focus();
+          }}
+          return;
+        }}
+        const backdrop = modal ? modal.querySelector('.matrix-tooltip-backdrop') : null;
+        if (target === backdrop) {{
+          const triggerControl = closeAll();
+          if (triggerControl) {{
+            triggerControl.focus();
+          }}
+        }}
+      }});
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape') {{
+          const triggerControl = closeAll();
+          if (triggerControl) {{
+            triggerControl.focus();
+          }}
+        }}
+      }});
+
+      function renderBulletList(container, items) {{
+        container.innerHTML = '';
+        const list = document.createElement('ul');
+        items.forEach((item) => {{
+          const li = document.createElement('li');
+          li.textContent = item;
+          list.appendChild(li);
+        }});
+        container.appendChild(list);
+      }}
+
+      function renderDetails(container, detailsData) {{
+        container.innerHTML = '';
+        if (!detailsData) {{
+          return;
+        }}
+        const sectionTitle = document.createElement('div');
+        sectionTitle.className = 'matrix-tooltip-details-title';
+        sectionTitle.textContent = detailsData.title || 'View details';
+        container.appendChild(sectionTitle);
+        if (detailsData.note) {{
+          const note = document.createElement('p');
+          note.className = 'matrix-tooltip-details-note';
+          note.textContent = detailsData.note;
+          container.appendChild(note);
+        }}
+        if (detailsData.type === 'table') {{
+          const table = document.createElement('table');
+          const thead = document.createElement('thead');
+          const headerRow = document.createElement('tr');
+          (detailsData.headers || []).forEach((header) => {{
+            const th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+          }});
+          thead.appendChild(headerRow);
+          table.appendChild(thead);
+          const tbody = document.createElement('tbody');
+          (detailsData.rows || []).forEach((row) => {{
+            const tr = document.createElement('tr');
+            row.forEach((cell) => {{
+              const td = document.createElement('td');
+              td.textContent = cell;
+              tr.appendChild(td);
+            }});
+            tbody.appendChild(tr);
+          }});
+          table.appendChild(tbody);
+          container.appendChild(table);
+          return;
+        }}
+        if (detailsData.type === 'bullets') {{
+          renderBulletList(container, detailsData.items || []);
+        }}
+      }}
+    }})();
+  </script>
 </body>
 </html>
 """
@@ -599,8 +1108,13 @@ def render_lab_link(name: str, href: str) -> str:
 
 
 def render_validation_matrix_row(row: dict[str, Any]) -> str:
+    if row.get("kind") == "group":
+        section_class = f" matrix-group-{escape(row.get('section', ''))}" if row.get("section") else ""
+        group_label = escape(row["label"])
+        return f"<tr class='matrix-group{section_class}'><th class='row-label' colspan='{len(row.get('cells', [])) + 1}'><span class='matrix-group-label'>{group_label}</span></th></tr>"
+    tooltip_attrs = render_matrix_trigger_attrs(row.get("tooltip", {}), row["label"])
     cells = "".join(render_matrix_cell(bool(cell), row["label"]) for cell in row["cells"])
-    return f"<tr><th class='row-label'>{escape(row['label'])}</th>{cells}</tr>"
+    return f"<tr><th class='row-label'><span class='matrix-row-label'><span class='matrix-row-title'>{escape(row['label'])}</span><button type='button' class='tooltip-trigger' aria-expanded='false' aria-label='Show details for {escape(row['label'])}'{tooltip_attrs}>i</button></span></th>{cells}</tr>"
 
 
 def render_matrix_cell(present: bool, validation_label: str) -> str:
@@ -608,6 +1122,182 @@ def render_matrix_cell(present: bool, validation_label: str) -> str:
     state = "yes" if present else "no"
     title = "present" if present else "absent"
     return f"<td title='{escape(validation_label)} is {title}'><span class='matrix-cell {state}' aria-label='{escape(title)}'>{symbol}</span></td>"
+
+
+def render_matrix_trigger_attrs(tooltip: dict[str, Any], label: str) -> str:
+    payload = {
+        "title": label,
+        "summary": tooltip.get("summary", []),
+        "details": tooltip.get("details"),
+    }
+    return f" data-tooltip-json='{escape(json.dumps(payload, ensure_ascii=False))}'"
+
+
+def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "H1 titles",
+        "headers": ["Lab", "H1 title"],
+        "rows": [[lab["name"], lab["readme"]["h1"] or "(missing)"] for lab in labs],
+    }
+
+
+def build_shared_section_details(common_required_h2: set[str]) -> dict[str, Any]:
+    return {
+        "type": "bullets",
+        "title": "Shared required H2 sections",
+        "items": sorted(common_required_h2) or ["(no common required H2 sections found)"],
+        "note": "These sections should appear in every README.",
+    }
+
+
+def build_h3_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "H3 implementation steps",
+        "headers": ["Lab", "H3 count", "H3 headings"],
+        "rows": [
+            [lab["name"], str(lab["readme"]["h3Count"]), ", ".join(lab["readme"]["actualH3"]) or "(none)"]
+            for lab in labs
+        ],
+        "note": "H3 sections are where the lab-specific implementation steps belong.",
+    }
+
+
+def build_phase_prefix_details(common_phase_prefix: tuple[str, ...], labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Opening phase pattern",
+        "headers": ["Lab", "Phase sequence"],
+        "rows": [[lab["name"], " -> ".join(lab["phaseSignature"]) or "(missing)"] for lab in labs],
+        "note": ("The shared opening phase prefix is: " + ", ".join(common_phase_prefix)) if common_phase_prefix else "(no shared opening phase found)",
+    }
+
+
+def build_console_section_details(labs: list[dict[str, Any]], which: str) -> dict[str, Any]:
+    entries = []
+    for lab in labs:
+        section = lab["readme"]["openingShellConsoleSection"] if which == "opening" else lab["readme"]["closingShellConsoleSection"]
+        entries.append([lab["name"], section.get("summary") or "(missing)"])
+    title = "Opening console sections" if which == "opening" else "Closing console sections"
+    note = "These console blocks show the before/after command flow in the README."
+    return {
+        "type": "table",
+        "title": title,
+        "headers": ["Lab", "Console section"],
+        "rows": entries,
+        "note": note,
+    }
+
+
+def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Shell console coverage",
+        "headers": ["Lab", "Shell console blocks", "All use shell syntax"],
+        "rows": [
+            [
+                lab["name"],
+                str(lab["readme"]["shellConsoleBlockCount"]),
+                "Yes" if lab["readme"]["allConsoleBlocksUseShellSyntax"] else "No",
+            ]
+            for lab in labs
+        ],
+        "note": "Shell fences keep the README commands copy-pasteable and consistent.",
+    }
+
+
+def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": f"{label} coverage",
+        "headers": ["Lab", "Present"],
+        "rows": [[lab["name"], "Yes" if label in lab["artifacts"]["labels"] else "No"] for lab in labs],
+    }
+
+
+def build_h2_sequence_difference_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Lab-specific H2 outlines",
+        "headers": ["Lab", "Ordered H2 outline"],
+        "rows": [[lab["name"], " -> ".join(lab["readme"]["actualH2"]) or "(missing)"] for lab in labs],
+        "note": "The H2 outline is the lab-specific shape of the README.",
+    }
+
+
+def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2: set[str]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Lab-specific H2 sections",
+        "headers": ["Lab", "Extra H2 sections"],
+        "rows": [
+            [
+                lab["name"],
+                ", ".join(sorted(set(lab["readme"]["actualH2"]) - common_required_h2)) or "(none)",
+            ]
+            for lab in labs
+        ],
+        "note": "These are the sections that should be compared against the shared scaffold.",
+    }
+
+
+def build_phase_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Phase sequences",
+        "headers": ["Lab", "Phase flow"],
+        "rows": [[lab["name"], " -> ".join(lab["phaseSignature"]) or "(missing)"] for lab in labs],
+    }
+
+
+def build_lab_specific_artifact_details(labs: list[dict[str, Any]], artifact_label_counts: Counter[str]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Lab-specific artifact labels",
+        "headers": ["Lab", "Unique labels"],
+        "rows": [
+            [
+                lab["name"],
+                ", ".join(label for label in lab["artifacts"]["labels"] if artifact_label_counts[label] == 1) or "(none)",
+            ]
+            for lab in labs
+        ],
+    }
+
+
+def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "table",
+        "title": "Additional artifact warnings",
+        "headers": ["Lab", "Additional artifacts"],
+        "rows": [
+            [lab["name"], ", ".join(lab["warnings"]["additionalArtifacts"]) or "(none)"]
+            for lab in labs
+        ],
+    }
+
+
+def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: set[str]) -> dict[str, Any]:
+    shared_scaffold = ", ".join(sorted(common_required_h2)) or "(no shared required H2 sections found)"
+    lab_differences = []
+    for lab in labs:
+        extra_sections = [section for section in lab["readme"]["actualH2"] if section not in common_required_h2]
+        if extra_sections:
+            lab_differences.append([lab["name"], ", ".join(extra_sections)])
+    return {
+        "summary": [
+            "Both READMEs use the same shared H2 scaffold.",
+            "The lab-specific H2 sections are shown in View details.",
+        ],
+        "details": {
+            "type": "table",
+            "title": "H2 scaffold and differences",
+            "headers": ["Lab", "Lab-specific H2 sections"],
+            "rows": lab_differences or [[lab["name"], "(none)"] for lab in labs],
+            "note": f"Shared scaffold: {shared_scaffold}. Keep these sections stable across labs.",
+        },
+    }
 
 
 def render_bullets(items: list[str]) -> str:
@@ -622,6 +1312,25 @@ def most_common_value(values: list[Any]) -> Any:
     if not values:
         return ""
     return Counter(values).most_common(1)[0][0]
+
+
+def longest_common_prefix(sequences: list[tuple[str, ...]]) -> tuple[str, ...]:
+    if not sequences:
+        return ()
+    prefix = list(sequences[0])
+    for sequence in sequences[1:]:
+        limit = min(len(prefix), len(sequence))
+        index = 0
+        while index < limit and prefix[index] == sequence[index]:
+            index += 1
+        prefix = prefix[:index]
+        if not prefix:
+            break
+    return tuple(prefix)
+
+
+def format_lab_value_map(items: Any) -> str:
+    return "; ".join(f"{lab}: {value}" for lab, value in items)
 
 
 def format_value(value: Any) -> str:
