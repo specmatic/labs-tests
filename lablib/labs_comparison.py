@@ -81,6 +81,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     additional_artifacts = sorted(
         label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
     )
+    report_snapshot = load_lab_report_snapshot(spec.name)
+    test_count_consistency = build_test_count_consistency_profile(spec.name, upstream_readme_text, report_snapshot)
 
     return {
         "name": spec.name,
@@ -131,6 +133,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         "warnings": {
             "additionalArtifacts": additional_artifacts,
         },
+        "testCountConsistency": test_count_consistency,
     }
 
 
@@ -436,6 +439,14 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["readme"]["allConsoleBlocksUseShellSyntax"] for lab in labs],
         },
         {
+            "label": "Test count consistency across README, console, CTRF, and HTML",
+            "tooltip": {
+                "summary": ["The README, console output, CTRF JSON, and Specmatic HTML report should describe the same counts."],
+                "details": build_test_count_consistency_details(labs),
+            },
+            "cells": [lab["testCountConsistency"]["consistent"] for lab in labs],
+        },
+        {
             "label": "CTRF report available",
             "tooltip": {
                 "summary": ["Each lab writes ctrf-report.json as the machine-readable test result."],
@@ -737,6 +748,26 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       padding-top: 12px;
       border-top: 1px solid #e2d7c6;
     }}
+    .matrix-tooltip-section {{
+      padding: 12px 14px;
+      margin-top: 12px;
+      border: 1px solid #e2d7c6;
+      border-radius: 12px;
+      background: #fffdf9;
+    }}
+    .matrix-tooltip-section:first-child {{
+      margin-top: 0;
+    }}
+    .matrix-tooltip-section-title {{
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #182126;
+    }}
+    .matrix-tooltip-section-note {{
+      margin: 0 0 10px;
+      color: #5f6b74;
+      font-size: 0.95rem;
+    }}
     .matrix-tooltip-details-title {{
       font-weight: 700;
       margin-bottom: 8px;
@@ -751,6 +782,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       width: 100%;
       border-collapse: collapse;
       font-size: 0.95rem;
+      table-layout: fixed;
     }}
     .matrix-tooltip-details th,
     .matrix-tooltip-details td {{
@@ -758,6 +790,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       padding: 8px 6px;
       text-align: left;
       vertical-align: top;
+      word-break: break-word;
     }}
     .matrix-group th {{
       text-align: left;
@@ -1022,15 +1055,36 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         if (!detailsData) {{
           return;
         }}
-        const sectionTitle = document.createElement('div');
-        sectionTitle.className = 'matrix-tooltip-details-title';
-        sectionTitle.textContent = detailsData.title || 'View details';
-        container.appendChild(sectionTitle);
+        renderDetailsBlock(container, detailsData, true);
+      }}
+
+      function renderDetailsBlock(container, detailsData, isRoot) {{
+        if (!detailsData) return;
+        if (isRoot) {{
+          const sectionTitle = document.createElement('div');
+          sectionTitle.className = 'matrix-tooltip-details-title';
+          sectionTitle.textContent = detailsData.title || 'View details';
+          container.appendChild(sectionTitle);
+        }} else if (detailsData.title) {{
+          const sectionTitle = document.createElement('div');
+          sectionTitle.className = 'matrix-tooltip-section-title';
+          sectionTitle.textContent = detailsData.title;
+          container.appendChild(sectionTitle);
+        }}
         if (detailsData.note) {{
           const note = document.createElement('p');
-          note.className = 'matrix-tooltip-details-note';
+          note.className = isRoot ? 'matrix-tooltip-details-note' : 'matrix-tooltip-section-note';
           note.textContent = detailsData.note;
           container.appendChild(note);
+        }}
+        if (detailsData.type === 'sections') {{
+          (detailsData.sections || []).forEach((section) => {{
+            const sectionContainer = document.createElement('div');
+            sectionContainer.className = 'matrix-tooltip-section';
+            container.appendChild(sectionContainer);
+            renderDetailsBlock(sectionContainer, section, false);
+          }});
+          return;
         }}
         if (detailsData.type === 'table') {{
           const table = document.createElement('table');
@@ -1058,7 +1112,19 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           return;
         }}
         if (detailsData.type === 'bullets') {{
-          renderBulletList(container, detailsData.items || []);
+          const list = document.createElement('ul');
+          (detailsData.items || []).forEach((item) => {{
+            const li = document.createElement('li');
+            li.textContent = item;
+            list.appendChild(li);
+          }});
+          container.appendChild(list);
+          return;
+        }}
+        if (detailsData.type === 'text') {{
+          const paragraph = document.createElement('p');
+          paragraph.textContent = detailsData.text || '';
+          container.appendChild(paragraph);
         }}
       }}
     }})();
@@ -1279,24 +1345,248 @@ def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, A
 
 
 def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: set[str]) -> dict[str, Any]:
-    shared_scaffold = ", ".join(sorted(common_required_h2)) or "(no shared required H2 sections found)"
-    lab_differences = []
+    shared_scaffold = sorted(common_required_h2) or ["(no shared required H2 sections found)"]
+    lab_sections = []
     for lab in labs:
         extra_sections = [section for section in lab["readme"]["actualH2"] if section not in common_required_h2]
-        if extra_sections:
-            lab_differences.append([lab["name"], ", ".join(extra_sections)])
+        lab_sections.append(
+            {
+                "type": "bullets",
+                "title": lab["name"],
+                "note": "Extra H2 sections in this README.",
+                "items": extra_sections or ["(none)"],
+            }
+        )
     return {
         "summary": [
-            "Both READMEs use the same shared H2 scaffold.",
-            "The lab-specific H2 sections are shown in View details.",
+            "Both READMEs share the same H2 scaffold.",
+            "The lab-specific H2 sections are broken out below.",
         ],
         "details": {
-            "type": "table",
+            "type": "sections",
             "title": "H2 scaffold and differences",
-            "headers": ["Lab", "Lab-specific H2 sections"],
-            "rows": lab_differences or [[lab["name"], "(none)"] for lab in labs],
-            "note": f"Shared scaffold: {shared_scaffold}. Keep these sections stable across labs.",
+            "note": "Keep the shared H2 sequence stable. Move lab-specific walkthrough steps into H3 headings.",
+            "sections": [
+                {
+                    "type": "bullets",
+                    "title": "Shared scaffold",
+                    "note": "These H2 sections appear in every compared README.",
+                    "items": shared_scaffold,
+                },
+                *lab_sections,
+                {
+                    "type": "bullets",
+                    "title": "Action",
+                    "items": [
+                        "Keep the shared H2 sequence stable across labs.",
+                        "Move lab-specific walkthrough steps into H3 headings.",
+                    ],
+                },
+            ],
         },
+    }
+
+
+def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not snapshot:
+        return {"available": False, "consistent": False, "phases": []}
+
+    readme_summaries = extract_tests_run_summaries(readme_text)
+    report_phases = snapshot.get("phases", [])
+    comparisons: list[dict[str, Any]] = []
+    all_consistent = bool(report_phases)
+    snapshot_root = snapshot.get("root")
+    for index, phase in enumerate(report_phases):
+        phase_path = phase_artifact_root(snapshot_root, phase)
+        console_summary = extract_tests_run_summary(phase.get("consoleSnippet", ""))
+        readme_summary = readme_summaries[index] if index < len(readme_summaries) else None
+        ctrf_summary = None
+        html_summary = None
+        if phase_path and phase_path.exists():
+            ctrf_artifact = phase_path / "ctrf-report.json"
+            html_artifact = phase_path / "specmatic" / "test" / "html" / "index.html"
+            if ctrf_artifact.exists():
+                ctrf_summary = format_tests_run_summary_from_report_json(ctrf_artifact)
+            if html_artifact.exists():
+                html_summary = format_tests_run_summary_from_html(html_artifact)
+        counts = [
+            parse_tests_run_counts(readme_summary),
+            parse_tests_run_counts(console_summary),
+            ctrf_summary,
+            html_summary,
+        ]
+        present_counts = [item for item in counts if item is not None]
+        consistent = bool(present_counts) and len({tuple(sorted(item.items())) for item in present_counts}) == 1
+        all_consistent = all_consistent and consistent
+        comparisons.append(
+            {
+                "phase": phase.get("name", f"Phase {index + 1}"),
+                "readme": readme_summary or "(missing)",
+                "console": console_summary or "(missing)",
+                "ctrf": format_tests_run_counts_short(ctrf_summary) if ctrf_summary else "(missing)",
+                "html": format_tests_run_counts_short(html_summary) if html_summary else "(missing)",
+                "consistent": consistent,
+            }
+        )
+
+    return {
+        "available": True,
+        "consistent": all_consistent,
+        "phases": comparisons,
+    }
+
+
+def load_lab_report_snapshot(lab_name: str) -> dict[str, Any] | None:
+    snapshot_dir = ROOT / "output" / "labs" / f"{lab_name}-output"
+    report_path = snapshot_dir / "report.json"
+    if not report_path.exists():
+        return None
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["root"] = snapshot_dir
+    return report
+
+
+def extract_tests_run_summaries(readme_text: str) -> list[str]:
+    return re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", readme_text)
+
+
+def extract_tests_run_summary(console_output: str) -> str | None:
+    matches = re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", console_output)
+    return matches[-1] if matches else None
+
+
+def phase_artifact_root(snapshot_root: Any, phase: dict[str, Any]) -> Path | None:
+    if not isinstance(snapshot_root, Path):
+        return None
+    for artifact in phase.get("artifacts", []):
+        href = artifact.get("href")
+        if href:
+            return snapshot_root / Path(href).parts[0]
+    return None
+
+
+def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
+    if not summary_text:
+        return None
+    match = re.search(
+        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
+        summary_text,
+    )
+    if not match:
+        return None
+    return {
+        "tests": int(match.group("tests")),
+        "passed": int(match.group("successes")),
+        "failed": int(match.group("failures")),
+        "skipped": 0,
+        "other": int(match.group("errors")),
+    }
+
+
+def format_tests_run_counts(counts: dict[str, int] | None) -> str:
+    if not counts:
+        return "(missing)"
+    return (
+        f"Tests run: {counts['tests']}, Successes: {counts['passed']}, "
+        f"Failures: {counts['failed']}, Errors: {counts['other']}"
+    )
+
+
+def format_tests_run_counts_short(counts: dict[str, int] | None) -> str:
+    if not counts:
+        return "(missing)"
+    return f"T={counts['tests']} P={counts['passed']} F={counts['failed']} S={counts['skipped']} O={counts['other']}"
+
+
+def format_tests_run_summary_from_report_json(report_path: Path) -> dict[str, int] | None:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    summary = report.get("results", {}).get("summary", {})
+    return {
+        "tests": int(summary.get("tests", 0)),
+        "passed": int(summary.get("passed", 0)),
+        "failed": int(summary.get("failed", 0)),
+        "skipped": int(summary.get("skipped", 0)),
+        "other": int(summary.get("other", 0)),
+    }
+
+
+def format_tests_run_summary_from_html(html_path: Path) -> dict[str, int] | None:
+    html_text = html_path.read_text(encoding="utf-8")
+    try:
+        report = parse_html_embedded_report(html_text)
+    except ValueError:
+        return None
+    summary = report.get("results", {}).get("summary", {})
+    return {
+        "tests": int(summary.get("tests", 0)),
+        "passed": int(summary.get("passed", 0)),
+        "failed": int(summary.get("failed", 0)),
+        "skipped": int(summary.get("skipped", 0)),
+        "other": int(summary.get("other", 0)),
+    }
+
+
+def parse_html_embedded_report(html_text: str) -> dict[str, Any]:
+    match = re.search(r"const report = (\{.*?\});\s*const specmaticConfig =", html_text, re.DOTALL)
+    if not match:
+        raise ValueError("Could not find the embedded Specmatic report payload inside the HTML report.")
+    return json.loads(match.group(1))
+
+
+def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    verdict_items = []
+    for lab in labs:
+        comparisons = lab["testCountConsistency"].get("phases", [])
+        mismatch_phases = [item["phase"] for item in comparisons if not item["consistent"]]
+        if lab["testCountConsistency"].get("consistent"):
+            verdict_items.append(f"{lab['name']}: consistent across {len(comparisons)} report-bearing phase(s).")
+        elif mismatch_phases:
+            verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
+        else:
+            verdict_items.append(f"{lab['name']}: no report data was available to validate.")
+        sections.append(
+            {
+                "type": "table",
+                "title": lab["name"],
+                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase.",
+                "headers": ["Phase", "README", "Console", "CTRF", "HTML", "Status"],
+                "rows": [
+                    [
+                        item["phase"],
+                        item["readme"],
+                        item["console"],
+                        item["ctrf"],
+                        item["html"],
+                        "Match" if item["consistent"] else "Mismatch",
+                    ]
+                    for item in comparisons
+                ] or [["(no report data found)", "(missing)", "(missing)", "(missing)", "(missing)", "Mismatch"]],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "Test count consistency",
+        "note": "The README, console, CTRF JSON, and Specmatic HTML should all describe the same run for each report-bearing phase.",
+        "sections": [
+            {
+                "type": "bullets",
+                "title": "Quick verdict",
+                "items": verdict_items or ["No copied lab report snapshots were available to validate."],
+            },
+            *sections
+        ] if sections else [
+            {
+                "type": "bullets",
+                "title": "Quick verdict",
+                "items": verdict_items or ["No copied lab report snapshots were available to validate."],
+            },
+            {
+                "type": "bullets",
+                "title": "No report data found",
+                "items": ["No copied lab report snapshots were available to validate."],
+            },
+        ],
     }
 
 

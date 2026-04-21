@@ -746,22 +746,101 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
 
 
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
-    readme_text = context.readme_text
-    console_output = strip_ansi(context.command_result.combined_output)
-    normalized_readme = normalize_space(readme_text)
+    has_report_artifacts = (
+        "ctrf-report.json" in context.artifacts
+        or "coverage_report.json" in context.artifacts
+        or first_html_artifact(context.artifacts) is not None
+    )
+    if not has_report_artifacts:
+        return []
+
+    readme_summary = extract_tests_run_summary(context.readme_text)
+    console_summary = extract_tests_run_summary(context.command_result.combined_output)
     assertions: list[dict[str, Any]] = []
 
-    runtime_summary = extract_tests_run_summary(console_output)
-    if runtime_summary is not None:
+    assertions.append(
+        assert_condition(
+            console_summary is not None,
+            "Console output included a test summary block.",
+            "Console output did not include a test summary block. Impact: the README and report counts cannot be compared. Action required: ensure the lab prints a final 'Tests run: ...' summary before exit.",
+            category="console",
+            details=[
+                detail("Console summary", console_summary or "(missing)"),
+                detail("README summary", readme_summary or "(missing)"),
+            ],
+        )
+    )
+    if console_summary is None:
+        return assertions
+
+    assertions.append(
+        assert_equal(
+            readme_summary,
+            console_summary,
+            "README test summary matched the console test summary.",
+            "README test summary did not match the console test summary. Impact: the README is no longer describing the actual runtime result. Action required: update the README test summary block or fix the lab so the console output matches the documented counts.",
+            category="readme",
+            details=[
+                detail("README summary", readme_summary or "(missing)"),
+                detail("Console summary", console_summary),
+            ],
+        )
+    )
+
+    console_counts = parse_console_test_summary(console_summary)
+    if console_counts is None:
+        return assertions
+
+    report_summaries: list[tuple[str, dict[str, int]]] = []
+    ctrf_artifact = context.artifacts.get("ctrf-report.json")
+    if ctrf_artifact and "json" in ctrf_artifact:
+        report_summary = ctrf_artifact["json"].get("results", {}).get("summary", {})
+        report_summaries.append(("CTRF", normalize_report_test_summary(report_summary)))
+
+    html_artifact = first_html_artifact(context.artifacts)
+    if html_artifact is not None:
+        try:
+            html_report = parse_html_embedded_report(html_artifact["text"])
+        except ValueError as exc:
+            assertions.append(
+                assert_condition(
+                    False,
+                    "Embedded Specmatic HTML report contained a parseable summary block.",
+                    "Embedded Specmatic HTML report could not be parsed for its summary block.",
+                    category="artifacts",
+                    details=[detail("Reason", str(exc))],
+                )
+            )
+        else:
+            report_summaries.append(("Specmatic HTML", normalize_report_test_summary(html_report["results"]["summary"])))
+
+    for label, report_counts in report_summaries:
+        console_counts_comparable = {key: console_counts[key] for key in ("tests", "passed", "failed", "other")}
+        report_counts_comparable = {key: report_counts[key] for key in ("tests", "passed", "failed", "other")}
         assertions.append(
-            assert_condition(
-                normalize_space(runtime_summary) in normalized_readme,
-                "README includes the exact observed runtime test summary.",
-                "README does not include the exact observed runtime test summary.",
-                category="readme",
+            assert_equal(
+                report_counts_comparable,
+                console_counts_comparable,
+                f"{label} summary matched the console test counts.",
+                f"{label} summary did not match the console test counts. Impact: the generated {label} artifact is out of sync with the observed runtime counts. Action required: regenerate the lab so the console output and report artifacts are produced from the same execution.",
+                category="report",
                 details=[
-                    detail("Observed runtime summary", runtime_summary),
-                    detail("Seen in README", normalize_space(runtime_summary) in normalized_readme),
+                    detail_table(
+                        "Test count comparison",
+                        headers=["Source", "Tests", "Passed/Successes", "Failed", "Skipped", "Other/Errors"],
+                        rows=[
+                            ["Console", console_counts["tests"], console_counts["passed"], console_counts["failed"], console_counts["skipped"], console_counts["other"]],
+                            [label, report_counts["tests"], report_counts["passed"], report_counts["failed"], report_counts["skipped"], report_counts["other"]],
+                        ],
+                    ),
+                    detail(
+                        "Impact",
+                        f"The README, console output, and {label} report no longer describe the same run.",
+                    ),
+                    detail(
+                        "Action required",
+                        "Re-run the lab, confirm the README documents the same final counts, and rebuild the reports from the refreshed artifacts.",
+                    ),
                 ],
             )
         )
@@ -858,10 +937,40 @@ def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:
-    match = re.search(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", console_output)
+    clean_output = strip_ansi(console_output)
+    match = re.search(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", clean_output)
     if not match:
         return None
     return match.group(0)
+
+
+def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | None:
+    if summary_text is None:
+        return None
+    clean_summary = strip_ansi(summary_text)
+    match = re.search(
+        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
+        clean_summary,
+    )
+    if not match:
+        return None
+    return {
+        "tests": int(match.group("tests")),
+        "passed": int(match.group("successes")),
+        "failed": int(match.group("failures")),
+        "skipped": 0,
+        "other": int(match.group("errors")),
+    }
+
+
+def normalize_report_test_summary(summary: dict[str, Any]) -> dict[str, int]:
+    return {
+        "tests": int(summary.get("tests", 0)),
+        "passed": int(summary.get("passed", 0)),
+        "failed": int(summary.get("failed", 0)),
+        "skipped": int(summary.get("skipped", 0)),
+        "other": int(summary.get("other", 0)),
+    }
 
 
 def extract_operations(context: ValidationContext) -> list[dict[str, Any]]:
