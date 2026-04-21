@@ -116,12 +116,12 @@ def main() -> int:
     mock_health_url = f"http://127.0.0.1:{mock_port}/actuator/health"
     request_url = f"{ui_url}/test?RequestQuery=books"
 
-    print("Starting camelCase mock and UI services...", flush=True)
-    up_code = run_command(runtime.command(COMPOSE_FILE, "up", "-d", "camelCaseService", "ui"))
-    if up_code != 0:
-        return up_code
-
     try:
+        print("Starting camelCase mock and UI services...", flush=True)
+        up_code = run_command(runtime.command(COMPOSE_FILE, "up", "-d", "camelCaseService", "ui"))
+        if up_code != 0:
+            return up_code
+
         print("Waiting for UI and mock health endpoints...", flush=True)
         wait_for_url(ui_url)
         wait_for_url(mock_health_url)
