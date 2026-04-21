@@ -8,10 +8,18 @@ import sys
 import time
 from urllib import error, request
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from lablib.compose_runtime import ComposeRuntime, create_compose_runtime
 
 MODE_FILE = Path.cwd() / ".labs-tests-mode"
 BUILD_DIR = Path.cwd() / "build" / "quick-start-mock"
-CONSUMER_URL = "http://127.0.0.1:8081"
+COMPOSE_FILE = Path.cwd() / "docker-compose.yaml"
+CONSUMER_CONTAINER_PORT = 8081
+MOCK_CONTAINER_PORT = 9100
+CONTAINER_NAMES = ["quick-start-mock-consumer", "quick-start-mock-server"]
 
 
 def run_command(command: list[str]) -> int:
@@ -49,31 +57,52 @@ def fetch_text(url: str) -> dict[str, object]:
         return {"status": None, "body": "", "error": str(exc)}
 
 
-def run_scenario(mode: str) -> dict[str, object]:
+def build_runtime() -> ComposeRuntime:
+    return create_compose_runtime(
+        COMPOSE_FILE,
+        {
+            "consumer": [CONSUMER_CONTAINER_PORT],
+            "mock": [MOCK_CONTAINER_PORT],
+        },
+        prefix="quick-start-mock",
+    )
+
+
+def print_runtime_notice(runtime: ComposeRuntime) -> None:
+    print(f"[runtime] {runtime.runtime_notice()}", flush=True)
+
+
+def cleanup_stale_containers() -> None:
+    subprocess.run(["docker", "rm", "-f", *CONTAINER_NAMES], check=False, text=True, capture_output=True)
+
+
+def run_scenario(mode: str, runtime: ComposeRuntime) -> dict[str, object]:
+    consumer_url = f"http://127.0.0.1:{runtime.host_port('consumer', CONSUMER_CONTAINER_PORT)}"
+    mock_url = f"http://127.0.0.1:{runtime.host_port('mock', MOCK_CONTAINER_PORT)}"
     if mode == "mock-running":
         print("Starting consumer and mock services...", flush=True)
-        up_code = run_command(["docker", "compose", "--profile", "mock", "up", "-d", "consumer", "mock"])
+        up_code = run_command(runtime.command(COMPOSE_FILE, "--profile", "mock", "up", "-d", "consumer", "mock"))
         if up_code != 0:
             raise RuntimeError("Failed to start consumer and mock services.")
-        wait_for_url(CONSUMER_URL)
-        wait_for_url("http://127.0.0.1:9100/actuator/health")
+        wait_for_url(consumer_url)
+        wait_for_url(f"{mock_url}/actuator/health")
         results = {
             "mode": mode,
-            "pet1": fetch_text("http://127.0.0.1:9100/pets/1"),
-            "pet2_first": fetch_text("http://127.0.0.1:9100/pets/2"),
-            "pet2_second": fetch_text("http://127.0.0.1:9100/pets/2"),
-            "pet_abc": fetch_text("http://127.0.0.1:9100/pets/abc"),
+            "pet1": fetch_text(f"{mock_url}/pets/1"),
+            "pet2_first": fetch_text(f"{mock_url}/pets/2"),
+            "pet2_second": fetch_text(f"{mock_url}/pets/2"),
+            "pet_abc": fetch_text(f"{mock_url}/pets/abc"),
         }
         return results
 
     print("Starting consumer without the mock...", flush=True)
-    up_code = run_command(["docker", "compose", "up", "-d", "consumer"])
+    up_code = run_command(runtime.command(COMPOSE_FILE, "up", "-d", "consumer"))
     if up_code != 0:
         raise RuntimeError("Failed to start the consumer service.")
-    wait_for_url(CONSUMER_URL)
+    wait_for_url(consumer_url)
     return {
         "mode": mode,
-        "pet1": fetch_text("http://127.0.0.1:9100/pets/1"),
+        "pet1": fetch_text(f"{mock_url}/pets/1"),
     }
 
 
@@ -86,12 +115,15 @@ def main() -> int:
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR, ignore_errors=True)
 
+    cleanup_stale_containers()
+    runtime = build_runtime()
+    print_runtime_notice(runtime)
     try:
-        results = run_scenario(mode)
+        results = run_scenario(mode, runtime)
         BUILD_DIR.mkdir(parents=True, exist_ok=True)
         (BUILD_DIR / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
         logs = subprocess.run(
-            ["docker", "compose", "--profile", "mock", "logs", "--no-color"],
+            runtime.command(COMPOSE_FILE, "--profile", "mock", "logs", "--no-color"),
             check=False,
             text=True,
             capture_output=True,
@@ -113,7 +145,7 @@ def main() -> int:
         return 0
     finally:
         print("Stopping compose services for quick-start-mock...", flush=True)
-        run_command(["docker", "compose", "--profile", "mock", "down", "-v"])
+        run_command(runtime.command(COMPOSE_FILE, "--profile", "mock", "down", "-v"))
 
 
 if __name__ == "__main__":

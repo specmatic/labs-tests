@@ -85,6 +85,8 @@ jobs:
           print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")
           print("| --- | --- | ---: | ---: | ---: | ---: |")
           for lab in payload.get("labs", []):
+              status = lab.get("status", "unknown")
+              status_symbol = "✅" if status == "passed" else "❌" if status == "failed" else status
               failures = "n/a"
               validations = "n/a"
               for item in lab.get("summary", []):
@@ -93,7 +95,7 @@ jobs:
                   if item.get("label") == "Validations":
                       validations = item.get("value", "n/a")
               print(
-                  f"| {lab.get('name', 'unknown')} | {lab.get('status', 'unknown')} | "
+                  f"| {lab.get('name', 'unknown')} | {status_symbol} | "
                   f"{lab.get('durationSeconds', 'n/a')} | {lab.get('exitCode', 'n/a')} | "
                   f"{failures} | {validations} |"
               )

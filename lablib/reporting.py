@@ -37,10 +37,19 @@ def render_html(payload: dict[str, Any]) -> str:
     )
     phases = "".join(render_phase(phase) for phase in phases_with_ids)
     failure_index_html = render_failure_index(failed_assertions)
-    consolidated_href = escape(payload.get("navigation", {}).get("consolidatedReportHref", "../../output/consolidated-report.html"))
-    back_link_html = (
-        f'<p class="back-link"><a href="{consolidated_href}">Back to consolidated report</a></p>'
+    consolidated_href = escape(
+        payload.get(
+            "navigation",
+            {},
+        ).get("consolidatedReportHref", "../../output/consolidated-report/consolidated-report.html")
     )
+    comparison_href = escape(
+        payload.get(
+            "navigation",
+            {},
+        ).get("comparisonReportHref", "")
+    )
+    report_nav_html = render_report_nav(consolidated_href, comparison_href)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -194,6 +203,17 @@ def render_html(payload: dict[str, Any]) -> str:
       margin-top: 14px;
       margin-bottom: 0;
     }}
+    .report-nav {{
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }}
+    .report-nav a {{
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
     .back-link a {{
       color: var(--accent);
       text-decoration: none;
@@ -339,6 +359,9 @@ def render_html(payload: dict[str, Any]) -> str:
     .fail-text {{
       color: var(--fail);
     }}
+    .warn-text {{
+      color: var(--warn);
+    }}
     .artifacts {{
       display: flex;
       flex-wrap: wrap;
@@ -373,6 +396,10 @@ def render_html(payload: dict[str, Any]) -> str:
       margin-top: 10px;
       margin-bottom: 12px;
     }}
+    .warnings-list {{
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }}
   </style>
 </head>
 <body>
@@ -382,7 +409,7 @@ def render_html(payload: dict[str, Any]) -> str:
       <h1>{title}</h1>
       <p>{escape(payload['lab']['description'])}</p>
       <p class="meta">Generated at {generated_at}</p>
-      {back_link_html}
+      {report_nav_html}
       <div class="grid">
         <section class="panel">
           <h2>Summary</h2>
@@ -403,6 +430,7 @@ def render_html(payload: dict[str, Any]) -> str:
         <button type="button" onclick="toggleAllDetails(true)">Expand All</button>
         <button type="button" onclick="toggleAllDetails(false)">Collapse All</button>
       </div>
+      {report_nav_html}
     </section>
     {phases}
   </main>
@@ -446,6 +474,13 @@ def render_phase(phase: dict[str, Any]) -> str:
     if phase.get("fixSummary"):
         fix_items = "".join(f"<li>{escape(item)}</li>" for item in phase["fixSummary"])
         fix_html = f"<h3>What Changed</h3><ul>{fix_items}</ul>"
+    warnings_html = ""
+    if phase.get("warnings"):
+        warning_items = "".join(f"<li class=\"warn-text\">{escape(item)}</li>" for item in phase["warnings"])
+        warnings_html = (
+            "<h3>Warnings</h3>"
+            f"<ul class=\"warnings-list\">{warning_items}</ul>"
+        )
 
     return (
         f"<details class=\"panel phase-block {phase_css}\">"
@@ -454,12 +489,20 @@ def render_phase(phase: dict[str, Any]) -> str:
         f"<p>{escape(phase['description'])}</p>"
         f"{command_html}"
         f"{fix_html}"
+        f"{warnings_html}"
         f"{category_summary}"
         f"{assertions}"
         f"{artifacts_html}"
         f"{console_html}"
         f"</details>"
     )
+
+
+def render_report_nav(consolidated_href: str, comparison_href: str) -> str:
+    links = [f'<a href="{consolidated_href}">Back to consolidated report</a>']
+    if comparison_href:
+        links.append(f'<a href="{comparison_href}">Open comparison report</a>')
+    return f'<div class="report-nav">{"".join(links)}</div>'
 
 
 def render_assertion(assertion: dict[str, Any]) -> str:

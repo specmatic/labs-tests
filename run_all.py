@@ -6,9 +6,8 @@ from html import escape
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
 import sys
+import shutil
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
@@ -17,17 +16,32 @@ if str(ROOT) not in sys.path:
 
 from lablib.command_runner import run_command
 from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
-from lablib.workspace_setup import run_setup
+from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref
+from lablib.workspace_setup import (
+    run_setup,
+    setup_failure_action_lines,
+    setup_failure_error_lines,
+)
 
 
 OUTPUT_DIR = ROOT / "output"
-SETUP_OUTPUT_PATH = OUTPUT_DIR / "setup-output.json"
-CONSOLIDATED_JSON_PATH = OUTPUT_DIR / "consolidated-report.json"
-CONSOLIDATED_HTML_PATH = OUTPUT_DIR / "consolidated-report.html"
+LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
+CONSOLIDATED_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
+SETUP_OUTPUT_PATH = CONSOLIDATED_OUTPUT_DIR / "setup-output.json"
+CONSOLIDATED_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.json"
+CONSOLIDATED_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.html"
+LEGACY_CONSOLIDATED_JSON_PATH = OUTPUT_DIR / "consolidated-report.json"
+LEGACY_CONSOLIDATED_HTML_PATH = OUTPUT_DIR / "consolidated-report.html"
+LEGACY_CONSOLIDATED_REPORT_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "report.json"
+LEGACY_CONSOLIDATED_REPORT_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "report.html"
+LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
+LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run all available lab harnesses and build a consolidated report.")
+    parser = argparse.ArgumentParser(
+        description="Run all available lab harnesses and build the consolidated and comparison reports."
+    )
     parser.add_argument(
         "--refresh-report",
         action="store_true",
@@ -53,12 +67,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Required with --refresh-labs when ../labs has local changes. Discards tracked and untracked changes.",
     )
+    parser.add_argument(
+        "--labs",
+        nargs="+",
+        help="Optional subset of lab folder names to run and include in the consolidated reports.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    # `run_all.py` owns the destructive cleanup so one end-to-end run always starts
+    # from a clean generated-output tree. `rebuild_reports.py` deliberately skips this
+    # so the existing lab snapshots remain available for report regeneration.
+    clean_output_tree()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    LABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     setup_payload: dict[str, Any] | None = None
     if args.refresh_report:
@@ -70,6 +95,7 @@ def main() -> int:
             refresh_labs=args.refresh_labs,
             target_branch=args.branch,
             force=args.force,
+            lab_names=args.labs,
         )
         setup_payload = {
             "status": setup_result.status,
@@ -81,7 +107,13 @@ def main() -> int:
         }
         SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
         if setup_result.status != "passed":
-            print(f"Workspace setup failed. Details: {SETUP_OUTPUT_PATH}")
+            print()
+            for line in setup_failure_error_lines(setup_result.commands):
+                print(line)
+            print()
+            for line in setup_failure_action_lines(setup_result.commands):
+                print(line)
+            print(f"Setup details: {SETUP_OUTPUT_PATH}")
             write_consolidated_report(
                 {
                     "generatedAt": datetime.now(UTC).isoformat(),
@@ -98,7 +130,8 @@ def main() -> int:
             return 1
 
     labs_git_ref = upstream_labs_git_ref()
-    labs = discover_labs()
+    all_labs = discover_labs()
+    labs = filter_labs(all_labs, args.labs)
     print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
 
     lab_results: list[dict[str, Any]] = []
@@ -114,8 +147,8 @@ def main() -> int:
             stream_output=True,
             stream_prefix=f"[all:{lab}]",
         )
-        report_json_path = ROOT / lab / "output" / "report.json"
-        report_html_path = ROOT / lab / "output" / "report.html"
+        report_json_path, report_html_path = snapshot_lab_output(lab)
+        copy_lab_snapshot(lab)
         lab_report = load_json(report_json_path) if report_json_path.exists() else None
         duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
         lab_results.append(
@@ -131,31 +164,16 @@ def main() -> int:
             }
         )
 
-    passed = sum(1 for item in lab_results if item["status"] == "passed")
-    failed = len(lab_results) - passed
-    total_runtime_seconds = round(sum(item.get("durationSeconds", 0.0) for item in lab_results), 2)
-    total_failures = sum(summary_value(item, "Failures") for item in lab_results)
-    total_tests = sum(summary_value(item, "Validations") for item in lab_results)
-    consolidated = {
-        "generatedAt": datetime.now(UTC).isoformat(),
-        "status": "passed" if failed == 0 else "failed",
-        "summary": [
-            {"label": "Labs discovered", "value": len(lab_results)},
-            {"label": "Labs passed", "value": passed},
-            {"label": "Labs failed", "value": failed},
-            {"label": "Total run time (s)", "value": total_runtime_seconds},
-            {"label": "Total failures", "value": total_failures},
-            {"label": "Total tests", "value": total_tests},
-        ],
-        "setup": setup_payload,
-        "environment": {
-            "specmaticVersion": detect_shared_specmatic_version(lab_results),
-            "labsGitRef": labs_git_ref,
-        },
-        "labs": lab_results,
+    consolidated = build_consolidated_payload(
+        setup_payload=setup_payload,
+        labs_git_ref=labs_git_ref,
+        lab_results=lab_results,
+    )
+    consolidated["navigation"] = {
+        "comparisonReportHref": "labs-comparison.html",
     }
     write_consolidated_report(consolidated)
-    generate_labs_comparison(ROOT)
+    generate_labs_comparison(ROOT, labs)
     print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
@@ -171,61 +189,83 @@ def discover_labs() -> list[str]:
     )
 
 
+def filter_labs(all_labs: list[str], selected_labs: list[str] | None) -> list[str]:
+    if not selected_labs:
+        return all_labs
+    selected_set = set(selected_labs)
+    invalid = sorted(selected_set - set(all_labs))
+    if invalid:
+        raise SystemExit(f"Unknown lab(s): {', '.join(invalid)}")
+    return [lab for lab in all_labs if lab in selected_set]
+
+
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def report_duration_seconds(report: dict[str, Any] | None) -> float:
-    if not report:
-        return 0.0
-    return sum(phase.get("command", {}).get("durationSeconds", 0.0) for phase in report.get("phases", []))
-
-
-def summary_value(lab: dict[str, Any], label: str) -> int:
-    for item in lab.get("summary", []):
-        if item.get("label") == label:
-            try:
-                return int(item.get("value", 0))
-            except (TypeError, ValueError):
-                return 0
-    return 0
-
-
-def extract_specmatic_version(report_json_path: Path) -> str:
-    output_dir = report_json_path.parent
-    for command_log in sorted(output_dir.glob("*/command.log")):
-        text = command_log.read_text(encoding="utf-8", errors="ignore")
-        enterprise_match = re.search(r"Specmatic Enterprise v([^\s]+)", text)
-        core_match = re.search(r"Specmatic Core v([^\s]+)", text)
-        versions: list[str] = []
-        if enterprise_match:
-            versions.append(f"Enterprise {enterprise_match.group(1)}")
-        if core_match:
-            versions.append(f"Core {core_match.group(1)}")
-        if versions:
-            return " / ".join(versions)
-    return "n/a"
-
-
-def upstream_labs_git_ref() -> str:
-    labs_dir = ROOT.parent / "labs"
-    try:
-        branch = subprocess.check_output(
-            ["git", "-C", str(labs_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-            text=True,
-        ).strip()
-        short_sha = subprocess.check_output(
-            ["git", "-C", str(labs_dir), "rev-parse", "--short", "HEAD"],
-            text=True,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "n/a"
-    return f"{branch}@{short_sha}"
-
-
 def write_consolidated_report(payload: dict[str, Any]) -> None:
+    CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for legacy_path in (
+        LEGACY_CONSOLIDATED_JSON_PATH,
+        LEGACY_CONSOLIDATED_HTML_PATH,
+        LEGACY_CONSOLIDATED_REPORT_JSON_PATH,
+        LEGACY_CONSOLIDATED_REPORT_HTML_PATH,
+    ):
+        if legacy_path.exists():
+            legacy_path.unlink()
     CONSOLIDATED_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     CONSOLIDATED_HTML_PATH.write_text(render_consolidated_html(payload), encoding="utf-8")
+
+
+def snapshot_lab_output(lab: str) -> tuple[Path, Path]:
+    target_dir = LABS_OUTPUT_DIR / f"{lab}-output"
+    return target_dir / "report.json", target_dir / "report.html"
+
+
+def copy_lab_snapshot(lab: str) -> None:
+    source_dir = ROOT / lab / "output"
+    target_dir = LABS_OUTPUT_DIR / f"{lab}-output"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    if source_dir.exists():
+        shutil.copytree(source_dir, target_dir)
+        rewrite_snapshot_back_link(target_dir / "report.html")
+
+
+def rewrite_snapshot_back_link(report_path: Path) -> None:
+    if not report_path.exists():
+        return
+    text = report_path.read_text(encoding="utf-8")
+    source_hrefs = (
+        "../../output/consolidated-report/consolidated-report.html",
+        "../../output/consolidated-report/report.html",
+    )
+    target_href = os.path.relpath(CONSOLIDATED_HTML_PATH, start=report_path.parent)
+    for source_href in source_hrefs:
+        if source_href in text:
+            report_path.write_text(text.replace(source_href, target_href), encoding="utf-8")
+            return
+
+
+def clean_output_tree() -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for path in (
+        LABS_OUTPUT_DIR,
+        CONSOLIDATED_OUTPUT_DIR,
+        LEGACY_CONSOLIDATED_JSON_PATH,
+        LEGACY_CONSOLIDATED_HTML_PATH,
+        LEGACY_CONSOLIDATED_REPORT_JSON_PATH,
+        LEGACY_CONSOLIDATED_REPORT_HTML_PATH,
+        LEGACY_COMPARISON_JSON_PATH,
+        LEGACY_COMPARISON_HTML_PATH,
+    ):
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+    for legacy_dir in OUTPUT_DIR.iterdir():
+        if legacy_dir.is_dir() and legacy_dir.name.endswith("-output"):
+            shutil.rmtree(legacy_dir)
 
 
 def detect_shared_specmatic_version(lab_results: list[dict[str, Any]]) -> str:
@@ -269,6 +309,8 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
         f"<p><strong>Labs git ref:</strong> {escape(str(environment.get('labsGitRef', 'n/a')))}</p>"
         "</footer>"
     )
+    comparison_href = escape(payload.get("navigation", {}).get("comparisonReportHref", "labs-comparison.html"))
+    report_nav_html = f'<p class="report-nav"><a href="{comparison_href}">Open comparison report</a></p>' if comparison_href else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -297,6 +339,14 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     }}
     .footer-panel p:last-child {{
       margin-bottom: 0;
+    }}
+    .report-nav {{
+      margin: 10px 0 0;
+    }}
+    .report-nav a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
     }}
     .status {{
       display: inline-block;
@@ -329,6 +379,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     <section class="panel">
       <div class="status">{escape(payload['status'].upper())}</div>
       <h1>Consolidated Labs Report</h1>
+      {report_nav_html}
       <ul>{summary_items}</ul>
     </section>
     {setup_html}

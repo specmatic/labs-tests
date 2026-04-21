@@ -50,8 +50,10 @@ def run_setup(
     refresh_labs: bool = False,
     target_branch: str = "main",
     force: bool = False,
+    lab_names: list[str] | None = None,
 ) -> SetupResult:
     commands: list[dict[str, Any]] = []
+    selected_labs = set(lab_names or LAB_NAMES)
 
     if not UPSTREAM_LABS.exists():
         clone_result = execute(
@@ -111,6 +113,8 @@ def run_setup(
             )
 
     for lab_name in LAB_NAMES:
+        if lab_name not in selected_labs:
+            continue
         upstream_lab_path = UPSTREAM_LABS / lab_name
         compose_file = upstream_lab_path / "docker-compose.yaml"
         if not compose_file.exists():
@@ -145,6 +149,69 @@ def run_setup(
         upstream_labs_path=str(UPSTREAM_LABS),
         commands=commands,
     )
+
+
+def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
+    for command in reversed(commands):
+        if command.get("exitCode", 0) == 0:
+            continue
+        text = "\n".join(
+            str(part)
+            for part in (
+                command.get("summary", ""),
+                command.get("stdout", ""),
+                command.get("stderr", ""),
+            )
+            if part
+        )
+        if "docker.sock" in text or "failed to connect to the docker API" in text or "Cannot connect to the Docker daemon" in text:
+            return (
+                "Docker is not running or the Docker socket is unavailable. "
+                "Start Docker Desktop, or otherwise bring up the Docker daemon so "
+                "the socket at ~/.docker/run/docker.sock exists, then rerun the labs."
+            )
+        if "No services to build" in text:
+            return (
+                "Docker Compose could not find any buildable services for the selected labs. "
+                "Check the selected lab list and the upstream docker-compose files, then rerun."
+            )
+        if text.strip():
+            return (
+                "Workspace setup failed during: "
+                f"{command.get('summary', 'an unknown setup step')}. "
+                "Inspect output/consolidated-report/setup-output.json for the full command log and rerun after fixing the issue."
+            )
+    return "Workspace setup failed. Inspect output/consolidated-report/setup-output.json for details."
+
+
+def setup_failure_action(commands: list[dict[str, Any]]) -> str:
+    for command in reversed(commands):
+        if command.get("exitCode", 0) == 0:
+            continue
+        text = "\n".join(
+            str(part)
+            for part in (
+                command.get("summary", ""),
+                command.get("stdout", ""),
+                command.get("stderr", ""),
+            )
+            if part
+        )
+        if "docker.sock" in text or "failed to connect to the docker API" in text or "Cannot connect to the Docker daemon" in text:
+            return "Start Docker Desktop, or otherwise bring up the Docker daemon so the socket at ~/.docker/run/docker.sock exists, then rerun the labs."
+        if "No services to build" in text:
+            return "Check the selected lab list and the upstream docker-compose files, then rerun."
+        if text.strip():
+            return "Inspect output/consolidated-report/setup-output.json for the full command log and rerun after fixing the issue."
+    return "Inspect output/consolidated-report/setup-output.json for details."
+
+
+def setup_failure_error_lines(commands: list[dict[str, Any]]) -> list[str]:
+    return [f"[error] {summarize_setup_failure(commands)}"]
+
+
+def setup_failure_action_lines(commands: list[dict[str, Any]]) -> list[str]:
+    return ["[Action required]", setup_failure_action(commands)]
 
 
 def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[dict[str, Any]]:

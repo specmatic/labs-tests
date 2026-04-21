@@ -10,7 +10,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from lablib.workspace_setup import ROOT as WORKSPACE_ROOT
-from lablib.workspace_setup import run_setup
+from lablib.workspace_setup import (
+    run_setup,
+    setup_failure_action_lines,
+    setup_failure_error_lines,
+)
 
 
 OUTPUT_DIR = WORKSPACE_ROOT / "output"
@@ -63,6 +67,13 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"Setup status: {result.status}")
+    if result.status != "passed":
+        print()
+        for line in setup_failure_error_lines(result.commands):
+            print(line)
+        print()
+        for line in setup_failure_action_lines(result.commands):
+            print(line)
     print(f"Wrote setup details to {OUTPUT_PATH}")
     return 0 if result.status == "passed" else 1
 

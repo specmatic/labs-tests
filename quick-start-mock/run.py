@@ -21,6 +21,7 @@ from lablib.scaffold import (
     docker_compose_down,
     run_lab,
 )
+from lablib.compose_runtime import RUNTIME_NOTICE
 
 
 UPSTREAM_LAB = ROOT.parent / "labs" / "quick-start-mock"
@@ -108,6 +109,7 @@ def build_lab_spec() -> LabSpec:
         ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
+        runtime_warnings=(RUNTIME_NOTICE,),
     )
 
 

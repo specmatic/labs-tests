@@ -68,22 +68,16 @@ To force `../labs` back to the latest `main` before refreshing Docker images:
 python3 setup.py --refresh-labs --force
 ```
 
-Run every available lab harness from the repo root and build a consolidated report with:
+Run every available lab harness from the repo root and build the consolidated and comparison reports with:
 
 ```bash
 python3 run_all.py
 ```
 
-Refresh all available lab reports and the consolidated report from existing captured artifacts without rerunning labs:
+Rebuild the consolidated and comparison reports from the existing lab snapshots without rerunning labs:
 
 ```bash
-python3 run_all.py --refresh-report
-```
-
-Generate a root-level similarities/differences report across all automated labs:
-
-```bash
-python3 compare_labs.py
+python3 rebuild_reports.py
 ```
 
 Refresh an individual lab report from previously captured artifacts without rerunning the lab:
@@ -186,11 +180,28 @@ python3 response-templating/run.py --refresh-report
 
 Outputs are written to:
 
-- `output/consolidated-report.json`
-- `output/consolidated-report.html`
-- `output/labs-comparison.json`
-- `output/labs-comparison.html`
-- `output/setup-output.json`
+- `output/consolidated-report/consolidated-report.json`
+- `output/consolidated-report/consolidated-report.html`
+- `output/consolidated-report/labs-comparison.json`
+- `output/consolidated-report/labs-comparison.html`
+- `output/consolidated-report/setup-output.json`
+- `output/labs/<lab-name>-output/` for each lab run
+
+Each lab’s `output/` directory is copied into `output/labs/<lab-name>-output/` after the run completes. The consolidated report uses those copied folders so the links remain stable even after the live lab output is cleaned up or refreshed.
+
+`run_all.py` starts by clearing the generated `output/labs/` and `output/consolidated-report/` folders before regenerating reports, so stale files from earlier runs do not leak into a new report set. `rebuild_reports.py` does not clean the output tree; it only refreshes the consolidated and comparison reports from the existing lab snapshots.
+
+Each individual lab run also clears its own `<lab>/output/` directory before a normal run starts. Refresh-only runs skip that cleanup so they can rebuild from the saved artifacts already on disk.
+
+Failure messages should be explicit and actionable.
+
+When a command or validation fails, the message should always say:
+
+- what failed
+- what the impact is
+- what action is needed to fix it
+
+Prefer concrete paths, commands, and missing artifacts over vague summaries or raw log excerpts.
 
 GitHub Actions workflow:
 
@@ -198,5 +209,5 @@ GitHub Actions workflow:
 - runs `python3 run_all.py --refresh-labs --force`
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
 - uses a 30-minute timeout for the workflow job and the main lab execution step
-- publishes a GitHub job summary based on `output/consolidated-report.json`
+- publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
 - uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact

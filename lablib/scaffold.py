@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -18,6 +19,10 @@ CONSOLE_COVERAGE_ROW_RE = re.compile(
     r"^\|\s*(?P<coverage>\d+%)\s+\|\s*(?P<path>/[^|]+?)\s+\|\s*(?P<method>[A-Z]+)\s+\|\s*(?P<response>\d+)\s+\|\s*(?P<count>\d+)\s+\|\s*(?P<status>[^|]+?)\s+\|$"
 )
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
+SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
+IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
+REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
 
 @dataclass
@@ -65,9 +70,12 @@ class LabSpec:
     phases: tuple[PhaseSpec, ...]
     common_artifact_specs: tuple[ArtifactSpec, ...] = ()
     readme_structure: ReadmeStructureSpec | None = None
-    setup_failure_message: str = "Workspace setup failed. See setup-output.json from the root setup command for details."
+    setup_failure_message: str = (
+        "Workspace setup failed. See output/consolidated-report/setup-output.json from the root setup command for details."
+    )
     clear_reports: Callable[["LabSpec"], None] | None = None
     post_phase_cleanup: Callable[["LabSpec"], None] | None = None
+    runtime_warnings: tuple[str, ...] = ()
 
 
 @dataclass
@@ -112,12 +120,14 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 
 
 def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
-    spec.output_dir.mkdir(parents=True, exist_ok=True)
     readme_text = spec.readme_path.read_text(encoding="utf-8")
     original_files = {
         alias: path.read_text(encoding="utf-8") if path.exists() else None
         for alias, path in spec.files.items()
     }
+    if not args.refresh_report:
+        clean_lab_output_dir(spec)
+    spec.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.refresh_report:
         print("Refreshing the report from existing captured artifacts...")
@@ -158,9 +168,44 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     )
     write_json(spec.output_dir / "report.json", report)
     write_html(spec.output_dir / "report.html", report)
+    snapshot_lab_output(spec)
     print(f"Wrote JSON report to {spec.output_dir / 'report.json'}")
     print(f"Wrote HTML report to {spec.output_dir / 'report.html'}")
     return 0 if report["status"] == "passed" else 1
+
+
+def clean_lab_output_dir(spec: LabSpec) -> None:
+    if spec.output_dir.exists():
+        shutil.rmtree(spec.output_dir, ignore_errors=True)
+
+
+def snapshot_lab_output(spec: LabSpec) -> Path:
+    target_dir = spec.root / "output" / "labs" / f"{spec.name}-output"
+    legacy_dir = spec.root / "output" / f"{spec.name}-output"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    if spec.output_dir.exists():
+        shutil.copytree(spec.output_dir, target_dir)
+        rewrite_consolidated_report_link(target_dir / "report.html", spec.root)
+    if legacy_dir.exists():
+        shutil.rmtree(legacy_dir)
+    return target_dir
+
+
+def rewrite_consolidated_report_link(report_path: Path, root: Path) -> None:
+    if not report_path.exists():
+        return
+    text = report_path.read_text(encoding="utf-8")
+    source_hrefs = (
+        "../../output/consolidated-report/consolidated-report.html",
+        "../../output/consolidated-report/report.html",
+    )
+    target_href = os.path.relpath(root / "output" / "consolidated-report" / "consolidated-report.html", start=report_path.parent)
+    target_href = target_href.replace("output/", "", 1) if target_href.startswith("output/") else target_href
+    for source_href in source_hrefs:
+        if source_href in text:
+            report_path.write_text(text.replace(source_href, target_href), encoding="utf-8")
+            return
 
 
 def docker_compose_down(spec: LabSpec, *compose_args: str) -> CommandResult:
@@ -191,6 +236,14 @@ def execute_phase(
     result = run_command(spec.command, spec.upstream_lab, stream_output=True, stream_prefix=f"[{phase_dir_name(phase)}]")
     try:
         artifacts = capture_artifacts(spec, phase, target_dir)
+    except FileNotFoundError as exc:
+        write_text(target_dir / "command.log", result.combined_output)
+        command_info = {
+            "exitCode": result.exit_code,
+            "durationSeconds": round(result.duration_seconds, 2),
+        }
+        phase_result = build_missing_artifact_phase_result(spec, phase, target_dir, command_info, exc)
+        return phase_result
     finally:
         if spec.post_phase_cleanup is not None:
             spec.post_phase_cleanup(spec)
@@ -286,6 +339,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         assertions.extend(phase.extra_assertions(context))
 
     assertions.extend(evaluate_readme_assertions(context))
+    assertions.extend(evaluate_readme_console_structure(context))
     assertions.extend(evaluate_runtime_summary_drift(context))
     if phase.include_readme_structure_checks and spec.readme_structure is not None:
         assertions.extend(validate_readme_structure(context.readme_text, spec.readme_structure))
@@ -304,6 +358,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         "artifacts": build_artifact_links(spec, phase, context.target_dir),
         "consoleSnippet": shorten_console_output(command_result),
         "fixSummary": list(phase.fix_summary),
+        "warnings": build_warning_messages(spec, phase),
     }
 
 
@@ -506,13 +561,14 @@ def build_missing_artifact_phase_result(
         "assertions": [
             {
                 "status": "failed",
-                "message": "Refresh-only mode could not rebuild this phase because saved artifacts are incomplete.",
+                "message": "This phase could not be reported because the required artifacts were not generated.",
                 "category": "artifacts",
                 "details": [
+                    detail("Impact", "The phase cannot be validated or rebuilt until the missing artifacts are generated."),
                     detail("Reason", str(error)),
                     detail(
                         "How to fix",
-                        "Rerun this lab without --refresh-report to regenerate the missing artifacts, then refresh the report again.",
+                        f"Rerun `python3 {spec.name}/run.py` without `--refresh-report` to regenerate the missing artifacts, then rerun `python3 rebuild_reports.py` or `python3 run_all.py --refresh-report`.",
                     ),
                     detail("Phase output folder", target_dir),
                 ],
@@ -637,6 +693,58 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
     return evaluated
 
 
+def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[str, Any]]:
+    readme_text = context.readme_text
+    console_output = normalize_space(context.command_result.combined_output)
+    blocks = extract_console_blocks(readme_text)
+    shell_blocks = [block for block in blocks if block["is_console"] and block["language"] in {"shell", "bash", "sh"}]
+    console_blocks = [block for block in blocks if block["is_console"]]
+
+    assertions: list[dict[str, Any]] = []
+    assertions.append(
+        assert_condition(
+            len(shell_blocks) >= 2,
+            "README contained at least two shell console sections.",
+            "README did not contain at least two shell console sections.",
+            category="readme",
+            details=[
+                detail("Shell console sections", len(shell_blocks)),
+                detail("Console-like blocks", len(console_blocks)),
+            ],
+        )
+    )
+    assertions.append(
+        assert_condition(
+            bool(console_blocks) and all(block["language"] in {"shell", "bash", "sh"} for block in console_blocks),
+            "All console-like README blocks use shell syntax.",
+            "Some console-like README blocks do not use shell syntax.",
+            category="readme",
+            details=[
+                detail("Console-like block count", len(console_blocks)),
+                detail(
+                    "Non-shell console blocks",
+                    ", ".join(block["preview"] for block in console_blocks if block["language"] not in {"shell", "bash", "sh"}) or "(none)",
+                ),
+            ],
+        )
+    )
+    for index, block in enumerate(shell_blocks, start=1):
+        representative_line = block["preview"]
+        assertions.append(
+            assert_condition(
+                representative_line in console_output,
+                f"Console output matched README shell section {index}.",
+                f"Console output did not match README shell section {index}.",
+                category="console",
+                details=[
+                    detail("Shell section", representative_line),
+                    detail("Console excerpt", extract_context(context.command_result.combined_output, representative_line)),
+                ],
+            )
+        )
+    return assertions
+
+
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
     readme_text = context.readme_text
     console_output = strip_ansi(context.command_result.combined_output)
@@ -716,6 +824,37 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
             )
         )
     return assertions
+
+
+def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for match in FENCED_CODE_BLOCK_RE.finditer(readme_text):
+        language = (match.group("lang") or "").strip().lower()
+        body = match.group("body").strip()
+        lines = [line.strip() for line in body.splitlines() if line.strip()]
+        preview = lines[0] if lines else ""
+        is_console = bool(lines and SHELL_COMMAND_PREFIXES_RE.match(lines[0]))
+        blocks.append(
+            {
+                "language": language,
+                "body": body,
+                "preview": preview,
+                "is_console": is_console,
+            }
+        )
+    return blocks
+
+
+def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:
+    warnings = list(spec.runtime_warnings)
+    artifact_labels = {artifact.label for artifact in all_artifact_specs(spec, phase)}
+    additional = sorted(
+        label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
+    )
+    if not additional:
+        return warnings
+    warnings.append(f"Additional artifacts found: {', '.join(additional)}")
+    return warnings
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:

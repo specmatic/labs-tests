@@ -77,6 +77,14 @@ Validate all relevant layers when applicable:
 - report artifact existence
 - README alignment with runtime behavior
 
+When a validation fails, the message must be explicit and actionable:
+
+- state what failed in plain language
+- state the impact of the failure, especially what the user cannot trust or cannot do next
+- state the exact action needed to resolve the failure
+- prefer concrete paths, commands, and missing artifacts over generic wording
+- do not bury the fix inside raw log output or a vague summary
+
 Automation scope in this repo is CLI/runtime plus generated artifacts only.
 Do not add Studio validation unless the user explicitly asks for Studio automation.
 
@@ -122,6 +130,7 @@ Rules:
 - verify documented path/status expectations against actual runtime status
 - add failures when important runtime details are missing from the README
 - prefer exact observed details over README wording when they differ
+- when a README mismatch fails, explain the runtime impact and the README change needed to resolve it
 
 Example: if runtime shows `422 Unprocessable Entity` but README omits it, that should fail.
 
@@ -141,6 +150,13 @@ The HTML report should support:
 - collapsible validation-category sections
 - collapsible artifacts sections
 - expand all / collapse all controls
+
+Failure and warning text in the HTML report should also be explicit:
+
+- every error should say what failed, what that means for the lab or report, and how to fix it
+- warnings should say what extra or unexpected condition was found and why it matters
+- avoid merging the action text into the raw console log output
+- prefer separate labeled sections such as `Impact`, `Action required`, or `How to fix`
 
 Default load state:
 
@@ -172,6 +188,7 @@ Important rules:
 - destructive refresh must require `--refresh-labs --force` when `../labs` is dirty
 - lab runners should support setup skipping
 - lab runners should support report-only refreshes from captured artifacts
+- normal lab runs should clear the lab-local `output/` directory before generating new artifacts; refresh-only runs should skip that cleanup
 
 Current command expectations:
 
@@ -180,7 +197,7 @@ Current command expectations:
 - `python3 <lab>/run.py`
 - `python3 <lab>/run.py --refresh-report`
 - `python3 run_all.py`
-- `python3 run_all.py --refresh-report`
+- `python3 rebuild_reports.py`
 
 ## Docker-owned artifact cleanup
 
@@ -215,8 +232,11 @@ Requirements:
 
 - discover all lab folders containing `run.py`
 - run or refresh each lab
+- clear the generated `output/labs/` and `output/consolidated-report/` folders before regenerating reports
 - write root consolidated JSON and HTML reports
-- link correctly to per-lab reports using paths relative to `output/consolidated-report.html`
+- link correctly to per-lab reports using paths relative to `output/consolidated-report/consolidated-report.html`
+
+`rebuild_reports.py` should regenerate the consolidated and comparison reports in place without clearing the output tree, so existing lab snapshots remain available for report regeneration.
 
 CI artifact upload must also follow discovery rather than a hardcoded lab list.
 
@@ -236,15 +256,15 @@ Always update:
 - the root `README.md` when the set of automated labs or supported commands changes
 - the changed lab's `output/report.json`
 - the changed lab's `output/report.html`
-- root `output/consolidated-report.json`
-- root `output/consolidated-report.html`
+- root `output/consolidated-report/consolidated-report.json`
+- root `output/consolidated-report/consolidated-report.html`
 - root comparison outputs when lab inventory or comparison inputs changed:
-  - `output/labs-comparison.json`
-  - `output/labs-comparison.html`
+  - `output/consolidated-report/labs-comparison.json`
+  - `output/consolidated-report/labs-comparison.html`
 
 Preferred close-out command from the repo root:
 
-- `python3 run_all.py --refresh-report`
+- `python3 rebuild_reports.py`
 
 Use that refresh step even when implementation work was completed earlier in the session, so READMEs and generated reports do not drift.
 

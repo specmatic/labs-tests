@@ -13,15 +13,25 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
-COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
-COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
+COMPARISON_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
+COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.json"
+COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.html"
+LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
+LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-CODE_BLOCK_RE = re.compile(r"```(?:bash|sh|shell)?\s*\n(.*?)```", re.DOTALL | re.MULTILINE)
+FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
+SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
+IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
+REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
 
-def generate_labs_comparison(root: Path | None = None) -> dict[str, Any]:
+def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | None = None) -> dict[str, Any]:
     repo_root = root or ROOT
-    labs = [build_lab_profile(path.parent) for path in sorted(repo_root.glob("*/run.py"))]
+    selected = set(lab_names or [])
+    run_files = sorted(repo_root.glob("*/run.py"))
+    if selected:
+        run_files = [path for path in run_files if path.parent.name in selected]
+    labs = [build_lab_profile(path.parent) for path in run_files]
     payload = {
         "generatedAt": datetime.now(UTC).isoformat(),
         "summary": build_summary(labs),
@@ -29,11 +39,22 @@ def generate_labs_comparison(root: Path | None = None) -> dict[str, Any]:
         "differences": build_differences(labs),
         "validationMatrix": build_validation_matrix(labs),
         "labs": labs,
+        "navigation": {
+            "consolidatedReportHref": "consolidated-report.html",
+        },
     }
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
+        if legacy_path.exists():
+            legacy_path.unlink()
     COMPARISON_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
     return payload
+
+
+def discover_lab_names(root: Path | None = None) -> list[str]:
+    repo_root = root or ROOT
+    return sorted(path.parent.name for path in repo_root.glob("*/run.py"))
 
 
 def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
@@ -47,11 +68,18 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     upstream_readme_text = spec.readme_path.read_text(encoding="utf-8")
     headings = extract_headings(upstream_readme_text)
     h2_headings = [heading["text"] for heading in headings if heading["level"] == 2]
+    h3_headings = [heading["text"] for heading in headings if heading["level"] == 3]
+    code_blocks = extract_fenced_code_blocks(upstream_readme_text)
     readme_command = extract_primary_command(upstream_readme_text) or list(spec.command)
     command_type = classify_command(readme_command)
     setup_types = detect_setup_types(readme_command)
     artifact_labels = sorted({artifact["label"] for artifact in [*common_artifacts, *phase_artifacts]})
     artifact_kinds = sorted({artifact["kind"] for artifact in [*common_artifacts, *phase_artifacts]})
+    shell_console_blocks = [block for block in code_blocks if looks_like_console_block(block) and block["language"] in {"shell", "bash", "sh"}]
+    console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
+    additional_artifacts = sorted(
+        label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
+    )
 
     return {
         "name": spec.name,
@@ -83,11 +111,20 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "requiredH2": list(spec.readme_structure.required_h2_prefixes) if spec.readme_structure else [],
             "additionalH2": list(spec.readme_structure.additional_h2_prefixes) if spec.readme_structure else [],
             "actualH2": h2_headings,
+            "actualH3": h3_headings,
             "hasStudioSection": any("studio" in heading.lower() for heading in h2_headings),
             "hasTroubleshooting": any("troubleshooting" in heading.lower() for heading in h2_headings),
             "hasPassCriteria": any("pass criteria" in heading.lower() or "verify the fix" in heading.lower() for heading in h2_headings),
             "headingCount": len(headings),
             "h2Count": len(h2_headings),
+            "h3Count": len(h3_headings),
+            "shellConsoleBlockCount": len(shell_console_blocks),
+            "consoleBlockCount": len(console_blocks),
+            "hasAtLeastTwoShellConsoleBlocks": len(shell_console_blocks) >= 2,
+            "allConsoleBlocksUseShellSyntax": bool(console_blocks) and all(block["language"] in {"shell", "bash", "sh"} for block in console_blocks),
+        },
+        "warnings": {
+            "additionalArtifacts": additional_artifacts,
         },
     }
 
@@ -124,11 +161,30 @@ def extract_headings(text: str) -> list[dict[str, Any]]:
     return [{"level": len(match.group(1)), "text": match.group(2).strip()} for match in HEADING_RE.finditer(text)]
 
 
+def extract_fenced_code_blocks(readme_text: str) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    for match in FENCED_CODE_BLOCK_RE.finditer(readme_text):
+        blocks.append(
+            {
+                "language": (match.group("lang") or "").strip().lower(),
+                "body": match.group("body").strip(),
+            }
+        )
+    return blocks
+
+
+def looks_like_console_block(block: dict[str, str]) -> bool:
+    lines = [line.strip() for line in block["body"].splitlines() if line.strip()]
+    if not lines:
+        return False
+    return bool(SHELL_COMMAND_PREFIXES_RE.match(lines[0]))
+
+
 def extract_primary_command(readme_text: str) -> list[str]:
-    for block in CODE_BLOCK_RE.finditer(readme_text):
-        lines = [line.strip() for line in block.group(1).splitlines() if line.strip()]
+    for block in extract_fenced_code_blocks(readme_text):
+        lines = [line.strip() for line in block["body"].splitlines() if line.strip()]
         for line in lines:
-            if line.startswith(("docker ", "python ", "python3 ", "chmod ", "git ", "curl ")):
+            if SHELL_COMMAND_PREFIXES_RE.match(line):
                 return line.split()
     return []
 
@@ -201,7 +257,11 @@ def build_commonalities(labs: list[dict[str, Any]]) -> dict[str, Any]:
     common_required_h2 = sorted(set.intersection(*required_h2_sets)) if required_h2_sets else []
     artifact_counter = Counter(label for lab in labs for label in lab["artifacts"]["labels"])
     phase_counter = Counter(tuple(phase["name"] for phase in lab["phases"]) for lab in labs)
+    h1_counter = Counter(lab["readme"]["h1"] for lab in labs if lab["readme"]["h1"])
+    h2_counter = Counter(tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"])
     return {
+        "sharedReadmeH1": h1_counter.most_common(1)[0][0] if h1_counter else "",
+        "sharedReadmeH2Sequence": list(h2_counter.most_common(1)[0][0]) if h2_counter else [],
         "commonRequiredReadmeSections": common_required_h2,
         "artifactLabelsUsedByAllLabs": sorted(label for label, count in artifact_counter.items() if count == len(labs)),
         "artifactLabelsUsedByMultipleLabs": sorted(label for label, count in artifact_counter.items() if count > 1),
@@ -258,42 +318,40 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
+    shared_h1 = most_common_value([lab["readme"]["h1"] for lab in labs if lab["readme"]["h1"]])
+    shared_h2 = most_common_value([tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"]])
     rows = [
         {
-            "label": "README has required H2s",
-            "cells": [readme_has_required_h2s(lab) for lab in labs],
+            "label": "README H1 matches shared title",
+            "cells": [lab["readme"]["h1"] == shared_h1 for lab in labs],
         },
         {
-            "label": "README has Studio section",
-            "cells": [lab["readme"]["hasStudioSection"] for lab in labs],
+            "label": "README H2 sequence matches shared template",
+            "cells": [tuple(lab["readme"]["actualH2"]) == shared_h2 for lab in labs],
         },
         {
-            "label": "README has troubleshooting",
-            "cells": [lab["readme"]["hasTroubleshooting"] for lab in labs],
+            "label": "README has H3 implementation steps",
+            "cells": [lab["readme"]["h3Count"] > 0 for lab in labs],
         },
         {
-            "label": "README has pass criteria",
-            "cells": [lab["readme"]["hasPassCriteria"] for lab in labs],
+            "label": "README has at least 2 shell console sections",
+            "cells": [lab["readme"]["hasAtLeastTwoShellConsoleBlocks"] for lab in labs],
         },
         {
-            "label": "Artifacts generated",
-            "cells": [bool(lab["artifacts"]["labels"]) for lab in labs],
+            "label": "All console sections use shell syntax",
+            "cells": [lab["readme"]["allConsoleBlocksUseShellSyntax"] for lab in labs],
         },
         {
-            "label": "Coverage artifact generated",
-            "cells": ["coverage" in lab["artifacts"]["families"] for lab in labs],
+            "label": "CTRF report available",
+            "cells": ["ctrf-report.json" in lab["artifacts"]["labels"] for lab in labs],
         },
         {
-            "label": "CTRF artifact generated",
-            "cells": ["ctrf" in lab["artifacts"]["families"] for lab in labs],
+            "label": "Sibling HTML report available",
+            "cells": ["specmatic-report.html" in lab["artifacts"]["labels"] for lab in labs],
         },
         {
-            "label": "HTML artifact generated",
-            "cells": ["html" in lab["artifacts"]["families"] for lab in labs],
-        },
-        {
-            "label": "Source snapshot artifact generated",
-            "cells": ["source-snapshot" in lab["artifacts"]["families"] for lab in labs],
+            "label": "No additional artifacts beyond report outputs",
+            "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
         },
     ]
     return {"columns": columns, "rows": rows}
@@ -305,6 +363,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         for item in payload.get("summary", [])
     )
     common_list = "".join(f"<li>{escape(item)}</li>" for item in payload.get("commonalities", {}).get("sharedCharacteristics", []))
+    shared_h1 = payload.get("commonalities", {}).get("sharedReadmeH1", "")
+    shared_h2_sequence = payload.get("commonalities", {}).get("sharedReadmeH2Sequence", [])
     common_sections = "".join(
         f"<li>{escape(section)}</li>" for section in payload.get("commonalities", {}).get("commonRequiredReadmeSections", [])
     )
@@ -321,6 +381,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         for item in payload.get("differences", {}).get("executionDifferences", [])
     )
     matrix = payload.get("validationMatrix", {"columns": [], "rows": []})
+    consolidated_href = escape(payload.get("navigation", {}).get("consolidatedReportHref", "consolidated-report.html"))
     matrix_header = "".join(
         f"<th class='matrix-lab'>{render_lab_link(column['name'], column['href'])}</th>"
         for column in matrix.get("columns", [])
@@ -376,6 +437,14 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .muted {{
       color: #5f6b74;
     }}
+    .nav-link {{
+      margin: 0.25rem 0 0.9rem;
+    }}
+    .nav-link a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
     .matrix-wrap {{
       overflow-x: auto;
     }}
@@ -425,12 +494,17 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     <section class="panel">
       <h1>Labs Similarities And Differences</h1>
       <p class="muted">Generated at {escape(payload['generatedAt'])}</p>
+      <p class="nav-link"><a href="{consolidated_href}">Back to consolidated report</a></p>
       <table>{summary_rows}</table>
     </section>
     <section class="panel">
       <h2>Shared Patterns</h2>
       <p>These are the strongest common patterns across the automated labs.</p>
       <ul>{common_list}</ul>
+      <h3>Shared README H1</h3>
+      <p>{escape(shared_h1) or '(no common H1 found)'}</p>
+      <h3>Shared README H2 Sequence</h3>
+      <ul>{''.join(f'<li>{escape(section)}</li>' for section in shared_h2_sequence) or '<li>(no common H2 sequence found)</li>'}</ul>
       <h3>Common README Sections</h3>
       <ul>{common_sections}</ul>
       <h3>Repeated Artifact Labels</h3>
@@ -544,12 +618,10 @@ def format_setup_types(setup_types: list[str]) -> str:
     return " + ".join(setup_types) if setup_types else "unknown"
 
 
-def readme_has_required_h2s(lab: dict[str, Any]) -> bool:
-    required = lab["readme"]["requiredH2"]
-    actual = [heading.lower() for heading in lab["readme"]["actualH2"]]
-    if not required:
-        return False
-    return all(any(actual_heading == requirement.lower() or actual_heading.startswith(requirement.lower()) for actual_heading in actual) for requirement in required)
+def most_common_value(values: list[Any]) -> Any:
+    if not values:
+        return ""
+    return Counter(values).most_common(1)[0][0]
 
 
 def format_value(value: Any) -> str:
