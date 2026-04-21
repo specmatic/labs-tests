@@ -138,9 +138,11 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "additionalH2": list(spec.readme_structure.additional_h2_prefixes) if spec.readme_structure else [],
             "actualH2": h2_headings,
             "actualH3": h3_headings,
+            "hasPrerequisites": any("prerequisites" in heading.lower() for heading in h2_headings),
             "hasStudioSection": any("studio" in heading.lower() for heading in h2_headings),
             "hasTroubleshooting": any("troubleshooting" in heading.lower() for heading in h2_headings),
             "hasPassCriteria": any("pass criteria" in heading.lower() or "verify the fix" in heading.lower() for heading in h2_headings),
+            "hasCleanupGuidance": any("cleanup" in heading.lower() for heading in [*h2_headings, *h3_headings]),
             "headingCount": len(headings),
             "h2Count": len(h2_headings),
             "h3Count": len(h3_headings),
@@ -151,6 +153,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "openingShellConsoleSection": shell_console_sections[0] if shell_console_sections else {},
             "closingShellConsoleSection": shell_console_sections[-1] if shell_console_sections else {},
             "shellConsoleSections": shell_console_sections,
+            "filesSectionText": extract_heading_section_text(upstream_readme_text, "Files in this lab", level=2),
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -249,6 +252,28 @@ def build_shell_console_sections(headings: list[dict[str, Any]], shell_console_b
 def heading_before_line(headings: list[dict[str, Any]], line: int) -> dict[str, Any] | None:
     before = [heading for heading in headings if heading["line"] <= line]
     return before[-1] if before else None
+
+
+def extract_heading_section_text(readme_text: str, heading_title: str, level: int = 2) -> str:
+    lines = readme_text.splitlines()
+    heading_line_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+    start_index = None
+    for index, line in enumerate(lines):
+        match = heading_line_pattern.match(line)
+        if not match:
+            continue
+        if len(match.group(1)) == level and match.group(2).strip() == heading_title:
+            start_index = index + 1
+            break
+    if start_index is None:
+        return ""
+    collected: list[str] = []
+    for line in lines[start_index:]:
+        match = heading_line_pattern.match(line)
+        if match and len(match.group(1)) <= level:
+            break
+        collected.append(line)
+    return "\n".join(collected).strip()
 
 
 def summarize_console_section(heading: str, command: str) -> str:
@@ -426,6 +451,52 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["readme"]["h3Count"] > 0 and not extra_h2_by_lab[lab["name"]] for lab in labs],
         },
         {
+            "label": "README shows a clear primary execution command for this lab",
+            "tooltip": {
+                "summary": ["The README should show one primary shell command that clearly communicates how to run the lab."],
+                "details": build_execution_command_details(labs),
+            },
+            "cells": [bool(lab["command"]) and lab["commandType"] != "other" for lab in labs],
+        },
+        {
+            "label": "README includes a Prerequisites section",
+            "tooltip": {
+                "summary": ["Every compared README should tell the reader what they need before starting the lab."],
+                "details": build_readme_section_presence_details(
+                    labs,
+                    title="Prerequisites coverage",
+                    note="This helps the reader understand setup expectations before they begin the lab.",
+                    accessor=lambda lab: lab["readme"]["hasPrerequisites"],
+                    success_label="Prerequisites section present",
+                    failure_label="Add a Prerequisites H2 section to the README.",
+                ),
+            },
+            "cells": [lab["readme"]["hasPrerequisites"] for lab in labs],
+        },
+        {
+            "label": "README documents the files used by this lab in the 'Files in this lab' section",
+            "tooltip": {
+                "summary": ["The README should list the important files that this lab uses so a reader knows what to inspect or edit."],
+                "details": build_files_under_test_details(labs),
+            },
+            "cells": [files_under_test_documented(lab) for lab in labs],
+        },
+        {
+            "label": "README includes cleanup guidance",
+            "tooltip": {
+                "summary": ["Every compared README should tell the reader how to clean up after running the lab."],
+                "details": build_readme_section_presence_details(
+                    labs,
+                    title="Cleanup guidance coverage",
+                    note="Cleanup guidance prevents leftover runtime state and keeps the local environment consistent between runs.",
+                    accessor=lambda lab: lab["readme"]["hasCleanupGuidance"],
+                    success_label="Cleanup guidance present",
+                    failure_label="Add cleanup guidance to the README as an H2 or H3 section.",
+                ),
+            },
+            "cells": [lab["readme"]["hasCleanupGuidance"] for lab in labs],
+        },
+        {
             "label": "README shows the baseline console run before implementation",
             "tooltip": {
                 "summary": ["Every compared README includes a shell console section before the implementation starts."],
@@ -448,6 +519,44 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_shell_console_details(labs),
             },
             "cells": [lab["readme"]["allConsoleBlocksUseShellSyntax"] for lab in labs],
+        },
+        {
+            "label": "README includes troubleshooting or common-confusion guidance",
+            "tooltip": {
+                "summary": ["Every compared README should help the reader recover when the lab flow is unclear or fails unexpectedly."],
+                "details": build_readme_section_presence_details(
+                    labs,
+                    title="Troubleshooting guidance coverage",
+                    note="This can be a Troubleshooting section or a common-confusion section with equivalent guidance.",
+                    accessor=lambda lab: lab["readme"]["hasTroubleshooting"],
+                    success_label="Troubleshooting guidance present",
+                    failure_label="Add troubleshooting or common-confusion guidance to the README.",
+                ),
+            },
+            "cells": [lab["readme"]["hasTroubleshooting"] for lab in labs],
+        },
+        {
+            "label": "README includes pass criteria or verify-the-fix guidance",
+            "tooltip": {
+                "summary": ["Every compared README should tell the reader how to know the lab is complete and correct."],
+                "details": build_readme_section_presence_details(
+                    labs,
+                    title="Pass criteria coverage",
+                    note="This can be an explicit Pass criteria section or equivalent verify-the-fix guidance.",
+                    accessor=lambda lab: lab["readme"]["hasPassCriteria"],
+                    success_label="Pass criteria present",
+                    failure_label="Add pass criteria or verify-the-fix guidance to the README.",
+                ),
+            },
+            "cells": [lab["readme"]["hasPassCriteria"] for lab in labs],
+        },
+        {
+            "label": "Implementation phase flow starts with the baseline mismatch step",
+            "tooltip": {
+                "summary": ["Every compared implementation should begin with the baseline mismatch phase before the fix flow starts."],
+                "details": build_phase_start_details(labs),
+            },
+            "cells": [bool(lab["phaseSignature"]) and lab["phaseSignature"][0] == "Baseline mismatch" for lab in labs],
         },
         {
             "label": "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
@@ -507,21 +616,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         f"<tr><th>{escape(item['label'])}</th><td>{escape(format_value(item['value']))}</td></tr>"
         for item in payload.get("summary", [])
     )
-    common_list = "".join(f"<li>{escape(item)}</li>" for item in payload.get("commonalities", {}).get("sharedCharacteristics", []))
-    shared_h1 = payload.get("commonalities", {}).get("sharedReadmeH1", "")
-    shared_h2_sequence = payload.get("commonalities", {}).get("sharedReadmeH2Sequence", [])
-    common_phase_prefix = payload.get("commonalities", {}).get("commonPhasePrefix", [])
-    common_sections = "".join(
-        f"<li>{escape(section)}</li>" for section in payload.get("commonalities", {}).get("commonRequiredReadmeSections", [])
-    )
-    repeated_artifacts = "".join(
-        f"<li>{escape(label)}</li>" for label in payload.get("commonalities", {}).get("artifactLabelsUsedByMultipleLabs", [])
-    )
-    phase_models = "".join(
-        f"<tr><td>{escape(', '.join(item['phases']))}</td><td>{item['count']}</td></tr>"
-        for item in payload.get("commonalities", {}).get("phaseModels", [])
-    )
-    lab_rows = "".join(render_lab_comparison_row(lab) for lab in payload.get("labs", []))
     difference_rows = "".join(
         f"<tr><td>{render_lab_link(item['lab'], item['labHref'])}</td><td>{escape(item['commandType'])}</td><td><code>{escape(item['command'])}</code></td><td>{escape(item['setupType'])}</td></tr>"
         for item in payload.get("differences", {}).get("executionDifferences", [])
@@ -622,17 +716,28 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       left: 0;
       background: #fffdf8;
       z-index: 2;
-      min-width: 240px;
+      width: 420px;
+      min-width: 420px;
+      max-width: 420px;
     }}
     .matrix-row-label {{
-      display: flex;
-      align-items: flex-start;
-      gap: 0.5rem;
-      justify-content: space-between;
+      display: block;
     }}
     .matrix-row-title {{
-      flex: 1 1 auto;
+      display: block;
       min-width: 0;
+      line-height: 1.35;
+    }}
+    .matrix-row-meta {{
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      margin-bottom: 0.35rem;
+    }}
+    .matrix-row-text {{
+      display: block;
+      white-space: normal;
+      overflow-wrap: break-word;
     }}
     .tooltip-trigger {{
       appearance: none;
@@ -796,15 +901,52 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       width: 100%;
       border-collapse: collapse;
       font-size: 0.95rem;
-      table-layout: fixed;
+      table-layout: auto;
     }}
     .matrix-tooltip-details th,
     .matrix-tooltip-details td {{
       border-bottom: 1px solid #eadfcd;
-      padding: 8px 6px;
+      padding: 9px 8px;
       text-align: left;
       vertical-align: top;
-      word-break: break-word;
+      overflow-wrap: break-word;
+    }}
+    .matrix-tooltip-details thead th {{
+      font-weight: 700;
+      color: #182126;
+      background: #fffaf2;
+    }}
+    .matrix-tooltip-details tbody tr:nth-child(even) {{
+      background: #fffdfa;
+    }}
+    .matrix-tooltip-details th:first-child,
+    .matrix-tooltip-details td:first-child {{
+      width: 32%;
+    }}
+    .matrix-tooltip-details th:nth-child(2),
+    .matrix-tooltip-details td:nth-child(2) {{
+      width: 16%;
+    }}
+    .matrix-tooltip-details th:last-child,
+    .matrix-tooltip-details td:last-child {{
+      width: 52%;
+    }}
+    .matrix-tooltip-cell-status {{
+      font-weight: 700;
+      white-space: nowrap;
+    }}
+    .matrix-tooltip-cell-status.ok {{
+      color: #1f7a3b;
+    }}
+    .matrix-tooltip-cell-status.fail {{
+      color: #b42318;
+    }}
+    .matrix-tooltip-cell-action.ok {{
+      color: #245b34;
+    }}
+    .matrix-tooltip-cell-action.fail {{
+      color: #8f2d1f;
+      font-weight: 600;
     }}
     .matrix .matrix-lab {{
       min-width: 120px;
@@ -868,8 +1010,10 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     }}
     .matrix-row-number {{
       color: #5f6b74;
-      margin-right: 0.35rem;
+      margin-right: 0.5rem;
       white-space: nowrap;
+      font-weight: 700;
+      display: inline-block;
     }}
     .matrix-cell {{
       font-size: 1.05rem;
@@ -893,46 +1037,10 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       <table>{summary_rows}</table>
     </section>
     <section class="panel">
-      <h2>Shared Patterns</h2>
-      <p>These are the strongest common patterns across the automated labs.</p>
-      <ul>{common_list}</ul>
-      <h3>Shared README H1</h3>
-      <p>{escape(shared_h1) or '(no common H1 found)'}</p>
-      <h3>Shared README H2 Sequence</h3>
-      <ul>{''.join(f'<li>{escape(section)}</li>' for section in shared_h2_sequence) or '<li>(no common H2 sequence found)</li>'}</ul>
-      <h3>Common Phase Prefix</h3>
-      <ul>{''.join(f'<li>{escape(phase)}</li>' for phase in common_phase_prefix) or '<li>(no shared opening phase found)</li>'}</ul>
-      <h3>Common README Sections</h3>
-      <ul>{common_sections}</ul>
-      <h3>Repeated Artifact Labels</h3>
-      <ul>{repeated_artifacts}</ul>
-      <h3>Phase Models</h3>
-      <table>
-        <thead><tr><th>Phases</th><th>Labs</th></tr></thead>
-        <tbody>{phase_models}</tbody>
-      </table>
-    </section>
-    <section class="panel">
       <h2>Execution Differences</h2>
       <table>
         <thead><tr><th>Lab</th><th>Command Type</th><th>Command</th><th>Setup Type</th></tr></thead>
         <tbody>{difference_rows}</tbody>
-      </table>
-    </section>
-    <section class="panel">
-      <h2>Per-Lab Matrix</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Lab</th>
-            <th>README Shape</th>
-            <th>Approach</th>
-            <th>Setup</th>
-            <th>Artifacts</th>
-            <th>Files Under Test</th>
-          </tr>
-        </thead>
-        <tbody>{lab_rows}</tbody>
       </table>
     </section>
     <section class="panel">
@@ -1128,7 +1236,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           const table = document.createElement('table');
           const thead = document.createElement('thead');
           const headerRow = document.createElement('tr');
-          (detailsData.headers || []).forEach((header) => {{
+          const headers = detailsData.headers || [];
+          headers.forEach((header) => {{
             const th = document.createElement('th');
             th.textContent = header;
             headerRow.appendChild(th);
@@ -1138,9 +1247,27 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           const tbody = document.createElement('tbody');
           (detailsData.rows || []).forEach((row) => {{
             const tr = document.createElement('tr');
-            row.forEach((cell) => {{
+            row.forEach((cell, index) => {{
               const td = document.createElement('td');
               td.textContent = cell;
+              const header = headers[index] || '';
+              if (header === 'Status' || header === 'Present') {{
+                td.classList.add('matrix-tooltip-cell-status');
+                if (cell === 'Present' || cell === 'Yes') {{
+                  td.classList.add('ok');
+                }}
+                if (cell === 'Missing' || cell === 'No') {{
+                  td.classList.add('fail');
+                }}
+              }}
+              if (header === 'Action') {{
+                td.classList.add('matrix-tooltip-cell-action');
+                if (cell === 'No change needed.' || cell.endsWith('present') || cell === 'No change needed.') {{
+                  td.classList.add('ok');
+                }} else {{
+                  td.classList.add('fail');
+                }}
+              }}
               tr.appendChild(td);
             }});
             tbody.appendChild(tr);
@@ -1172,41 +1299,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
 """
 
 
-def render_lab_comparison_row(lab: dict[str, Any]) -> str:
-    readme_bits = [
-        f"H2 sections: {lab['readme']['h2Count']}",
-        f"Studio section: {'yes' if lab['readme']['hasStudioSection'] else 'no'}",
-        f"Troubleshooting: {'yes' if lab['readme']['hasTroubleshooting'] else 'no'}",
-        f"Pass criteria/verify fix: {'yes' if lab['readme']['hasPassCriteria'] else 'no'}",
-    ]
-    approach_bits = [
-        f"Phases: {', '.join(phase['name'] for phase in lab['phases'])}",
-        f"Command type: {lab['commandType']}",
-    ]
-    setup_bits = [
-        f"Type: {lab['setup']['display']}",
-        f"Compose file: {'yes' if lab['setup']['hasComposeFile'] else 'no'}",
-        f"Python entrypoint: {'yes' if lab['setup']['usesPython'] else 'no'}",
-        f"Build flag: {'yes' if lab['setup']['hasBuildFlag'] else 'no'}",
-        f"Abort on exit: {'yes' if lab['setup']['hasAbortOnExit'] else 'no'}",
-    ]
-    artifact_bits = [
-        f"Families: {', '.join(lab['artifacts']['families']) or 'none'}",
-        f"Labels: {', '.join(lab['artifacts']['labels']) or 'none'}",
-    ]
-    file_bits = ", ".join(f"{alias}: {path}" for alias, path in lab["filesUnderTest"].items())
-    return (
-        "<tr>"
-        f"<td>{render_lab_link(lab['name'], lab['href'])}<br><span class='muted'>{escape(lab['description'])}</span></td>"
-        f"<td>{render_bullets(readme_bits)}</td>"
-        f"<td>{render_bullets(approach_bits)}</td>"
-        f"<td>{render_bullets(setup_bits)}</td>"
-        f"<td>{render_bullets(artifact_bits)}</td>"
-        f"<td><code>{escape(file_bits)}</code></td>"
-        "</tr>"
-    )
-
-
 def render_lab_link(name: str, href: str) -> str:
     return f"<a href='{escape(href)}' target='_blank' rel='noreferrer'><strong>{escape(name)}</strong></a>"
 
@@ -1222,9 +1314,10 @@ def render_validation_matrix_row(row: dict[str, Any]) -> str:
         "<th class='row-label'>"
         "<span class='matrix-row-label'>"
         "<span class='matrix-row-title'>"
+        "<span class='matrix-row-meta'>"
         f"<button type='button' class='matrix-row-status tooltip-trigger {status_class}' aria-expanded='false' aria-label='Show details for {escape(row['label'])}'{tooltip_attrs}><span aria-hidden='true'>{status_symbol}</span><span class='matrix-row-status-text'>{status_text}</span><span class='matrix-row-status-info' aria-hidden='true'>i</span></button>"
-        f"<span class='matrix-row-number'>{row.get('index', '')}.</span>"
-        f"{escape(row['label'])}"
+        "</span>"
+        f"<span class='matrix-row-text'><span class='matrix-row-number'>{row.get('index', '')}.</span>{escape(row['label'])}</span>"
         "</span>"
         "</span>"
         "</th>"
@@ -1249,12 +1342,204 @@ def render_matrix_trigger_attrs(tooltip: dict[str, Any], label: str) -> str:
     return f" data-tooltip-json='{escape(json.dumps(payload, ensure_ascii=False))}'"
 
 
-def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+def files_under_test_documented(lab: dict[str, Any]) -> bool:
+    section_text = lab["readme"].get("filesSectionText", "").lower()
+    if not lab["filesUnderTest"]:
+        return True
+    if not section_text:
+        return False
+    for alias, path in lab["filesUnderTest"].items():
+        file_name = Path(path).name.lower()
+        if alias.lower() not in section_text and path.lower() not in section_text and file_name not in section_text:
+            return False
+    return True
+
+
+def build_execution_command_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        command_text = " ".join(lab["command"]) if lab["command"] else "(missing)"
+        recognized = bool(lab["command"]) and lab["commandType"] != "other"
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Primary command",
+                        "note": "This is the main shell command detected from the README.",
+                        "items": [command_text],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Execution style",
+                        "note": "This is how the README command is classified.",
+                        "items": [lab["commandType"]],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "attention" if not recognized else "ok",
+                        "note": "Use this to make the README command easier to understand and automate.",
+                        "items": (
+                            ["Rewrite the README so it shows one clear docker compose, docker run, or python command for the main lab flow."]
+                            if not recognized
+                            else ["No change needed."]
+                        ),
+                    },
+                ],
+            }
+        )
     return {
-        "type": "table",
+        "type": "sections",
+        "title": "Primary execution commands",
+        "note": "Each README should expose one clear primary command so the documented execution style is obvious.",
+        "sections": sections,
+    }
+
+
+def build_files_under_test_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        section_text = lab["readme"].get("filesSectionText", "")
+        documented: list[str] = []
+        missing: list[str] = []
+        for alias, path in lab["filesUnderTest"].items():
+            file_name = Path(path).name
+            if (
+                alias.lower() in section_text.lower()
+                or path.lower() in section_text.lower()
+                or file_name.lower() in section_text.lower()
+            ):
+                documented.append(f"{alias}: {path}")
+            else:
+                missing.append(f"{alias}: {path}")
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Documented in README",
+                        "tone": "ok",
+                        "note": "These files are already mentioned in the 'Files in this lab' section.",
+                        "items": documented or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Add to README",
+                        "tone": "attention" if missing else "ok",
+                        "note": "These files are used by the lab but are not clearly listed in the 'Files in this lab' section.",
+                        "items": missing or ["(none)"],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "Files used by each lab",
+        "note": "Readers should be able to see which files matter by scanning the README section named 'Files in this lab'.",
+        "sections": sections,
+    }
+
+
+def build_readme_section_presence_details(
+    labs: list[dict[str, Any]],
+    title: str,
+    note: str,
+    accessor: Any,
+    success_label: str,
+    failure_label: str,
+) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        present = accessor(lab)
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Status",
+                        "tone": "ok" if present else "attention",
+                        "items": ["Present" if present else "Missing"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "ok" if present else "attention",
+                        "items": [success_label if present else failure_label],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": title,
+        "note": note,
+        "sections": sections,
+    }
+
+
+def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        first_phase = lab["phaseSignature"][0] if lab["phaseSignature"] else "(missing)"
+        ok = bool(lab["phaseSignature"]) and lab["phaseSignature"][0] == "Baseline mismatch"
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "First phase",
+                        "items": [first_phase],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "ok" if ok else "attention",
+                        "items": [
+                            "No change needed."
+                            if ok
+                            else "Start the implementation flow with the 'Baseline mismatch' phase."
+                        ],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "Implementation phase starts",
+        "note": "The first phase should be the baseline mismatch step so the documented before/after flow stays consistent.",
+        "sections": sections,
+    }
+
+
+def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "H1 title",
+                        "items": [lab["readme"]["h1"] or "(missing)"],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
         "title": "H1 titles",
-        "headers": ["Lab", "H1 title"],
-        "rows": [[lab["name"], lab["readme"]["h1"] or "(missing)"] for lab in labs],
+        "sections": sections,
     }
 
 def build_h3_details(labs: list[dict[str, Any]], extra_h2_by_lab: dict[str, list[str]]) -> dict[str, Any]:
@@ -1334,44 +1619,91 @@ def build_console_section_details(labs: list[dict[str, Any]], which: str) -> dic
 
 
 def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        ok = lab["readme"]["allConsoleBlocksUseShellSyntax"]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Shell console blocks",
+                        "items": [str(lab["readme"]["shellConsoleBlockCount"])],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Shell syntax check",
+                        "tone": "ok" if ok else "attention",
+                        "items": ["All console blocks use shell syntax." if ok else "Some console blocks do not use shell syntax."],
+                    },
+                ],
+            }
+        )
     return {
-        "type": "table",
+        "type": "sections",
         "title": "Shell console coverage",
-        "headers": ["Lab", "Shell console blocks", "All use shell syntax"],
-        "rows": [
-            [
-                lab["name"],
-                str(lab["readme"]["shellConsoleBlockCount"]),
-                "Yes" if lab["readme"]["allConsoleBlocksUseShellSyntax"] else "No",
-            ]
-            for lab in labs
-        ],
         "note": "Shell fences keep the README commands copy-pasteable and consistent.",
+        "sections": sections,
     }
 
 
 def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        present = label in lab["artifacts"]["generatedLabels"]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Status",
+                        "tone": "ok" if present else "attention",
+                        "items": ["Present" if present else "Missing"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "ok" if present else "attention",
+                        "items": ["No change needed." if present else f"Generate {label} for this lab output."],
+                    },
+                ],
+            }
+        )
     return {
-        "type": "table",
+        "type": "sections",
         "title": f"{label} coverage",
-        "headers": ["Lab", "Present"],
-        "rows": [[lab["name"], "Yes" if label in lab["artifacts"]["generatedLabels"] else "No"] for lab in labs],
+        "sections": sections,
     }
 
 
 def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2: list[str] | tuple[str, ...] | set[str]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        extra_h2 = [section for section in lab["readme"]["actualH2"] if section not in common_required_h2]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Move to H3",
+                        "tone": "attention",
+                        "note": "These walkthrough sections are currently H2 headings and should be converted to H3.",
+                        "items": extra_h2 or ["(none)"],
+                    },
+                ],
+            }
+        )
     return {
-        "type": "table",
+        "type": "sections",
         "title": "H2 sections that should be H3",
-        "headers": ["Lab", "H2 sections to convert to H3"],
-        "rows": [
-            [
-                lab["name"],
-                ", ".join([section for section in lab["readme"]["actualH2"] if section not in common_required_h2]) or "(none)",
-            ]
-            for lab in labs
-        ],
         "note": "These H2 sections are lab-specific walkthrough content. They should be changed to H3 in the lab README.",
+        "sections": sections,
     }
 
 
@@ -1400,14 +1732,27 @@ def build_lab_specific_artifact_details(labs: list[dict[str, Any]], artifact_lab
 
 
 def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        extra = lab["warnings"]["additionalArtifacts"]
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Additional artifacts",
+                        "tone": "attention" if extra else "ok",
+                        "items": extra or ["(none)"],
+                    },
+                ],
+            }
+        )
     return {
-        "type": "table",
+        "type": "sections",
         "title": "Additional artifact warnings",
-        "headers": ["Lab", "Additional artifacts"],
-        "rows": [
-            [lab["name"], ", ".join(lab["warnings"]["additionalArtifacts"]) or "(none)"]
-            for lab in labs
-        ],
+        "sections": sections,
     }
 
 
