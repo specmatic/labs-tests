@@ -1003,9 +1003,17 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       margin-top: 0;
     }}
     .matrix-tooltip-section-title {{
+      display: inline-block;
       font-weight: 700;
       margin-bottom: 4px;
       color: #182126;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.28);
+    }}
+    a.matrix-tooltip-section-title:hover,
+    a.matrix-tooltip-section-title:focus {{
+      color: #145a7a;
+      border-bottom-color: rgba(20, 90, 122, 0.55);
     }}
     .matrix-tooltip-section-note {{
       margin: 0 0 10px;
@@ -1331,10 +1339,20 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           sectionTitle.textContent = detailsData.title || 'View details';
           container.appendChild(sectionTitle);
         }} else if (detailsData.title) {{
-          const sectionTitle = document.createElement('div');
-          sectionTitle.className = 'matrix-tooltip-section-title';
-          sectionTitle.textContent = detailsData.title;
-          container.appendChild(sectionTitle);
+          if (detailsData.href) {{
+            const sectionTitleLink = document.createElement('a');
+            sectionTitleLink.className = 'matrix-tooltip-section-title';
+            sectionTitleLink.href = detailsData.href;
+            sectionTitleLink.target = '_blank';
+            sectionTitleLink.rel = 'noreferrer';
+            sectionTitleLink.textContent = detailsData.title;
+            container.appendChild(sectionTitleLink);
+          }} else {{
+            const sectionTitle = document.createElement('div');
+            sectionTitle.className = 'matrix-tooltip-section-title';
+            sectionTitle.textContent = detailsData.title;
+            container.appendChild(sectionTitle);
+          }}
         }}
         if (detailsData.note) {{
           const note = document.createElement('p');
@@ -2089,12 +2107,12 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
 
 def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapshot: dict[str, Any] | None) -> dict[str, Any]:
     if not snapshot:
-        return {"available": False, "consistent": False, "phases": []}
+        return {"available": False, "consistent": True, "phases": []}
 
     readme_summaries = extract_tests_run_summaries(readme_text)
     report_phases = snapshot.get("phases", [])
     comparisons: list[dict[str, Any]] = []
-    all_consistent = bool(report_phases)
+    all_consistent = True
     snapshot_root = snapshot.get("root")
     for index, phase in enumerate(report_phases):
         phase_path = phase_artifact_root(snapshot_root, phase)
@@ -2117,21 +2135,25 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
             html_summary,
         ]
         present_counts = [item for item in counts if item is not None]
-        consistent = bool(present_counts) and len({tuple(sorted(item.items())) for item in present_counts}) == 1
-        all_consistent = all_consistent and consistent
+        comparable = len(present_counts) >= 2
+        consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
+        status = "match" if consistent else "mismatch" if comparable else "not-available"
+        if comparable:
+            all_consistent = all_consistent and consistent
         comparisons.append(
             {
                 "phase": readme_phase_name or phase.get("name", f"Phase {index + 1}"),
-                "readme": readme_summary or "(missing)",
-                "console": console_summary or "(missing)",
-                "ctrf": format_tests_run_counts_short(ctrf_summary) if ctrf_summary else "(missing)",
-                "html": format_tests_run_counts_short(html_summary) if html_summary else "(missing)",
+                "readme": readme_summary or "not-available",
+                "console": console_summary or "not-available",
+                "ctrf": format_tests_run_counts_short(ctrf_summary) if ctrf_summary else "not-available",
+                "html": format_tests_run_counts_short(html_summary) if html_summary else "not-available",
                 "consistent": consistent,
+                "status": status,
             }
         )
 
     return {
-        "available": True,
+        "available": bool(snapshot),
         "consistent": all_consistent,
         "phases": comparisons,
     }
@@ -2209,7 +2231,7 @@ def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
 
 def format_tests_run_counts(counts: dict[str, int] | None) -> str:
     if not counts:
-        return "(missing)"
+        return "not-available"
     return (
         f"Tests run: {counts['tests']}, Successes: {counts['passed']}, "
         f"Failures: {counts['failed']}, Errors: {counts['other']}"
@@ -2218,7 +2240,7 @@ def format_tests_run_counts(counts: dict[str, int] | None) -> str:
 
 def format_tests_run_counts_short(counts: dict[str, int] | None) -> str:
     if not counts:
-        return "(missing)"
+        return "not-available"
     return f"T={counts['tests']} P={counts['passed']} F={counts['failed']} S={counts['skipped']} O={counts['other']}"
 
 
@@ -2262,18 +2284,23 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
     verdict_items = []
     for lab in labs:
         comparisons = lab["testCountConsistency"].get("phases", [])
-        mismatch_phases = [item["phase"] for item in comparisons if not item["consistent"]]
-        if lab["testCountConsistency"].get("consistent"):
-            verdict_items.append(f"{lab['name']}: consistent across {len(comparisons)} report-bearing phase(s).")
-        elif mismatch_phases:
+        mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
+        matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
+        unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
+        if mismatch_phases:
             verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
+        elif matched_phases:
+            verdict_items.append(f"{lab['name']}: matching counts where data is available.")
+        elif unavailable_phases:
+            verdict_items.append(f"{lab['name']}: count data is not-available for comparison.")
         else:
-            verdict_items.append(f"{lab['name']}: no report data was available to validate.")
+            verdict_items.append(f"{lab['name']}: no phase data was available to validate.")
         sections.append(
             {
                 "type": "table",
                 "title": lab["name"],
-                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase.",
+                "href": lab["href"],
+                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available.",
                 "headers": ["Phase", "README", "Console", "CTRF", "HTML", "Status"],
                 "rows": [
                     [
@@ -2282,16 +2309,16 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
                         item["console"],
                         item["ctrf"],
                         item["html"],
-                        "Match" if item["consistent"] else "Mismatch",
+                        format_count_status(item.get("status", "not-available")),
                     ]
                     for item in comparisons
-                ] or [["(no report data found)", "(missing)", "(missing)", "(missing)", "(missing)", "Mismatch"]],
+                ] or [["(no phase data found)", "not-available", "not-available", "not-available", "not-available", "Not available"]],
             }
         )
     return {
         "type": "sections",
         "title": "Test count consistency",
-        "note": "The README, console, CTRF JSON, and Specmatic HTML should all describe the same run for each report-bearing phase.",
+        "note": "The README, console, CTRF JSON, and Specmatic HTML should describe the same run wherever those sources are available.",
         "sections": [
             {
                 "type": "bullets",
@@ -2312,6 +2339,14 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
             },
         ],
     }
+
+
+def format_count_status(status: str) -> str:
+    if status == "match":
+        return "Match"
+    if status == "mismatch":
+        return "Mismatch"
+    return "Not available"
 
 
 def render_bullets(items: list[str]) -> str:
