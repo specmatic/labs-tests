@@ -74,12 +74,21 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     command_type = classify_command(readme_command)
     setup_types = detect_setup_types(readme_command)
     artifact_labels = sorted({artifact["label"] for artifact in [*common_artifacts, *phase_artifacts]})
+    generated_artifact_labels = sorted(
+        {
+            artifact["label"]
+            for artifact in [*common_artifacts, *phase_artifacts]
+            if artifact["origin"] == "generated"
+        }
+    )
     artifact_kinds = sorted({artifact["kind"] for artifact in [*common_artifacts, *phase_artifacts]})
     shell_console_blocks = [block for block in code_blocks if looks_like_console_block(block) and block["language"] in {"shell", "bash", "sh"}]
     console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
     shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
     additional_artifacts = sorted(
-        label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
+        label
+        for label in generated_artifact_labels
+        if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
     test_count_consistency = build_test_count_consistency_profile(spec.name, upstream_readme_text, report_snapshot)
@@ -105,10 +114,11 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         "phaseSignature": tuple(phase.name for phase in spec.phases),
         "artifacts": {
             "labels": artifact_labels,
+            "generatedLabels": generated_artifact_labels,
             "kinds": artifact_kinds,
             "common": common_artifacts,
             "phaseSpecific": phase_artifacts,
-            "families": detect_artifact_families(artifact_labels),
+            "families": detect_artifact_families(generated_artifact_labels),
         },
         "readme": {
             "h1": next((heading["text"] for heading in headings if heading["level"] == 1), ""),
@@ -162,7 +172,13 @@ def artifact_profile(artifact: Any) -> dict[str, Any]:
         "kind": data["kind"],
         "source": data["source_relpath"],
         "target": data["target_relpath"],
+        "origin": classify_artifact_origin(data["source_relpath"]),
     }
+
+
+def classify_artifact_origin(source_relpath: str) -> str:
+    normalized = source_relpath.replace("\\", "/")
+    return "generated" if normalized.startswith("build/") else "source"
 
 
 def extract_headings(text: str) -> list[dict[str, Any]]:
@@ -373,12 +389,12 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     shared_h2 = most_common_value([tuple(lab["readme"]["actualH2"]) for lab in labs if lab["readme"]["actualH2"]])
     common_required_h2_sets = [set(lab["readme"]["requiredH2"]) for lab in labs if lab["readme"]["requiredH2"]]
     common_required_h2 = set.intersection(*common_required_h2_sets) if common_required_h2_sets else set()
-    artifact_label_counts = Counter(label for lab in labs for label in lab["artifacts"]["labels"])
+    artifact_label_counts = Counter(label for lab in labs for label in lab["artifacts"]["generatedLabels"])
     common_phase_prefix = longest_common_prefix([lab["phaseSignature"] for lab in labs if lab["phaseSignature"]])
     rows = [
         {"kind": "group", "label": "Similarities", "section": "similarities", "cells": [None] * len(labs)},
         {
-            "label": "README starts with a top-level H1",
+            "label": "README starts with a top-level H1 title",
             "tooltip": {
                 "summary": ["Both READMEs start with an H1."],
                 "details": build_h1_details(labs),
@@ -386,12 +402,12 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["h1"]) for lab in labs],
         },
         {
-            "label": "README H2 sequence follows the source README outline",
+            "label": "README H2 order matches the lab's source-of-truth structure",
             "tooltip": build_h2_sequence_tooltip(labs, common_required_h2),
             "cells": [tuple(lab["readme"]["actualH2"]) == shared_h2 for lab in labs],
         },
         {
-            "label": "README contains the common required H2 sections",
+            "label": "README includes all shared required H2 sections",
             "tooltip": {
                 "summary": ["Both READMEs include the shared required H2 sections."],
                 "details": build_shared_section_details(common_required_h2),
@@ -399,7 +415,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [common_required_h2.issubset(set(lab["readme"]["actualH2"])) for lab in labs],
         },
         {
-            "label": "README has implementation steps in H3 format",
+            "label": "README uses H3 headings for lab-specific implementation steps",
             "tooltip": {
                 "summary": ["Lab-specific walkthrough steps belong in H3 headings."],
                 "details": build_h3_details(labs),
@@ -407,7 +423,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["readme"]["h3Count"] > 0 for lab in labs],
         },
         {
-            "label": "README opening phase is shared across the compared labs",
+            "label": "README phase sequence starts with the same shared opening phase",
             "tooltip": {
                 "summary": ["Both labs start with the same opening phase pattern."],
                 "details": build_phase_prefix_details(common_phase_prefix, labs),
@@ -415,7 +431,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [tuple(lab["phaseSignature"][: len(common_phase_prefix)]) == common_phase_prefix for lab in labs] if common_phase_prefix else [False for _ in labs],
         },
         {
-            "label": "README has an opening shell console section before implementation",
+            "label": "README includes a shell console section before the implementation steps",
             "tooltip": {
                 "summary": ["Both READMEs include a shell console section before the implementation starts."],
                 "details": build_console_section_details(labs, "opening"),
@@ -423,7 +439,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["openingShellConsoleSection"]) for lab in labs],
         },
         {
-            "label": "README has a closing shell console section after implementation",
+            "label": "README includes a shell console section after the implementation steps",
             "tooltip": {
                 "summary": ["Both READMEs end with a shell console section after the implementation."],
                 "details": build_console_section_details(labs, "closing"),
@@ -431,7 +447,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
         },
         {
-            "label": "All console sections use shell syntax",
+            "label": "README console sections all use shell fenced blocks",
             "tooltip": {
                 "summary": ["All console examples use shell-style fences."],
                 "details": build_shell_console_details(labs),
@@ -439,7 +455,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["readme"]["allConsoleBlocksUseShellSyntax"] for lab in labs],
         },
         {
-            "label": "Test count consistency across README, console, CTRF, and HTML",
+            "label": "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
             "tooltip": {
                 "summary": ["The README, console output, CTRF JSON, and Specmatic HTML report should describe the same counts."],
                 "details": build_test_count_consistency_details(labs),
@@ -447,20 +463,20 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [lab["testCountConsistency"]["consistent"] for lab in labs],
         },
         {
-            "label": "CTRF report available",
+            "label": "Generated artifacts include ctrf-report.json",
             "tooltip": {
                 "summary": ["Each lab writes ctrf-report.json as the machine-readable test result."],
                 "details": build_artifact_details(labs, "ctrf-report.json"),
             },
-            "cells": ["ctrf-report.json" in lab["artifacts"]["labels"] for lab in labs],
+            "cells": ["ctrf-report.json" in lab["artifacts"]["generatedLabels"] for lab in labs],
         },
         {
-            "label": "Sibling HTML report available",
+            "label": "Generated artifacts include the sibling Specmatic HTML report",
             "tooltip": {
                 "summary": ["Each lab writes specmatic-report.html alongside the CTRF JSON output."],
                 "details": build_artifact_details(labs, "specmatic-report.html"),
             },
-            "cells": ["specmatic-report.html" in lab["artifacts"]["labels"] for lab in labs],
+            "cells": ["specmatic-report.html" in lab["artifacts"]["generatedLabels"] for lab in labs],
         },
         {"kind": "group", "label": "Differences", "section": "differences", "cells": [None] * len(labs)},
         {
@@ -496,15 +512,15 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [True for _ in labs],
         },
         {
-            "label": "README has lab-specific artifact labels",
+            "label": "Generated artifacts include lab-specific extra files",
             "tooltip": {
-                "summary": ["Each lab has artifact labels beyond the shared report outputs."],
+                "summary": ["Each lab may generate extra files beyond the shared report outputs."],
                 "details": build_lab_specific_artifact_details(labs, artifact_label_counts),
             },
-            "cells": [any(artifact_label_counts[label] == 1 for label in lab["artifacts"]["labels"]) for lab in labs],
+            "cells": [any(artifact_label_counts[label] == 1 for label in lab["artifacts"]["generatedLabels"]) for lab in labs],
         },
         {
-            "label": "No additional artifacts beyond report outputs",
+            "label": "Generated artifacts do not include unexpected extra files",
             "tooltip": {
                 "summary": ["Any extra files beyond the report outputs are treated as deviations."],
                 "details": build_additional_artifact_details(labs),
@@ -1213,7 +1229,7 @@ def build_shared_section_details(common_required_h2: set[str]) -> dict[str, Any]
         "type": "bullets",
         "title": "Shared required H2 sections",
         "items": sorted(common_required_h2) or ["(no common required H2 sections found)"],
-        "note": "These sections should appear in every README.",
+        "note": "These are the shared H2 sections that should appear in every compared README.",
     }
 
 
@@ -1278,7 +1294,7 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
         "type": "table",
         "title": f"{label} coverage",
         "headers": ["Lab", "Present"],
-        "rows": [[lab["name"], "Yes" if label in lab["artifacts"]["labels"] else "No"] for lab in labs],
+        "rows": [[lab["name"], "Yes" if label in lab["artifacts"]["generatedLabels"] else "No"] for lab in labs],
     }
 
 
@@ -1320,12 +1336,12 @@ def build_phase_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 def build_lab_specific_artifact_details(labs: list[dict[str, Any]], artifact_label_counts: Counter[str]) -> dict[str, Any]:
     return {
         "type": "table",
-        "title": "Lab-specific artifact labels",
+        "title": "Lab-specific generated artifacts",
         "headers": ["Lab", "Unique labels"],
         "rows": [
             [
                 lab["name"],
-                ", ".join(label for label in lab["artifacts"]["labels"] if artifact_label_counts[label] == 1) or "(none)",
+                ", ".join(label for label in lab["artifacts"]["generatedLabels"] if artifact_label_counts[label] == 1) or "(none)",
             ]
             for lab in labs
         ],

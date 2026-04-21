@@ -193,7 +193,16 @@ Each lab’s `output/` directory is copied into `output/labs/<lab-name>-output/`
 
 Each individual lab run also clears its own `<lab>/output/` directory before a normal run starts. Refresh-only runs skip that cleanup so they can rebuild from the saved artifacts already on disk.
 
+For Docker-based labs, a normal run also performs a best-effort runtime cleanup before the first phase starts and again after the lab finishes. This keeps stale containers, networks, or volumes from an earlier lab attempt from leaking into later results without adding heavy cleanup work between every command.
+
 Failure messages should be explicit and actionable.
+
+Validation focus:
+
+- the upstream lab `README.md` is the source of truth
+- the console output from the automated lab run should match the README
+- the generated CTRF JSON and sibling Specmatic HTML report should match the README and console output
+- copied source snapshots such as `specmatic.yaml`, example JSON files, or service source files may still be archived for inspection, but they should not drive pass/fail assertions by themselves
 
 When a command or validation fails, the message should always say:
 

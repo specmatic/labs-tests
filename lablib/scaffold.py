@@ -147,6 +147,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
                     print(spec.setup_failure_message)
                     return 1
 
+            run_best_effort_runtime_cleanup(spec, "before lab execution")
             for phase in spec.phases:
                 print(f"Preparing {phase.name.lower()} lab state...")
                 apply_phase_files(spec, phase, original_files)
@@ -154,8 +155,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
                 phases.append(phase_result)
         finally:
             restore_original_files(spec, original_files)
-            if spec.post_phase_cleanup is not None:
-                spec.post_phase_cleanup(spec)
+            run_best_effort_runtime_cleanup(spec, "after lab execution")
 
     report = build_report(
         lab_name=spec.name,
@@ -177,6 +177,21 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 def clean_lab_output_dir(spec: LabSpec) -> None:
     if spec.output_dir.exists():
         shutil.rmtree(spec.output_dir, ignore_errors=True)
+
+
+def run_best_effort_runtime_cleanup(spec: LabSpec, when: str) -> None:
+    if spec.post_phase_cleanup is None:
+        return
+    print(f"Running runtime cleanup {when}...", flush=True)
+    try:
+        spec.post_phase_cleanup(spec)
+    except Exception as exc:
+        print(
+            f"[warning] Runtime cleanup {when} failed for {spec.name}: {exc}. "
+            "Impact: stale containers, networks, or volumes may affect later phases or labs. "
+            "Action required: inspect the Docker state and rerun the lab if needed.",
+            flush=True,
+        )
 
 
 def snapshot_lab_output(spec: LabSpec) -> Path:
@@ -336,7 +351,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         )
 
     if phase.extra_assertions is not None:
-        assertions.extend(phase.extra_assertions(context))
+        assertions.extend(filter_relevant_lab_assertions(phase.extra_assertions(context), context))
 
     assertions.extend(evaluate_readme_assertions(context))
     assertions.extend(evaluate_readme_console_structure(context))
@@ -399,6 +414,8 @@ def build_artifact_assertions(context: ValidationContext) -> list[dict[str, Any]
     for artifact in all_artifact_specs(context.lab, context.phase):
         loaded = context.artifacts[artifact.label]
         artifact_path = loaded["path"]
+        if loaded.get("origin") == "source":
+            continue
         assertions.append(
             assert_condition(
                 artifact_path.exists(),
@@ -481,25 +498,84 @@ def capture_artifacts(spec: LabSpec, phase: PhaseSpec, target_dir: Path) -> dict
             shutil.copytree(source, target, dirs_exist_ok=True)
         else:
             shutil.copy2(source, target)
-        artifacts[artifact.label] = load_artifact(target, artifact.kind)
+        artifacts[artifact.label] = load_artifact(
+            target,
+            artifact.kind,
+            label=artifact.label,
+            source_relpath=artifact.source_relpath,
+            target_relpath=artifact.target_relpath,
+        )
     return artifacts
 
 
 def load_copied_artifacts(spec: LabSpec, phase: PhaseSpec, target_dir: Path) -> dict[str, dict[str, Any]]:
     artifacts: dict[str, dict[str, Any]] = {}
     for artifact in all_artifact_specs(spec, phase):
-        artifacts[artifact.label] = load_artifact(target_dir / artifact.target_relpath, artifact.kind)
+        artifacts[artifact.label] = load_artifact(
+            target_dir / artifact.target_relpath,
+            artifact.kind,
+            label=artifact.label,
+            source_relpath=artifact.source_relpath,
+            target_relpath=artifact.target_relpath,
+        )
     return artifacts
 
 
-def load_artifact(path: Path, kind: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {"path": path, "kind": kind}
+def load_artifact(
+    path: Path,
+    kind: str,
+    *,
+    label: str | None = None,
+    source_relpath: str | None = None,
+    target_relpath: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": path,
+        "kind": kind,
+        "label": label,
+        "sourceRelpath": source_relpath,
+        "targetRelpath": target_relpath,
+        "origin": classify_artifact_origin(source_relpath),
+    }
     if kind == "json":
         payload["json"] = load_json(path)
         payload["text"] = path.read_text(encoding="utf-8")
     elif kind in {"html", "text"}:
         payload["text"] = path.read_text(encoding="utf-8")
     return payload
+
+
+def classify_artifact_origin(source_relpath: str | None) -> str:
+    if not source_relpath:
+        return "unknown"
+    normalized = source_relpath.replace("\\", "/")
+    return "generated" if normalized.startswith("build/") else "source"
+
+
+def filter_relevant_lab_assertions(assertions: list[dict[str, Any]], context: ValidationContext) -> list[dict[str, Any]]:
+    return [
+        assertion
+        for assertion in assertions
+        if not assertion_targets_only_source_snapshots(assertion, context)
+    ]
+
+
+def assertion_targets_only_source_snapshots(assertion: dict[str, Any], context: ValidationContext) -> bool:
+    if assertion.get("category") != "report":
+        return False
+    referenced_paths = {
+        item.get("value", "")
+        for item in assertion.get("details", [])
+        if item.get("label") == "Artifact path"
+    }
+    if not referenced_paths:
+        return False
+    matched_origins = {
+        artifact.get("origin")
+        for artifact in context.artifacts.values()
+        if str(artifact.get("path", "")) in referenced_paths
+    }
+    return bool(matched_origins) and matched_origins == {"source"}
 
 
 def all_artifact_specs(spec: LabSpec, phase: PhaseSpec) -> tuple[ArtifactSpec, ...]:

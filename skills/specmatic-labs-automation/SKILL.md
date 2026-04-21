@@ -189,6 +189,9 @@ Important rules:
 - lab runners should support setup skipping
 - lab runners should support report-only refreshes from captured artifacts
 - normal lab runs should clear the lab-local `output/` directory before generating new artifacts; refresh-only runs should skip that cleanup
+- normal Docker-based lab runs should also do a best-effort runtime cleanup before the first phase and again after the lab completes, so stale containers, networks, or volumes do not leak into later results
+- the upstream lab `README.md` is the source of truth; the console output and generated CTRF/Specmatic HTML reports should match it
+- copied source snapshots such as specs, examples, and service files may be archived for inspection, but they should not be treated as primary pass/fail assertions on their own
 
 Current command expectations:
 
