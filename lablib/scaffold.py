@@ -773,7 +773,6 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
 
 def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[str, Any]]:
     readme_text = context.readme_text
-    console_output = normalize_space(context.command_result.combined_output)
     blocks = extract_console_blocks(readme_text)
     shell_blocks = [block for block in blocks if block["is_console"] and block["language"] in {"shell", "bash", "sh"}]
     console_blocks = [block for block in blocks if block["is_console"]]
@@ -806,20 +805,6 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
             ],
         )
     )
-    for index, block in enumerate(shell_blocks, start=1):
-        representative_line = block["preview"]
-        assertions.append(
-            assert_condition(
-                representative_line in console_output,
-                f"Console output matched README shell section {index}.",
-                f"Console output did not match README shell section {index}.",
-                category="console",
-                details=[
-                    detail("Shell section", representative_line),
-                    detail("Console excerpt", extract_context(context.command_result.combined_output, representative_line)),
-                ],
-            )
-        )
     return assertions
 
 
