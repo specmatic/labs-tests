@@ -80,6 +80,8 @@ class PhaseSpec:
     artifact_specs: tuple[ArtifactSpec, ...] = ()
     notes: tuple[str, ...] = ()
     readme_summary_query: str | None = None
+    command_timeout_seconds: float | None = None
+    command_idle_timeout_seconds: float | None = None
 
 
 @dataclass
@@ -284,6 +286,8 @@ def execute_phase(
         env=spec.command_env,
         stream_output=True,
         stream_prefix=f"[{phase_dir_name(phase)}]",
+        timeout_seconds=phase.command_timeout_seconds,
+        idle_timeout_seconds=phase.command_idle_timeout_seconds,
     )
     try:
         artifacts = capture_artifacts(spec, phase, target_dir)
@@ -369,6 +373,20 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
             ],
         )
     )
+    if command_result.timed_out:
+        assertions.append(
+            assert_condition(
+                False,
+                "Command completed within the allowed timeout.",
+                f"Command timed out. {command_result.timeout_reason}",
+                category="command",
+                details=[
+                    detail("Command", " ".join(spec.command)),
+                    detail("Timeout reason", command_result.timeout_reason),
+                    detail("Exit code", command_result.exit_code),
+                ],
+            )
+        )
 
     assertions.extend(build_artifact_assertions(context))
 

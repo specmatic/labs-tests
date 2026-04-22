@@ -96,6 +96,8 @@ def build_lab_spec() -> LabSpec:
                 description="Run the provider with the intentional petType/type mismatch and verify the failing contract test.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
+                command_timeout_seconds=180,
+                command_idle_timeout_seconds=120,
                 expected_console_phrases=(
                     "Scenario: GET /pets/(petid:number) -> 200 with the request from the example 'SCOOBY_200_OK' has FAILED",
                     "petType",
@@ -122,6 +124,8 @@ def build_lab_spec() -> LabSpec:
                 description="Change the provider response field to type and verify the contract test passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
+                command_timeout_seconds=180,
+                command_idle_timeout_seconds=120,
                 expected_console_phrases=("Tests run: 1, Successes: 1, Failures: 0, Errors: 0",),
                 readme_assertions=(
                     readme_contains(
