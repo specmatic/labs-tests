@@ -10,6 +10,19 @@ import shutil
 from typing import Any, Callable
 
 from lablib.command_runner import CommandResult, run_command
+from lablib.readme_expectations import (
+    EXECUTABLE_COMMAND_FENCE_LANGUAGES,
+    OUTPUT_FENCE_LANGUAGE,
+    get_lab_readme_override,
+    heading_matches,
+    missing_shared_h2_titles,
+    normalize_heading_title,
+    optional_h2_titles,
+    shared_h2_sequence_matches,
+    shared_h2_titles,
+    title_present,
+    unexpected_h2_titles_for_lab,
+)
 from lablib.reporting import build_report, write_html, write_json
 from lablib.workspace_setup import run_setup
 
@@ -23,8 +36,8 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
-CONSOLE_FENCE_LANGUAGES = {"shell", "bash", "sh", "zsh", "powershell", "ps1", "cmd", "bat"}
-TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
+CONSOLE_FENCE_LANGUAGES = set(EXECUTABLE_COMMAND_FENCE_LANGUAGES)
+TERMINAL_OUTPUT_FENCE_LANGUAGE = OUTPUT_FENCE_LANGUAGE
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
@@ -371,8 +384,8 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
     assertions.extend(evaluate_readme_console_structure(context))
     assertions.extend(evaluate_readme_os_documentation(context))
     assertions.extend(evaluate_runtime_summary_drift(context))
-    if phase.include_readme_structure_checks and spec.readme_structure is not None:
-        assertions.extend(validate_readme_structure(context.readme_text, spec.readme_structure))
+    if phase.include_readme_structure_checks:
+        assertions.extend(validate_readme_structure(context.readme_text, spec.name))
     assertions = apply_readme_annotation_overrides(assertions, context.readme_text)
 
     phase_status = "passed" if all(item["status"] != "failed" for item in assertions) else "failed"
@@ -1028,10 +1041,12 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
     return assertions
 
 
-def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) -> list[dict[str, Any]]:
+def validate_readme_structure(readme_text: str, lab_name: str) -> list[dict[str, Any]]:
     headings = [(len(m.group(1)), m.group(2).strip()) for m in HEADING_RE.finditer(readme_text)]
     assertions: list[dict[str, Any]] = []
     h1_headings = [text for level, text in headings if level == 1]
+    actual_h2 = [text for level, text in headings if level == 2]
+    override = get_lab_readme_override(lab_name)
     assertions.append(
         assert_equal(
             len(h1_headings),
@@ -1044,15 +1059,14 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
         )
     )
 
-    for prefix in (*structure.required_h2_prefixes, *structure.additional_h2_prefixes):
-        normalized_prefix = normalize_heading_text(prefix)
-        at_level = [text for level, text in headings if level == 2 and normalize_heading_text(text).startswith(normalized_prefix)]
-        wrong_level = [f"h{level} {text}" for level, text in headings if level != 2 and normalize_heading_text(text).startswith(normalized_prefix)]
+    for expected_title in shared_h2_titles():
+        at_level = [text for level, text in headings if level == 2 and heading_matches(text, expected_title)]
+        wrong_level = [f"h{level} {text}" for level, text in headings if level != 2 and heading_matches(text, expected_title)]
         assertions.append(
             assert_condition(
                 bool(at_level),
-                f"README contains the '{prefix}' section at level 2.",
-                f"README is missing the '{prefix}' section at level 2.",
+                f"README contains the '{expected_title}' section at level 2.",
+                f"README is missing the '{expected_title}' section at level 2.",
                 category="readme",
                 code="readme.structure.required_h2_sections",
                 details=[
@@ -1062,36 +1076,43 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
             )
         )
 
-    if structure.enforce_required_order:
-        required_positions: list[tuple[str, int]] = []
-        for prefix in structure.required_h2_prefixes:
-            normalized_prefix = normalize_heading_text(prefix)
-            for index, (level, text) in enumerate(headings):
-                if level == 2 and normalize_heading_text(text).startswith(normalized_prefix):
-                    required_positions.append((prefix, index))
-                    break
-
-        actual_prefixes = [prefix for prefix, _ in required_positions]
-        actual_positions = [position for _, position in required_positions]
-        order_is_correct = actual_positions == sorted(actual_positions) and actual_prefixes == list(structure.required_h2_prefixes)
-        assertions.append(
-            assert_condition(
-                order_is_correct,
-                "README required sections appear in the expected order.",
-                "README required sections do not appear in the expected order.",
-                category="readme",
-                code="readme.structure.required_h2_order",
-                details=[
-                    detail("Expected order", " -> ".join(structure.required_h2_prefixes)),
-                    detail("Actual found order", " -> ".join(actual_prefixes) or "(none)"),
-                ],
-            )
+    missing_shared = missing_shared_h2_titles(actual_h2)
+    actual_found_shared = [
+        title
+        for title in actual_h2
+        if any(heading_matches(title, expected) for expected in shared_h2_titles())
+    ]
+    assertions.append(
+        assert_condition(
+            shared_h2_sequence_matches(actual_h2),
+            "README required sections appear in the expected order.",
+            "README required sections do not appear in the expected order.",
+            category="readme",
+            code="readme.structure.required_h2_order",
+            details=[
+                detail("Expected order", " -> ".join(shared_h2_titles())),
+                detail("Actual shared H2 order", " -> ".join(actual_found_shared) or "(none)"),
+                detail("Missing shared H2 sections", ", ".join(missing_shared) or "(none)"),
+            ],
         )
+    )
+
+    unexpected_h2 = unexpected_h2_titles_for_lab(lab_name, actual_h2)
+    assertions.append(
+        assert_condition(
+            not unexpected_h2,
+            "README does not keep unexpected implementation sections at H2 level.",
+            "README contains extra or unwanted H2 sections that should move to H3 or be removed.",
+            category="readme",
+            code="readme.structure.unexpected_h2_sections",
+            details=[
+                detail("Unexpected H2 sections", ", ".join(unexpected_h2) or "(none)"),
+                detail("Allowed optional H2 sections", ", ".join(optional_h2_titles()) or "(none)"),
+                detail("Lab override H2 sections", ", ".join(override.allowed_additional_h2_titles) or "(none)"),
+            ],
+        )
+    )
     return assertions
-
-
-def normalize_heading_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text.replace("`", "")).strip().lower()
 
 
 def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:

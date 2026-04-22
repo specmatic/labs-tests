@@ -217,7 +217,10 @@ Validation focus:
 - Studio-only phases that are not automated yet should be reported as known limitations or skipped validations, not as failures
 - intentional differences that are part of the lab design should be recorded as expected differences, not counted in the failure index
 - copied source snapshots such as `specmatic.yaml`, example JSON files, or service source files may still be archived for inspection, but they should not drive pass/fail assertions by themselves
-- the shared comparison H2 template is configured in [`lablib/readme_expectations.py`](/Users/anand.bagmar/projects/specmatic/labs-tests/lablib/readme_expectations.py) as `EXPECTED_README_H2_SEQUENCE`, so the expected README order can be updated in one place
+- the shared README template is configured in [`lablib/readme_expectations.py`](/Users/anand.bagmar/projects/specmatic/labs-tests/lablib/readme_expectations.py)
+  - `README_TEMPLATE` defines the shared H1/H2/H3 schema and section-level command/output expectations
+  - `LAB_README_OVERRIDES` defines lab-specific exceptions or manual Studio allowances
+  - `EXPECTED_README_H2_SEQUENCE` is derived from that template for compatibility with existing comparison logic
 
 README command/output conventions:
 
@@ -289,6 +292,7 @@ Supported shared README ignore codes currently include:
 - `readme.structure.single_h1`
 - `readme.structure.required_h2_sections`
 - `readme.structure.required_h2_order`
+- `readme.structure.unexpected_h2_sections`
 
 When an ignore annotation is present:
 

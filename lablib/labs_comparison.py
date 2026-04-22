@@ -10,7 +10,17 @@ from pathlib import Path
 import re
 from typing import Any
 
-from lablib.readme_expectations import EXPECTED_README_H2_SEQUENCE
+from lablib.readme_expectations import (
+    EXPECTED_README_H2_SEQUENCE,
+    README_TEMPLATE,
+    get_lab_readme_override,
+    heading_matches,
+    optional_h2_titles,
+    shared_h2_sequence_matches,
+    shared_h2_titles,
+    title_present,
+    unexpected_h2_titles_for_lab,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +108,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
     test_count_consistency = build_test_count_consistency_profile(spec.name, upstream_readme_text, report_snapshot)
+    override = get_lab_readme_override(spec.name)
+    unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
 
     return {
         "name": spec.name,
@@ -128,15 +140,16 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         },
         "readme": {
             "h1": next((heading["text"] for heading in headings if heading["level"] == 1), ""),
-            "requiredH2": list(spec.readme_structure.required_h2_prefixes) if spec.readme_structure else [],
-            "additionalH2": list(spec.readme_structure.additional_h2_prefixes) if spec.readme_structure else [],
+            "requiredH2": list(shared_h2_titles()),
+            "optionalH2": list(optional_h2_titles()),
+            "additionalH2": list(override.allowed_additional_h2_titles),
             "actualH2": h2_headings,
             "actualH3": h3_headings,
-            "hasPrerequisites": any("prerequisites" in heading.lower() for heading in h2_headings),
+            "hasPrerequisites": title_present(h2_headings, "Prerequisites"),
             "hasStudioSection": any("studio" in heading.lower() for heading in h2_headings),
             "hasStudioComponent": any("studio" in heading.lower() for heading in [*h2_headings, *h3_headings]) or "--profile studio" in upstream_readme_text.lower(),
-            "hasTroubleshooting": any("troubleshooting" in heading.lower() for heading in h2_headings),
-            "hasPassCriteria": any("pass criteria" in heading.lower() or "verify the fix" in heading.lower() for heading in h2_headings),
+            "hasTroubleshooting": title_present(h2_headings, "Troubleshooting"),
+            "hasPassCriteria": any(heading_matches(heading, "Pass criteria") or "verify the fix" in heading.lower() for heading in h2_headings),
             "hasCleanupGuidance": any("cleanup" in heading.lower() for heading in [*h2_headings, *h3_headings]),
             "headingCount": len(headings),
             "h2Count": len(h2_headings),
@@ -152,6 +165,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "shellConsoleSections": shell_console_sections,
             "filesSectionText": extract_heading_section_text(upstream_readme_text, "Files in this lab", level=2),
             "osDocumentation": os_documentation,
+            "unexpectedH2": unexpected_h2,
+            "sharedH2OrderMatches": shared_h2_sequence_matches(h2_headings),
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -558,10 +573,10 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
-    shared_h2 = tuple(EXPECTED_README_H2_SEQUENCE)
-    common_required_h2 = list(EXPECTED_README_H2_SEQUENCE)
+    shared_h2 = tuple(shared_h2_titles())
+    common_required_h2 = list(shared_h2_titles())
     extra_h2_by_lab = {
-        lab["name"]: [section for section in lab["readme"]["actualH2"] if section not in shared_h2]
+        lab["name"]: list(lab["readme"]["unexpectedH2"])
         for lab in labs
     }
     row_definitions = [
@@ -576,7 +591,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
         {
             "label": "README H2 order matches the lab's source-of-truth structure",
             "tooltip": build_h2_sequence_tooltip(labs, common_required_h2),
-            "cells": [tuple(lab["readme"]["actualH2"]) == shared_h2 for lab in labs],
+            "cells": [lab["readme"]["sharedH2OrderMatches"] for lab in labs],
         },
         {
             "label": "README uses H3 headings for lab-specific implementation steps",
@@ -2139,7 +2154,7 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
 def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2: list[str] | tuple[str, ...] | set[str]) -> dict[str, Any]:
     sections = []
     for lab in labs:
-        extra_h2 = [section for section in lab["readme"]["actualH2"] if section not in common_required_h2]
+        extra_h2 = list(lab["readme"]["unexpectedH2"])
         sections.append(
             {
                 "type": "sections",
@@ -2151,6 +2166,13 @@ def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2
                         "tone": "attention",
                         "note": "These walkthrough sections are currently H2 headings and should be converted to H3.",
                         "items": extra_h2 or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Allowed H2 exceptions",
+                        "tone": "ok",
+                        "note": "These extra H2 sections are allowed by the shared schema or lab override.",
+                        "items": lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"] or ["(none)"],
                     },
                 ],
             }
@@ -2217,21 +2239,23 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
     lab_sections = []
     for lab in labs:
         actual_h2 = list(lab["readme"]["actualH2"])
-        actual_h2_set = set(actual_h2)
-        expected_h2_set = set(common_required_h2)
-        extra_sections = [section for section in actual_h2 if section not in expected_h2_set]
-        missing_sections = [section for section in common_required_h2 if section not in actual_h2_set]
+        extra_sections = list(lab["readme"]["unexpectedH2"])
+        missing_sections = [section for section in common_required_h2 if not any(heading_matches(actual, section) for actual in actual_h2)]
         incorrect_order_sections = []
-        actual_positions = {section: index for index, section in enumerate(actual_h2)}
+        actual_positions = []
+        for index, title in enumerate(actual_h2):
+            matched = next((section for section in common_required_h2 if heading_matches(title, section)), None)
+            if matched is not None:
+                actual_positions.append((matched, index))
         previous_position = -1
         for section in common_required_h2:
-            if section not in actual_positions:
+            current = next((index for matched, index in actual_positions if heading_matches(matched, section)), None)
+            if current is None:
                 continue
-            current_position = actual_positions[section]
-            if current_position < previous_position:
+            if current < previous_position:
                 incorrect_order_sections.append(section)
             else:
-                previous_position = current_position
+                previous_position = current
         lab_sections.append(
             {
                 "type": "sections",
@@ -2251,6 +2275,13 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
                         "tone": "attention",
                         "note": "These H2 sections are lab-specific walkthrough content and should move to H3.",
                         "items": extra_sections or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Allowed optional H2",
+                        "tone": "ok",
+                        "note": "These H2 sections are allowed by the shared template or lab override.",
+                        "items": lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"] or ["(none)"],
                     },
                     {
                         "type": "bullets",

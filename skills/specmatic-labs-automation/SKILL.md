@@ -195,6 +195,7 @@ Hidden README ignore annotation pattern:
   - `<!-- labs-tests: ignore readme.os_commands.coverage -->`
   - `<!-- labs-tests: ignore readme.command_output.followup readme.output.terminaloutput_fence -->`
 - when present, the matching validation should become `skipped`, stay visible in the report, and not count as a failure
+- structure-related ignore codes can include `readme.structure.required_h2_sections`, `readme.structure.required_h2_order`, and `readme.structure.unexpected_h2_sections`
 
 ## Category model
 
@@ -223,7 +224,10 @@ Important rules:
 - normal Docker-based lab runs should also do a best-effort runtime cleanup before the first phase and again after the lab completes, so stale containers, networks, or volumes do not leak into later results
 - the upstream lab `README.md` is the source of truth; the console output and generated CTRF/Specmatic HTML reports should match it
 - copied source snapshots such as specs, examples, and service files may be archived for inspection, but they should not be treated as primary pass/fail assertions on their own
-- the shared README H2 comparison template should live in one editable constant, so changing the expected sequence does not require updating comparison logic in multiple places; the current location is `lablib/readme_expectations.py` as `EXPECTED_README_H2_SEQUENCE`
+- the shared README schema should live in one editable module: `lablib/readme_expectations.py`
+  - `README_TEMPLATE` defines the shared H1/H2/H3 structure and section-level command/output rules
+  - `LAB_README_OVERRIDES` defines lab-specific exceptions or manual Studio allowances
+  - `EXPECTED_README_H2_SEQUENCE` is derived from the shared template and can continue to support compatibility checks
 
 Current command expectations:
 
