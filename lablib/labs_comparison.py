@@ -1191,6 +1191,21 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       color: #8f2d1f;
       font-weight: 600;
     }}
+    .matrix-tooltip-count.ok {{
+      color: #245b34;
+    }}
+    .matrix-tooltip-count.mismatch {{
+      color: #b42318;
+      font-weight: 700;
+      background: #fff1ea;
+      border-radius: 0.35rem;
+      padding: 0.2rem 0.35rem;
+      display: inline-block;
+    }}
+    .matrix-tooltip-count.na {{
+      color: #5f6b74;
+      font-style: italic;
+    }}
     .matrix .matrix-lab {{
       min-width: 120px;
       max-width: 120px;
@@ -1503,23 +1518,30 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
             const tr = document.createElement('tr');
             row.forEach((cell, index) => {{
               const td = document.createElement('td');
-              td.textContent = cell;
-              if (typeof cell === 'string' && cell.includes('T=') && cell.includes('P=')) {{
+              const rawValue = (cell && typeof cell === 'object' && !Array.isArray(cell)) ? cell : null;
+              const textValue = rawValue ? (rawValue.text || '') : cell;
+              td.textContent = textValue;
+              if (rawValue && rawValue.title) {{
+                td.title = rawValue.title;
+              }} else if (typeof textValue === 'string' && textValue.includes('T=') && textValue.includes('P=')) {{
                 td.title = 'T = Total, P = Passed, F = Failed, S = Skipped, O = Other';
               }}
+              if (rawValue && rawValue.className) {{
+                rawValue.className.split(/\s+/).filter(Boolean).forEach((name) => td.classList.add(name));
+              }}
               const header = headers[index] || '';
-              if (header === 'Status' || header === 'Present') {{
+              if ((header === 'Status' || header === 'Present') && !rawValue?.className) {{
                 td.classList.add('matrix-tooltip-cell-status');
-                if (cell === 'Present' || cell === 'Yes') {{
+                if (textValue === 'Present' || textValue === 'Yes') {{
                   td.classList.add('ok');
                 }}
-                if (cell === 'Missing' || cell === 'No') {{
+                if (textValue === 'Missing' || textValue === 'No') {{
                   td.classList.add('fail');
                 }}
               }}
-              if (header === 'Action') {{
+              if (header === 'Action' && !rawValue?.className) {{
                 td.classList.add('matrix-tooltip-cell-action');
-                if (cell === 'No change needed.' || cell.endsWith('present') || cell === 'No change needed.') {{
+                if (textValue === 'No change needed.' || textValue.endsWith('present') || textValue === 'No change needed.') {{
                   td.classList.add('ok');
                 }} else {{
                   td.classList.add('fail');
@@ -2420,10 +2442,10 @@ def build_test_count_consistency_profile(
         comparisons.append(
             {
                 "phase": getattr(spec_phase, "readme_summary_query", None) or readme_phase_name or phase.get("name", f"Phase {index + 1}"),
-                "readme": format_tests_run_counts(readme_counts) if readme_counts else "not-available",
-                "console": format_tests_run_counts(console_counts) if console_counts else "not-available",
-                "ctrf": format_tests_run_counts(ctrf_summary) if ctrf_summary else "not-available",
-                "html": format_tests_run_counts(html_summary) if html_summary else "not-available",
+                "readmeCounts": readme_counts,
+                "consoleCounts": console_counts,
+                "ctrfCounts": ctrf_summary,
+                "htmlCounts": html_summary,
                 "consistent": consistent,
                 "status": status,
             }
@@ -2600,6 +2622,49 @@ def format_tests_run_counts(counts: dict[str, int] | None) -> str:
     )
 
 
+def count_cell_text(counts: dict[str, int] | None) -> str:
+    return format_tests_run_counts(counts) if counts else "not-available"
+
+
+def choose_reference_counts(item: dict[str, Any]) -> dict[str, int] | None:
+    candidates = [
+        item.get("readmeCounts"),
+        item.get("consoleCounts"),
+        item.get("ctrfCounts"),
+        item.get("htmlCounts"),
+    ]
+    present = [counts for counts in candidates if counts is not None]
+    if not present:
+        return None
+    tuples = [tuple(sorted(counts.items())) for counts in present]
+    most_common, count = Counter(tuples).most_common(1)[0]
+    if count >= 2:
+        return dict(most_common)
+    return present[0]
+
+
+def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any]) -> dict[str, str]:
+    reference = choose_reference_counts(comparison_item)
+    text = count_cell_text(counts)
+    if counts is None:
+        return {
+            "text": text,
+            "className": "matrix-tooltip-count na",
+            "title": "No count data was available for this source.",
+        }
+    if reference is None or counts == reference:
+        return {
+            "text": text,
+            "className": "matrix-tooltip-count ok",
+            "title": "T = Total, P = Passed, F = Failed, S = Skipped, O = Other",
+        }
+    return {
+        "text": text,
+        "className": "matrix-tooltip-count mismatch",
+        "title": "This count block does not match the other available sources. T = Total, P = Passed, F = Failed, S = Skipped, O = Other",
+    }
+
+
 def format_tests_run_summary_from_report_json(report_path: Path) -> dict[str, int] | None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if isinstance(report, list):
@@ -2702,14 +2767,14 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
                 "rows": [
                     [
                         item["phase"],
-                        item["readme"],
-                        item["console"],
-                        item["ctrf"],
-                        item["html"],
+                        build_count_cell(item.get("readmeCounts"), item),
+                        build_count_cell(item.get("consoleCounts"), item),
+                        build_count_cell(item.get("ctrfCounts"), item),
+                        build_count_cell(item.get("htmlCounts"), item),
                         format_count_status(item.get("status", "not-available")),
                     ]
                     for item in comparisons
-                ] or [["(no phase data found)", "not-available", "not-available", "not-available", "not-available", "Not available"]],
+                ] or [["(no phase data found)", count_cell_text(None), count_cell_text(None), count_cell_text(None), count_cell_text(None), "Not available"]],
             }
         )
     return {
