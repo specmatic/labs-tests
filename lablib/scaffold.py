@@ -36,6 +36,8 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
+TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
+EXAMPLES_SUMMARY_RE = re.compile(r"Examples:\s*(?P<passed>\d+)\s+passed\s+and\s+(?P<failed>\d+)\s+failed\s+out of\s+(?P<tests>\d+)\s+total", re.IGNORECASE)
 CONSOLE_FENCE_LANGUAGES = set(EXECUTABLE_COMMAND_FENCE_LANGUAGES)
 TERMINAL_OUTPUT_FENCE_LANGUAGE = OUTPUT_FENCE_LANGUAGE
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
@@ -1331,14 +1333,21 @@ def apply_readme_annotation_overrides(assertions: list[dict[str, Any]], readme_t
 
 def extract_tests_run_summary(console_output: str) -> str | None:
     clean_output = strip_ansi(console_output)
-    matches = re.findall(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+", clean_output)
-    return matches[-1] if matches else None
+    tests_matches = TESTS_RUN_SUMMARY_RE.findall(clean_output)
+    if tests_matches:
+        return tests_matches[-1]
+    example_matches = EXAMPLES_SUMMARY_RE.finditer(clean_output)
+    last_match = None
+    for last_match in example_matches:
+        pass
+    return last_match.group(0) if last_match else None
 
 
 def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
     summaries: list[dict[str, str]] = []
-    pattern = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
-    for match in pattern.finditer(readme_text):
+    matches = list(TESTS_RUN_SUMMARY_RE.finditer(readme_text)) + list(EXAMPLES_SUMMARY_RE.finditer(readme_text))
+    matches.sort(key=lambda match: match.start())
+    for match in matches:
         line = line_number_for_index(readme_text, match.start())
         summaries.append(
             {
@@ -1379,7 +1388,16 @@ def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | Non
         clean_summary,
     )
     if not match:
-        return None
+        example_match = EXAMPLES_SUMMARY_RE.search(clean_summary)
+        if not example_match:
+            return None
+        return {
+            "tests": int(example_match.group("tests")),
+            "passed": int(example_match.group("passed")),
+            "failed": int(example_match.group("failed")),
+            "skipped": 0,
+            "other": 0,
+        }
     return {
         "tests": int(match.group("tests")),
         "passed": int(match.group("successes")),

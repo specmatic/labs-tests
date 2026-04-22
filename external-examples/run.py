@@ -161,8 +161,23 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
         assert_condition('"2025-11-28"' in context.artifacts["test_find_available_products_book_200.json"]["text"], "Fixed book example uses a valid ISO to-date.", "Fixed book example does not use a valid ISO to-date.", category="report"),
         assert_condition('"type": "book"' in context.artifacts["test_accepted_product_request.json"]["text"] and '"inventory": 5' in context.artifacts["test_accepted_product_request.json"]["text"], "Fixed product example uses valid enum and numeric values.", "Fixed product example does not use valid enum and numeric values.", category="report"),
         assert_condition('"count": 2' in context.artifacts["test_accepted_order_request.json"]["text"], "Fixed order example added the missing count field.", "Fixed order example did not add the missing count field.", category="report"),
-        assert_condition(context.artifacts["test_created_product_request_201.json"]["text"].strip() != "", "Created product 201 example was added.", "Created product 201 example was not added.", category="report"),
-        assert_condition(context.artifacts["test_created_order_request_201.json"]["text"].strip() != "", "Created order 201 example was added.", "Created order 201 example was not added.", category="report"),
+        assert_condition(
+            '"name": "Laptop"' in context.artifacts["test_created_product_request_201.json"]["text"]
+            and '"type": "gadget"' in context.artifacts["test_created_product_request_201.json"]["text"]
+            and '"inventory": 7' in context.artifacts["test_created_product_request_201.json"]["text"]
+            and '"id": 2' in context.artifacts["test_created_product_request_201.json"]["text"],
+            "Created product 201 example was added with a distinct request body and required response id.",
+            "Created product 201 example is missing the distinct request body or required response id.",
+            category="report",
+        ),
+        assert_condition(
+            '"productid": 2' in context.artifacts["test_created_order_request_201.json"]["text"]
+            and '"count": 3' in context.artifacts["test_created_order_request_201.json"]["text"]
+            and '"id": 2' in context.artifacts["test_created_order_request_201.json"]["text"],
+            "Created order 201 example was added with a distinct request body and required response id.",
+            "Created order 201 example is missing the distinct request body or required response id.",
+            category="report",
+        ),
     ]
 
 
@@ -203,14 +218,16 @@ def create_product_201_example(_: str) -> str:
       "Content-Type": "application/json"
     },
     "body": {
-      "name": "Harry Potter",
-      "type": "book",
-      "inventory": 5
+      "name": "Laptop",
+      "type": "gadget",
+      "inventory": 7
     }
   },
   "http-response": {
     "status": 201,
-    "body": {},
+    "body": {
+      "id": 2
+    },
     "status-text": "Created",
     "headers": {
       "Content-Type": "application/json"
@@ -229,13 +246,15 @@ def create_order_201_example(_: str) -> str:
       "Content-Type": "application/json"
     },
     "body": {
-      "productid": 1234,
-      "count": 2
+      "productid": 2,
+      "count": 3
     }
   },
   "http-response": {
     "status": 201,
-    "body": {},
+    "body": {
+      "id": 2
+    },
     "status-text": "Created",
     "headers": {
       "Content-Type": "application/json"
