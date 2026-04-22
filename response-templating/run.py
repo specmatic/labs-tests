@@ -28,6 +28,7 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "response-templating"
 README_FILE = UPSTREAM_LAB / "README.md"
 ORDER_MOCK_FILE = UPSTREAM_LAB / "examples" / "mock" / "test_accepted_order_request.json"
 LOOKUP_MOCK_FILE = UPSTREAM_LAB / "examples" / "mock" / "test_find_available_products_book_200.json"
+LOOKUP_GADGET_MOCK_FILE = UPSTREAM_LAB / "examples" / "mock" / "test_find_available_products_gadget_200.json"
 OUTPUT_DIR = ROOT / "response-templating" / "output"
 LAB_COMMAND = ["docker", "compose", "up", "--abort-on-container-exit"]
 
@@ -60,32 +61,14 @@ ORDER_TASK_A = """{
 }
 """
 
-LOOKUP_FINAL = """{
-  "dataLookup": {
-    "products": {
-      "book": {
-        "id": 1,
-        "name": "Larry Potter",
-        "type": "book",
-        "inventory": 100,
-        "createdOn": "2026-02-15"
-      },
-      "gadget": {
-        "id": 2,
-        "name": "iPhone",
-        "type": "gadget",
-        "inventory": 500,
-        "createdOn": "2026-02-15"
-      }
-    }
-  },
+LOOKUP_BOOK_FINAL = """{
   "http-request": {
     "path": "/findAvailableProducts",
     "method": "GET",
     "query": {
       "from-date": "2026-02-15",
       "to-date": "2026-02-15",
-      "type": "(PRODUCT_TYPE:string)"
+      "type": "book"
     },
     "headers": {
       "pageSize": "10"
@@ -94,11 +77,41 @@ LOOKUP_FINAL = """{
   "http-response": {
     "status": 200,
     "body": {
-      "id": "$(dataLookup.products[PRODUCT_TYPE].id)",
-      "name": "$(dataLookup.products[PRODUCT_TYPE].name)",
-      "type": "$(dataLookup.products[PRODUCT_TYPE].type)",
-      "inventory": "$(dataLookup.products[PRODUCT_TYPE].inventory)",
-      "createdOn": "$(dataLookup.products[PRODUCT_TYPE].createdOn)"
+      "id": 1,
+      "name": "Larry Potter",
+      "type": "book",
+      "inventory": 100,
+      "createdOn": "2026-02-15"
+    },
+    "status-text": "OK",
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}
+"""
+
+LOOKUP_GADGET_FINAL = """{
+  "http-request": {
+    "path": "/findAvailableProducts",
+    "method": "GET",
+    "query": {
+      "from-date": "2026-02-15",
+      "to-date": "2026-02-15",
+      "type": "gadget"
+    },
+    "headers": {
+      "pageSize": "10"
+    }
+  },
+  "http-response": {
+    "status": 200,
+    "body": {
+      "id": 2,
+      "name": "iPhone",
+      "type": "gadget",
+      "inventory": 500,
+      "createdOn": "2026-02-15"
     },
     "status-text": "OK",
     "headers": {
@@ -121,7 +134,11 @@ def build_lab_spec() -> LabSpec:
         description="Automates the response-templating lab with direct substitution and data lookup fixes.",
         root=ROOT,
         upstream_lab=UPSTREAM_LAB,
-        files={"order_mock": ORDER_MOCK_FILE, "lookup_mock": LOOKUP_MOCK_FILE},
+        files={
+            "order_mock": ORDER_MOCK_FILE,
+            "lookup_mock": LOOKUP_MOCK_FILE,
+            "lookup_gadget_mock": LOOKUP_GADGET_MOCK_FILE,
+        },
         readme_path=README_FILE,
         output_dir=OUTPUT_DIR,
         command=LAB_COMMAND,
@@ -151,6 +168,13 @@ def build_lab_spec() -> LabSpec:
                 label="test_find_available_products_book_200.json",
                 source_relpath="examples/mock/test_find_available_products_book_200.json",
                 target_relpath="examples/mock/test_find_available_products_book_200.json",
+                kind="text",
+                expected_markers=("http-response",),
+            ),
+            ArtifactSpec(
+                label="test_find_available_products_gadget_200.json",
+                source_relpath="examples/mock/test_find_available_products_gadget_200.json",
+                target_relpath="examples/mock/test_find_available_products_gadget_200.json",
                 kind="text",
                 expected_markers=("http-response",),
             ),
@@ -205,9 +229,14 @@ def build_lab_spec() -> LabSpec:
                 readme_assertions=(readme_contains("Tests run: 4, Successes: 4, Failures: 0, Errors: 0", "README documents the final passing summary.", "README is missing the final passing summary."),),
                 fix_summary=(
                     "Kept the direct substitution fix for accepted orders.",
-                    "Updated examples/mock/test_find_available_products_book_200.json to drive both book and gadget responses from dataLookup.",
+                    "Updated examples/mock/test_find_available_products_book_200.json to return the expected book response.",
+                    "Added examples/mock/test_find_available_products_gadget_200.json to return the expected gadget response.",
                 ),
-                file_transforms={"order_mock": set_order_task_a, "lookup_mock": set_lookup_final},
+                file_transforms={
+                    "order_mock": set_order_task_a,
+                    "lookup_mock": set_lookup_book_final,
+                    "lookup_gadget_mock": set_lookup_gadget_final,
+                },
                 extra_assertions=final_assertions,
             ),
         ),
@@ -247,11 +276,20 @@ def final_assertions(context: ValidationContext) -> list[dict]:
     return [
         *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 4, "failed": 0, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 4, "failures": 0, "errors": 0}),
         assert_condition(
-            "$(dataLookup.products[PRODUCT_TYPE].name)" in context.artifacts["test_find_available_products_book_200.json"]["text"],
-            "Final lookup mock contains dataLookup-driven response fields.",
-            "Final lookup mock does not contain the expected dataLookup-driven response fields.",
+            '"name": "Larry Potter"' in context.artifacts["test_find_available_products_book_200.json"]["text"]
+            and '"type": "book"' in context.artifacts["test_find_available_products_book_200.json"]["text"],
+            "Final book lookup mock contains the expected book response values.",
+            "Final book lookup mock does not contain the expected book response values.",
             category="report",
             details=[detail("Artifact path", context.artifacts["test_find_available_products_book_200.json"]["path"])],
+        ),
+        assert_condition(
+            '"name": "iPhone"' in context.artifacts["test_find_available_products_gadget_200.json"]["text"]
+            and '"type": "gadget"' in context.artifacts["test_find_available_products_gadget_200.json"]["text"],
+            "Final gadget lookup mock contains the expected gadget response values.",
+            "Final gadget lookup mock does not contain the expected gadget response values.",
+            category="report",
+            details=[detail("Artifact path", context.artifacts["test_find_available_products_gadget_200.json"]["path"])],
         ),
     ]
 
@@ -268,8 +306,12 @@ def set_order_task_a(content: str) -> str:
     return ORDER_TASK_A
 
 
-def set_lookup_final(content: str) -> str:
-    return LOOKUP_FINAL
+def set_lookup_book_final(content: str) -> str:
+    return LOOKUP_BOOK_FINAL
+
+
+def set_lookup_gadget_final(content: str) -> str:
+    return LOOKUP_GADGET_FINAL
 
 
 def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
