@@ -5,6 +5,12 @@ Automation harnesses for Specmatic labs live in lab-named folders in this repo.
 Current automation scope validates CLI/runtime behavior and generated artifacts.
 It does not automate Specmatic Studio flows, but the comparison report can indicate whether a lab README documents a Studio component.
 
+Prerequisites:
+
+- Python `3.14.x`
+- Docker with the daemon running
+- sibling upstream checkout at `../labs`
+
 Current labs:
 
 - [`api-coverage`](api-coverage/)
