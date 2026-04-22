@@ -23,6 +23,7 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
 CONSOLE_FENCE_LANGUAGES = {"shell", "bash", "sh", "zsh", "powershell", "ps1", "cmd", "bat"}
+TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
@@ -782,33 +783,31 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
 def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[str, Any]]:
     readme_text = context.readme_text
     blocks = extract_console_blocks(readme_text)
-    shell_blocks = [block for block in blocks if block["is_console"] and block["language"] in CONSOLE_FENCE_LANGUAGES]
-    console_blocks = [block for block in blocks if block["is_console"]]
+    command_blocks = [block for block in blocks if block["is_console"]]
 
     assertions: list[dict[str, Any]] = []
     assertions.append(
         assert_condition(
-            len(shell_blocks) >= 2,
-            "README contained at least two shell console sections.",
-            "README did not contain at least two shell console sections.",
+            len(command_blocks) >= 2,
+            "README contained at least two executable command sections.",
+            "README did not contain at least two executable command sections.",
             category="readme",
             details=[
-                detail("Shell console sections", len(shell_blocks)),
-                detail("Console-like blocks", len(console_blocks)),
+                detail("Executable command sections", len(command_blocks)),
             ],
         )
     )
     assertions.append(
         assert_condition(
-            bool(console_blocks) and all(block["language"] in CONSOLE_FENCE_LANGUAGES for block in console_blocks),
-            "All console-like README blocks use shell or OS-appropriate command syntax.",
-            "Some console-like README blocks do not use shell or OS-appropriate command syntax.",
+            bool(command_blocks) and all(block["language"] in CONSOLE_FENCE_LANGUAGES for block in command_blocks),
+            "All executable command sections use shell or OS-appropriate command fenced blocks.",
+            "Some executable command sections do not use shell or OS-appropriate command fenced blocks.",
             category="readme",
             details=[
-                detail("Console-like block count", len(console_blocks)),
+                detail("Executable command section count", len(command_blocks)),
                 detail(
-                    "Non-shell console blocks",
-                    ", ".join(block["preview"] for block in console_blocks if block["language"] not in CONSOLE_FENCE_LANGUAGES) or "(none)",
+                    "Command sections with unsupported fence languages",
+                    ", ".join(block["preview"] for block in command_blocks if block["language"] not in CONSOLE_FENCE_LANGUAGES) or "(none)",
                 ),
             ],
         )
@@ -857,6 +856,50 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
                 "README does not provide OS-specific output sections for path-based console output. Impact: readers may not know what equivalent output should look like on their OS. Action required: add Windows, macOS, and Linux output examples when paths are shown.",
                 category="readme",
                 details=[detail("Missing OS output sections", ", ".join(profile["missingOutputOs"]) or "(none)")],
+            )
+        )
+
+    assertions.append(
+        assert_condition(
+            not profile["commandsMissingOutput"],
+            "Every documented command section is followed by a console output snippet.",
+            "Some documented command sections are not followed by a console output snippet. Impact: readers cannot see what the command should produce before moving to the next step. Action required: add a console output fenced block immediately after each command section.",
+            category="readme",
+            details=[
+                detail(
+                    "Commands missing console output",
+                    ", ".join(profile["commandsMissingOutput"]) or "(none)",
+                )
+            ],
+        )
+    )
+    assertions.append(
+        assert_condition(
+            not profile["outputLanguageIssues"],
+            "All README console output snippets use ```terminaloutput``` fenced blocks.",
+            "Some README console output snippets do not use ```terminaloutput``` fenced blocks. Impact: commands and output are harder to distinguish, and OS-specific output examples are less readable. Action required: change those output snippets to ```terminaloutput``` fenced blocks.",
+            category="readme",
+            details=[
+                detail(
+                    "Output fence issues",
+                    ", ".join(profile["outputLanguageIssues"]) or "(none)",
+                )
+            ],
+        )
+    )
+    if profile["hasCommands"]:
+        assertions.append(
+            assert_condition(
+                not profile["missingOutputForCommandOs"],
+                "OS-specific command sections include matching OS-specific console output snippets.",
+                "Some OS-specific command sections do not include matching OS-specific console output snippets. Impact: readers cannot see the expected output for every OS-specific command variant. Action required: add a terminaloutput block for each Windows, macOS, and Linux command section.",
+                category="readme",
+                details=[
+                    detail(
+                        "Missing OS-specific command outputs",
+                        ", ".join(profile["missingOutputForCommandOs"]) or "(none)",
+                    )
+                ],
             )
         )
 
@@ -1038,13 +1081,19 @@ def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
         lines = [line.strip() for line in body.splitlines() if line.strip()]
         preview = lines[0] if lines else ""
         is_console = bool(lines and SHELL_COMMAND_PREFIXES_RE.match(lines[0]))
+        heading_text = heading_before_line_text(readme_text, line_number_for_index(readme_text, match.start()))
+        context_text = " ".join(filter(None, [heading_text, collect_preceding_context(readme_text, line_number_for_index(readme_text, match.start()))]))
         blocks.append(
             {
                 "language": language,
                 "body": body,
                 "preview": preview,
+                "normalizedPreview": normalize_output_preview(preview),
                 "is_console": is_console,
                 "line": line_number_for_index(readme_text, match.start()),
+                "heading": heading_text,
+                "contextText": context_text,
+                "osTargets": sorted(os_targets_from_text(context_text)),
             }
         )
     return blocks
@@ -1084,7 +1133,7 @@ def is_output_block_with_paths(block: dict[str, Any], context_text: str) -> bool
     if block["is_console"] or not PATH_LIKE_RE.search(block["body"]):
         return False
     lowered_context = context_text.lower()
-    output_languages = {"terminaloutput", "output", "text", "log"}
+    output_languages = {TERMINAL_OUTPUT_FENCE_LANGUAGE, "output", "text", "log"}
     output_markers = ("expected output", "output", "result", "console output", "example output")
     return block["language"] in output_languages or any(marker in lowered_context for marker in output_markers)
 
@@ -1102,23 +1151,59 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
     command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     command_language_issues: list[dict[str, str]] = []
+    output_language_issues: list[str] = []
+    commands_missing_output: list[str] = []
     has_commands = False
     has_path_outputs = False
+    blocks = extract_console_blocks(readme_text)
 
-    for block in extract_console_blocks(readme_text):
-        heading_text = heading_before_line_text(readme_text, block["line"])
-        context_text = " ".join(filter(None, [heading_text, collect_preceding_context(readme_text, block["line"])]))
-        os_targets = os_targets_from_text(context_text)
+    for index, block in enumerate(blocks):
+        heading_text = block["heading"]
+        context_text = block["contextText"]
+        os_targets = set(block["osTargets"])
         if block["is_console"]:
             has_commands = True
             for os_name in os_targets:
-                command_coverage[os_name].append({"heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
+                command_coverage[os_name].append(
+                    {
+                        "heading": heading_text or "(no heading)",
+                        "language": block["language"] or "(none)",
+                        "preview": block["preview"] or "(blank)",
+                    }
+                )
                 if not is_command_language_appropriate(os_name, block["language"] or ""):
                     command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
+            next_block = blocks[index + 1] if index + 1 < len(blocks) else None
+            if next_block is None or next_block["is_console"]:
+                commands_missing_output.append(f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'}")
+                continue
+            output_targets = set(next_block["osTargets"]) or os_targets
+            for os_name in output_targets:
+                output_coverage[os_name].append(
+                    {
+                        "heading": next_block["heading"] or heading_text or "(no heading)",
+                        "language": next_block["language"] or "(none)",
+                        "preview": next_block["normalizedPreview"] or "(blank)",
+                    }
+                )
+            if next_block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+                output_language_issues.append(
+                    f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['language'] or '(none)'}``` for output"
+                )
         elif is_output_block_with_paths(block, context_text):
             has_path_outputs = True
             for os_name in os_targets:
-                output_coverage[os_name].append({"heading": heading_text or "(no heading)"})
+                output_coverage[os_name].append(
+                    {
+                        "heading": heading_text or "(no heading)",
+                        "language": block["language"] or "(none)",
+                        "preview": block["normalizedPreview"] or "(blank)",
+                    }
+                )
+            if block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+                output_language_issues.append(
+                    f"{heading_text or '(no heading)'} uses ```{block['language'] or '(none)'}``` for output"
+                )
 
     return {
         "hasCommands": has_commands,
@@ -1126,7 +1211,21 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
         "commandLanguageIssues": command_language_issues,
         "hasPathOutputs": has_path_outputs,
         "missingOutputOs": [os_name for os_name, entries in output_coverage.items() if has_path_outputs and not entries],
+        "commandsMissingOutput": commands_missing_output,
+        "outputLanguageIssues": output_language_issues,
+        "missingOutputForCommandOs": [os_name for os_name, entries in command_coverage.items() if entries and not output_coverage[os_name]],
     }
+
+
+def normalize_output_preview(text: str) -> str:
+    if not text:
+        return ""
+    normalized = re.sub(
+        r"^\s*(?:\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*|\d{4}-\d{1,2}-\d{1,2}[ T]\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\s*|[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*)",
+        "",
+        text,
+    )
+    return normalized.strip()
 
 
 def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:

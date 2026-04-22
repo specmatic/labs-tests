@@ -86,7 +86,7 @@ When a validation fails, the message must be explicit and actionable:
 - do not bury the fix inside raw log output or a vague summary
 
 Automation scope in this repo is CLI/runtime plus generated artifacts only.
-Do not add Studio validation unless the user explicitly asks for Studio automation.
+Do not add Studio automation unless the user explicitly asks for Studio automation, but it is acceptable to report whether a lab README documents a Studio component.
 
 ## Before/after phase pattern
 
@@ -133,6 +133,10 @@ Rules:
 - when a README mismatch fails, explain the runtime impact and the README change needed to resolve it
 - when a README documents commands, require OS-specific command sections for Windows, macOS, and Linux
 - require OS-appropriate fenced block languages for those command sections: `shell`/`bash` for macOS and Linux, `powershell`/`cmd` for Windows
+- require every documented command section to be followed by a console output snippet
+- require OS-specific command sections to have matching OS-specific console output snippets
+- require all README console output snippets to use `terminaloutput` fenced blocks
+- when README console output includes timestamps, ignore the datetime stamp during comparison and focus on the meaningful output content
 - when a README shows console output with file-system paths, require equivalent output sections for Windows, macOS, and Linux
 
 Example: if runtime shows `422 Unprocessable Entity` but README omits it, that should fail.
@@ -205,6 +209,14 @@ Current command expectations:
 - `python3 <lab>/run.py --refresh-report`
 - `python3 run_all.py`
 - `python3 rebuild_reports.py`
+
+README command and output fence expectations:
+
+- use executable fenced blocks for commands:
+  - `shell`, `bash`, `sh`, or `zsh` for macOS and Linux
+  - `powershell`, `ps1`, `cmd`, or `bat` for Windows
+- place a `terminaloutput` fenced block immediately after each documented command block
+- when commands differ by OS, include a matching `terminaloutput` block for each OS-specific command
 
 ## Docker-owned artifact cleanup
 
