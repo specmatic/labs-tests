@@ -67,6 +67,7 @@ def render_html(payload: dict[str, Any]) -> str:
       --pass: #1f7a4d;
       --fail: #ab2e2e;
       --warn: #9a5b00;
+      --skip: #6b7280;
       --accent: #145a7a;
     }}
     body {{
@@ -123,6 +124,9 @@ def render_html(payload: dict[str, Any]) -> str:
     }}
     .status.fail {{
       background: var(--fail);
+    }}
+    .status.warn {{
+      background: var(--warn);
     }}
     .grid {{
       display: grid;
@@ -295,11 +299,20 @@ def render_html(payload: dict[str, Any]) -> str:
       border-radius: 12px;
       padding: 12px 12px 0;
     }}
+    .assertion-section.warn {{
+      border-top-color: rgba(154, 91, 0, 0.35);
+      background: rgba(154, 91, 0, 0.04);
+      border-radius: 12px;
+      padding: 12px 12px 0;
+    }}
     .assertion-section.pass > summary {{
       color: var(--pass);
     }}
     .assertion-section.fail > summary {{
       color: var(--fail);
+    }}
+    .assertion-section.warn > summary {{
+      color: var(--warn);
     }}
     .phase-block > summary,
     .assertion-section > summary,
@@ -361,6 +374,9 @@ def render_html(payload: dict[str, Any]) -> str:
     }}
     .warn-text {{
       color: var(--warn);
+    }}
+    .skip-text {{
+      color: var(--skip);
     }}
     .artifacts {{
       display: flex;
@@ -506,7 +522,7 @@ def render_report_nav(consolidated_href: str, comparison_href: str) -> str:
 
 
 def render_assertion(assertion: dict[str, Any]) -> str:
-    css_class = "pass-text" if assertion["status"] == "passed" else "fail-text"
+    css_class = assertion_text_class(assertion["status"])
     details_html = ""
     if assertion.get("details"):
         detail_items = "".join(
@@ -540,7 +556,13 @@ def render_assertion_sections(phase: dict[str, Any]) -> str:
 def render_assertion_section(phase_name: str, category: str, assertions: list[dict[str, Any]]) -> str:
     items = "".join(render_assertion(assertion) for assertion in assertions)
     section_id = category_section_id(phase_name, category)
-    section_status = "pass" if all(assertion["status"] == "passed" for assertion in assertions) else "fail"
+    statuses = {assertion["status"] for assertion in assertions}
+    if "failed" in statuses:
+        section_status = "fail"
+    elif statuses <= {"passed"}:
+        section_status = "pass"
+    else:
+        section_status = "warn"
     return (
         f"<details id=\"{escape(section_id)}\" class=\"assertion-section {section_status}\">"
         f"<summary><h3>{escape(category_title(category))}</h3></summary>"
@@ -599,7 +621,7 @@ def assign_assertion_ids(phases: list[dict[str, Any]]) -> tuple[list[dict[str, A
         for assertion_index, assertion in enumerate(phase.get("assertions", [])):
             assertion_id = f"phase-{phase_index + 1}-assertion-{assertion_index + 1}"
             assertion["id"] = assertion_id
-            if assertion["status"] != "passed":
+            if assertion["status"] == "failed":
                 failed_assertions.append(
                     {
                         "id": assertion_id,
@@ -670,7 +692,7 @@ def render_category_summary(phase: dict[str, Any]) -> str:
     grouped: dict[str, dict[str, int]] = {}
     for assertion in assertions:
         category = assertion.get("category", "other")
-        stats = grouped.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "other": 0})
+        stats = grouped.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "expected": 0, "other": 0})
         stats["total"] += 1
         status = assertion.get("status", "other")
         if status == "passed":
@@ -679,18 +701,20 @@ def render_category_summary(phase: dict[str, Any]) -> str:
             stats["failed"] += 1
         elif status == "skipped":
             stats["skipped"] += 1
+        elif status == "expected":
+            stats["expected"] += 1
         else:
             stats["other"] += 1
 
     rows = "".join(
-        f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['other']}</td></tr>"
+        f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['expected']}</td><td>{stats['other']}</td></tr>"
         for category, stats in grouped.items()
     )
     return (
         '<section class="category-summary">'
         "<h3>Category Summary</h3>"
         "<table>"
-        "<thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Other</th></tr></thead>"
+        "<thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Expected</th><th>Other</th></tr></thead>"
         f"<tbody>{rows}</tbody>"
         "</table>"
         "</section>"
@@ -719,7 +743,7 @@ def build_report(
         1
         for phase in phases
         for assertion in phase["assertions"]
-        if assertion["status"] != "passed"
+        if assertion["status"] == "failed"
     )
 
     readme_href = f"https://github.com/specmatic/labs/blob/main/{lab_path.name}/README.md"
@@ -743,3 +767,15 @@ def build_report(
         ],
         "phases": phases,
     }
+
+
+def assertion_text_class(status: str) -> str:
+    if status == "passed":
+        return "pass-text"
+    if status == "failed":
+        return "fail-text"
+    if status == "expected":
+        return "warn-text"
+    if status == "skipped":
+        return "skip-text"
+    return "warn-text"

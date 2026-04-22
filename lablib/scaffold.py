@@ -20,6 +20,7 @@ CONSOLE_COVERAGE_ROW_RE = re.compile(
 )
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
+HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
 CONSOLE_FENCE_LANGUAGES = {"shell", "bash", "sh", "zsh", "powershell", "ps1", "cmd", "bat"}
@@ -58,6 +59,7 @@ class PhaseSpec:
     include_readme_structure_checks: bool = False
     extra_assertions: Callable[["ValidationContext"], list[dict[str, Any]]] | None = None
     artifact_specs: tuple[ArtifactSpec, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 @dataclass
@@ -80,6 +82,8 @@ class LabSpec:
     clear_reports: Callable[["LabSpec"], None] | None = None
     post_phase_cleanup: Callable[["LabSpec"], None] | None = None
     runtime_warnings: tuple[str, ...] = ()
+    known_limitations: tuple[str, ...] = ()
+    intentional_differences: tuple[str, ...] = ()
 
 
 @dataclass
@@ -369,8 +373,9 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
     assertions.extend(evaluate_runtime_summary_drift(context))
     if phase.include_readme_structure_checks and spec.readme_structure is not None:
         assertions.extend(validate_readme_structure(context.readme_text, spec.readme_structure))
+    assertions = apply_readme_annotation_overrides(assertions, context.readme_text)
 
-    phase_status = "passed" if all(item["status"] == "passed" for item in assertions) else "failed"
+    phase_status = "passed" if all(item["status"] != "failed" for item in assertions) else "failed"
     return {
         "name": phase.name,
         "description": phase.description,
@@ -774,6 +779,7 @@ def evaluate_readme_assertions(context: ValidationContext) -> list[dict[str, Any
                 "message": item["success"] if condition else item["failure"],
                 "category": "readme",
                 "details": details,
+                "code": item.get("code"),
             }
         )
 
@@ -792,6 +798,7 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
             "README contained at least two executable command sections.",
             "README did not contain at least two executable command sections.",
             category="readme",
+            code="readme.commands.minimum_count",
             details=[
                 detail("Executable command sections", len(command_blocks)),
             ],
@@ -803,6 +810,7 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
             "All executable command sections use shell or OS-appropriate command fenced blocks.",
             "Some executable command sections do not use shell or OS-appropriate command fenced blocks.",
             category="readme",
+            code="readme.commands.executable_fences",
             details=[
                 detail("Executable command section count", len(command_blocks)),
                 detail(
@@ -826,6 +834,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
                 "README provides OS-specific command sections for Windows, macOS, and Linux.",
                 "README does not provide OS-specific command sections for every OS. Impact: readers on some platforms will not know which command to run. Action required: add command sections for the missing OS variants in appropriate fenced code blocks.",
                 category="readme",
+                code="readme.os_commands.coverage",
                 details=[detail("Missing OS command sections", ", ".join(profile["missingCommandOs"]) or "(none)")],
             )
         )
@@ -835,6 +844,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
                 "README uses OS-appropriate fenced block languages for documented commands.",
                 "README uses non-standard fenced block languages for some OS-specific commands. Impact: readers may not understand which shell to use and syntax highlighting becomes misleading. Action required: use shell/bash for macOS and Linux commands, and powershell/cmd for Windows commands.",
                 category="readme",
+                code="readme.os_commands.fence_languages",
                 details=[
                     detail(
                         "Fence language issues",
@@ -855,6 +865,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
                 "README provides OS-specific output sections when console output shows paths.",
                 "README does not provide OS-specific output sections for path-based console output. Impact: readers may not know what equivalent output should look like on their OS. Action required: add Windows, macOS, and Linux output examples when paths are shown.",
                 category="readme",
+                code="readme.os_output.path_coverage",
                 details=[detail("Missing OS output sections", ", ".join(profile["missingOutputOs"]) or "(none)")],
             )
         )
@@ -865,6 +876,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
             "Every documented command section is followed by a console output snippet.",
             "Some documented command sections are not followed by a console output snippet. Impact: readers cannot see what the command should produce before moving to the next step. Action required: add a console output fenced block immediately after each command section.",
             category="readme",
+            code="readme.command_output.followup",
             details=[
                 detail(
                     "Commands missing console output",
@@ -879,6 +891,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
             "All README console output snippets use ```terminaloutput``` fenced blocks.",
             "Some README console output snippets do not use ```terminaloutput``` fenced blocks. Impact: commands and output are harder to distinguish, and OS-specific output examples are less readable. Action required: change those output snippets to ```terminaloutput``` fenced blocks.",
             category="readme",
+            code="readme.output.terminaloutput_fence",
             details=[
                 detail(
                     "Output fence issues",
@@ -894,6 +907,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
                 "OS-specific command sections include matching OS-specific console output snippets.",
                 "Some OS-specific command sections do not include matching OS-specific console output snippets. Impact: readers cannot see the expected output for every OS-specific command variant. Action required: add a terminaloutput block for each Windows, macOS, and Linux command section.",
                 category="readme",
+                code="readme.os_output.command_coverage",
                 details=[
                     detail(
                         "Missing OS-specific command outputs",
@@ -926,6 +940,7 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
             "Console output included a test summary block.",
             "Console output did not include a test summary block. Impact: the README and report counts cannot be compared. Action required: ensure the lab prints a final 'Tests run: ...' summary before exit.",
             category="console",
+            code="console.tests_run_summary.present",
             details=[
                 detail("Console summary", console_summary or "(missing)"),
                 detail("README summary", readme_summary or "(missing)"),
@@ -942,6 +957,7 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
             "README test summary matched the console test summary.",
             "README test summary did not match the console test summary. Impact: the README is no longer describing the actual runtime result. Action required: update the README test summary block or fix the lab so the console output matches the documented counts.",
             category="readme",
+            code="readme.tests_run_summary.matches_console",
             details=[
                 detail("README summary", readme_summary or "(missing)"),
                 detail("Console summary", console_summary),
@@ -970,6 +986,7 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
                     "Embedded Specmatic HTML report contained a parseable summary block.",
                     "Embedded Specmatic HTML report could not be parsed for its summary block.",
                     category="artifacts",
+                    code="artifacts.html_summary.parseable",
                     details=[detail("Reason", str(exc))],
                 )
             )
@@ -986,6 +1003,7 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
                 f"{label} summary matched the console test counts.",
                 f"{label} summary did not match the console test counts. Impact: the generated {label} artifact is out of sync with the observed runtime counts. Action required: regenerate the lab so the console output and report artifacts are produced from the same execution.",
                 category="report",
+                code=f"report.tests_run_summary.matches_{label.lower().replace(' ', '_')}",
                 details=[
                     detail_table(
                         "Test count comparison",
@@ -1021,6 +1039,7 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
             "README contained exactly one level-1 heading.",
             f"README expected exactly one level-1 heading, found {len(h1_headings)}.",
             category="readme",
+            code="readme.structure.single_h1",
             details=[detail("H1 headings", ", ".join(h1_headings) or "(none)")],
         )
     )
@@ -1035,6 +1054,7 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
                 f"README contains the '{prefix}' section at level 2.",
                 f"README is missing the '{prefix}' section at level 2.",
                 category="readme",
+                code="readme.structure.required_h2_sections",
                 details=[
                     detail("Matching h2 headings", ", ".join(at_level) or "(none)"),
                     detail("Matching headings at wrong levels", ", ".join(wrong_level) or "(none)"),
@@ -1060,6 +1080,7 @@ def validate_readme_structure(readme_text: str, structure: ReadmeStructureSpec) 
                 "README required sections appear in the expected order.",
                 "README required sections do not appear in the expected order.",
                 category="readme",
+                code="readme.structure.required_h2_order",
                 details=[
                     detail("Expected order", " -> ".join(structure.required_h2_prefixes)),
                     detail("Actual found order", " -> ".join(actual_prefixes) or "(none)"),
@@ -1230,6 +1251,9 @@ def normalize_output_preview(text: str) -> str:
 
 def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:
     warnings = list(spec.runtime_warnings)
+    warnings.extend(spec.known_limitations)
+    warnings.extend(spec.intentional_differences)
+    warnings.extend(phase.notes)
     artifact_labels = {artifact.label for artifact in all_artifact_specs(spec, phase)}
     additional = sorted(
         label for label in artifact_labels if label not in REPORT_ARTIFACT_LABELS and label not in IGNORED_ARTIFACT_LABELS
@@ -1238,6 +1262,48 @@ def build_warning_messages(spec: LabSpec, phase: PhaseSpec) -> list[str]:
         return warnings
     warnings.append(f"Additional artifacts found: {', '.join(additional)}")
     return warnings
+
+
+def parse_readme_ignore_codes(readme_text: str) -> set[str]:
+    codes: set[str] = set()
+    for match in HTML_COMMENT_RE.finditer(readme_text):
+        body = " ".join(match.group("body").split())
+        directive_match = re.search(r"labs-tests:\s*ignore\s+(.+)", body, re.IGNORECASE)
+        if not directive_match:
+            continue
+        raw_codes = directive_match.group(1)
+        for raw_code in re.split(r"[,\s]+", raw_codes):
+            code = raw_code.strip()
+            if code:
+                codes.add(code)
+    return codes
+
+
+def apply_readme_annotation_overrides(assertions: list[dict[str, Any]], readme_text: str) -> list[dict[str, Any]]:
+    ignored_codes = parse_readme_ignore_codes(readme_text)
+    if not ignored_codes:
+        return assertions
+
+    updated: list[dict[str, Any]] = []
+    for assertion in assertions:
+        code = assertion.get("code")
+        if code and code in ignored_codes:
+            original_message = assertion["message"]
+            updated.append(
+                {
+                    **assertion,
+                    "status": "skipped",
+                    "message": f"Validation ignored by README annotation: {code}.",
+                    "details": [
+                        *(assertion.get("details") or []),
+                        detail("Ignored validation code", code),
+                        detail("Original result", original_message),
+                    ],
+                }
+            )
+        else:
+            updated.append(assertion)
+    return updated
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:
@@ -1770,12 +1836,14 @@ def assert_equal(
     *,
     category: str,
     details: list[dict[str, Any]] | None = None,
+    code: str | None = None,
 ) -> dict[str, Any]:
     return {
         "status": "passed" if actual == expected else "failed",
         "message": success_message if actual == expected else failure_message,
         "category": category,
         "details": details or [],
+        "code": code,
     }
 
 
@@ -1786,10 +1854,44 @@ def assert_condition(
     *,
     category: str,
     details: list[dict[str, Any]] | None = None,
+    code: str | None = None,
 ) -> dict[str, Any]:
     return {
         "status": "passed" if condition else "failed",
         "message": success_message if condition else failure_message,
         "category": category,
         "details": details or [],
+        "code": code,
+    }
+
+
+def assert_skipped(
+    message: str,
+    *,
+    category: str,
+    details: list[dict[str, Any]] | None = None,
+    code: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "skipped",
+        "message": message,
+        "category": category,
+        "details": details or [],
+        "code": code,
+    }
+
+
+def assert_expected(
+    message: str,
+    *,
+    category: str,
+    details: list[dict[str, Any]] | None = None,
+    code: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "expected",
+        "message": message,
+        "category": category,
+        "details": details or [],
+        "code": code,
     }

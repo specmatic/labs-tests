@@ -208,6 +208,8 @@ Validation focus:
 - OS-specific command sections should have matching OS-specific console output snippets
 - all README console output snippets should use `terminaloutput` fenced blocks
 - when README console output includes timestamps, comparison logic should ignore the datetime stamp and focus on the meaningful output content
+- Studio-only phases that are not automated yet should be reported as known limitations or skipped validations, not as failures
+- intentional differences that are part of the lab design should be recorded as expected differences, not counted in the failure index
 - copied source snapshots such as `specmatic.yaml`, example JSON files, or service source files may still be archived for inspection, but they should not drive pass/fail assertions by themselves
 - the shared comparison H2 template is configured in [`lablib/readme_expectations.py`](/Users/anand.bagmar/projects/specmatic/labs-tests/lablib/readme_expectations.py) as `EXPECTED_README_H2_SEQUENCE`, so the expected README order can be updated in one place
 
@@ -226,6 +228,67 @@ When a command or validation fails, the message should always say:
 - what action is needed to fix it
 
 Prefer concrete paths, commands, and missing artifacts over vague summaries or raw log excerpts.
+
+Non-failing validation states:
+
+- use `assert_skipped(...)` for validations that are intentionally not implemented yet, such as documented Studio-only steps that labs-tests does not automate yet
+- use `assert_expected(...)` for intentional differences that should stay visible in the report but should not count as failures
+- skipped and expected validations should remain visible in the HTML report, but they should not appear in the failure index or contribute to the failure count
+
+How to mark an intentional difference as expected in a lab runner:
+
+Use `assert_expected(...)` inside a phase's `extra_assertions`.
+
+Example:
+
+```python
+from lablib.scaffold import assert_expected, detail
+
+def baseline_assertions(context):
+    return [
+        assert_expected(
+            "This baseline mismatch is intentional and should stay visible without failing the lab.",
+            category="readme",
+            code="readme.intentional-baseline-difference",
+            details=[
+                detail("Reason", "The README documents this mismatch as the before state."),
+                detail("Action", "Do not fix this in labs-tests; fix only if the upstream README changes."),
+            ],
+        )
+    ]
+```
+
+How to ignore a shared README validation without showing anything in the rendered README:
+
+Add an HTML comment to the upstream README. GitHub and browsers do not render it, but labs-tests will read it.
+
+Example:
+
+```md
+<!-- labs-tests: ignore readme.os_commands.coverage -->
+<!-- labs-tests: ignore readme.command_output.followup readme.output.terminaloutput_fence -->
+```
+
+Supported shared README ignore codes currently include:
+
+- `readme.commands.minimum_count`
+- `readme.commands.executable_fences`
+- `readme.os_commands.coverage`
+- `readme.os_commands.fence_languages`
+- `readme.os_output.path_coverage`
+- `readme.command_output.followup`
+- `readme.output.terminaloutput_fence`
+- `readme.os_output.command_coverage`
+- `readme.tests_run_summary.matches_console`
+- `readme.structure.single_h1`
+- `readme.structure.required_h2_sections`
+- `readme.structure.required_h2_order`
+
+When an ignore annotation is present:
+
+- the validation is shown as `skipped`
+- it remains visible in the report for traceability
+- it does not count as a failure
 
 GitHub Actions workflow:
 

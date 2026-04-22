@@ -83,6 +83,9 @@ def build_lab_spec() -> LabSpec:
                 readme_assertions=(readme_contains("Tests run: 20, Successes: 20, Failures: 0, Errors: 0", "README documents the final filtered summary.", "README is missing the final filtered summary."),),
                 file_transforms={"specmatic": set_baseline_filter},
                 extra_assertions=baseline_assertions,
+                notes=(
+                    "Studio phases documented in the README are not yet automated in labs-tests. Impact: this run validates the CLI baseline only for the before state. Action required: add Studio automation separately when Studio coverage is implemented.",
+                ),
             ),
             PhaseSpec(
                 name="Fixed contract",
@@ -93,10 +96,16 @@ def build_lab_spec() -> LabSpec:
                 fix_summary=("Updated specmatic.yaml with a persisted filter expression that keeps only the passing 200/201 scenarios.",),
                 file_transforms={"specmatic": set_fixed_filter},
                 extra_assertions=fixed_assertions,
+                notes=(
+                    "README steps for starting Studio and rerunning inside Studio are intentionally not automated yet. Impact: the CLI persistence flow is validated here, but the Studio path remains a documented manual step. Action required: add Studio automation only when that workflow is in scope for labs-tests.",
+                ),
             ),
         ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
+        known_limitations=(
+            "The README includes Studio-only phases that are currently tracked as manual/not-yet-implemented work in labs-tests. They should appear as guidance, not as failures.",
+        ),
     )
 
 

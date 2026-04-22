@@ -138,6 +138,8 @@ Rules:
 - require all README console output snippets to use `terminaloutput` fenced blocks
 - when README console output includes timestamps, ignore the datetime stamp during comparison and focus on the meaningful output content
 - when a README shows console output with file-system paths, require equivalent output sections for Windows, macOS, and Linux
+- when README-documented Studio-only steps are not automated yet, record them as skipped or known limitations, not failures
+- when a difference is intentional and should remain visible but non-blocking, record it as an expected difference, not a failure
 
 Example: if runtime shows `422 Unprocessable Entity` but README omits it, that should fail.
 
@@ -164,6 +166,7 @@ Failure and warning text in the HTML report should also be explicit:
 - warnings should say what extra or unexpected condition was found and why it matters
 - avoid merging the action text into the raw console log output
 - prefer separate labeled sections such as `Impact`, `Action required`, or `How to fix`
+- skipped and expected validations should remain visible in the report, but they should not appear in the failure index
 
 Default load state:
 
@@ -171,6 +174,27 @@ Default load state:
 - validation-category sections collapsed
 
 Use `Validations` terminology consistently, not `Assertions`.
+
+Shared validation-state helpers:
+
+- use `assert_skipped(...)` when a check is intentionally not implemented yet
+- use `assert_expected(...)` when a difference is intentional and should not block the lab
+- only `failed` validations should contribute to the failure index and failure totals
+
+Expected-difference pattern:
+
+- add `assert_expected(...)` inside the relevant phase `extra_assertions`
+- keep the message explicit about why the difference is intentional
+- include `detail(...)` items for reason and action
+- prefer a stable `code` when the difference is likely to be referenced again
+
+Hidden README ignore annotation pattern:
+
+- use an HTML comment so nothing appears in the rendered README
+- syntax:
+  - `<!-- labs-tests: ignore readme.os_commands.coverage -->`
+  - `<!-- labs-tests: ignore readme.command_output.followup readme.output.terminaloutput_fence -->`
+- when present, the matching validation should become `skipped`, stay visible in the report, and not count as a failure
 
 ## Category model
 
