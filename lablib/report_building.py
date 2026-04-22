@@ -7,6 +7,8 @@ import re
 import subprocess
 from typing import Any
 
+from lablib.provenance import detect_report_provenance
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
@@ -82,6 +84,7 @@ def build_consolidated_payload(
     total_tests = sum(summary_value(item, "Validations") for item in lab_results)
     return {
         "generatedAt": datetime.now(UTC).isoformat(),
+        "provenance": detect_report_provenance(),
         "status": "passed" if failed == 0 else "failed",
         "summary": [
             {"label": "Labs discovered", "value": len(lab_results)},

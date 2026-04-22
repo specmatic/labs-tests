@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from lablib.provenance import detect_report_provenance
+
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,6 +52,7 @@ def render_html(payload: dict[str, Any]) -> str:
         ).get("comparisonReportHref", "")
     )
     report_nav_html = render_report_nav(consolidated_href, comparison_href)
+    provenance_html = render_provenance_html(payload.get("provenance"))
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -425,6 +428,7 @@ def render_html(payload: dict[str, Any]) -> str:
       <h1>{title}</h1>
       <p>{escape(payload['lab']['description'])}</p>
       <p class="meta">Generated at {generated_at}</p>
+      {provenance_html}
       {report_nav_html}
       <div class="grid">
         <section class="panel">
@@ -750,6 +754,7 @@ def build_report(
 
     return {
         "generatedAt": datetime.now(UTC).isoformat(),
+        "provenance": detect_report_provenance(),
         "status": overall_status,
         "lab": {
             "name": lab_name,
@@ -767,6 +772,17 @@ def build_report(
         ],
         "phases": phases,
     }
+
+
+def render_provenance_html(provenance: dict[str, Any] | None) -> str:
+    if not provenance:
+        return ""
+    label = escape(str(provenance.get("label", "Generated from")))
+    display = escape(str(provenance.get("display", "n/a")))
+    href = str(provenance.get("href", "") or "")
+    if href:
+        return f'<p class="meta"><strong>{label}:</strong> <a href="{escape(href)}" target="_blank" rel="noopener noreferrer">{display}</a></p>'
+    return f'<p class="meta"><strong>{label}:</strong> {display}</p>'
 
 
 def assertion_text_class(status: str) -> str:

@@ -135,10 +135,12 @@ def main() -> int:
     print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
 
     lab_results: list[dict[str, Any]] = []
-    for lab in labs:
+    total_labs = len(labs)
+    for index, lab in enumerate(labs, start=1):
         print()
         print("=" * 78)
         print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
+        print(f"Lab # {index} of {total_labs}")
         print("=" * 78)
         lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
         result = run_command(
@@ -312,6 +314,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     )
     comparison_href = escape(payload.get("navigation", {}).get("comparisonReportHref", "labs-comparison.html"))
     report_nav_html = f'<p class="report-nav"><a href="{comparison_href}">Open comparison report</a></p>' if comparison_href else ""
+    provenance_html = render_provenance_html(payload.get("provenance"))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -380,6 +383,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     <section class="panel">
       <div class="status">{escape(payload['status'].upper())}</div>
       <h1>Consolidated Labs Report</h1>
+      {provenance_html}
       {report_nav_html}
       <ul>{summary_items}</ul>
     </section>
@@ -409,6 +413,17 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
 </body>
 </html>
 """
+
+
+def render_provenance_html(provenance: dict[str, Any] | None) -> str:
+    if not provenance:
+        return ""
+    label = escape(str(provenance.get("label", "Generated from")))
+    display = escape(str(provenance.get("display", "n/a")))
+    href = str(provenance.get("href", "") or "")
+    if href:
+        return f'<p class="report-nav"><strong>{label}:</strong> <a href="{escape(href)}" target="_blank" rel="noopener noreferrer">{display}</a></p>'
+    return f'<p class="report-nav"><strong>{label}:</strong> {display}</p>'
 
 
 def render_lab_row(lab: dict[str, Any]) -> str:

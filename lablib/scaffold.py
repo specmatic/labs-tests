@@ -36,7 +36,7 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
-TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
+TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+(?:,\s*Errors:\s*\d+)?")
 EXAMPLES_SUMMARY_RE = re.compile(r"Examples:\s*(?P<passed>\d+)\s+passed\s+and\s+(?P<failed>\d+)\s+failed\s+out of\s+(?P<tests>\d+)\s+total", re.IGNORECASE)
 MCP_SUMMARY_RE = re.compile(
     r"(?:(?P<prefix>SUMMARY:)\s*)?Total:\s*(?P<tests>\d+)\s*(?:\||\n|\r\n)\s*Passed:\s*(?P<passed>\d+)\s*(?:\||\n|\r\n)\s*Failed:\s*(?P<failed>\d+)",
@@ -79,6 +79,7 @@ class PhaseSpec:
     extra_assertions: Callable[["ValidationContext"], list[dict[str, Any]]] | None = None
     artifact_specs: tuple[ArtifactSpec, ...] = ()
     notes: tuple[str, ...] = ()
+    readme_summary_query: str | None = None
 
 
 @dataclass
@@ -951,7 +952,8 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
 
     readme_summaries = extract_tests_run_summaries(context.readme_text)
     phase_index = next((index for index, phase in enumerate(context.lab.phases) if phase is context.phase), 0)
-    readme_summary = readme_summaries[phase_index]["summary"] if phase_index < len(readme_summaries) else None
+    selected_summary = select_readme_summary_for_phase(readme_summaries, context.phase, phase_index)
+    readme_summary = selected_summary["summary"] if selected_summary else None
     console_summary = extract_tests_run_summary(context.command_result.combined_output)
     assertions: list[dict[str, Any]] = []
 
@@ -1047,6 +1049,23 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
         )
 
     return assertions
+
+
+def select_readme_summary_for_phase(
+    readme_summaries: list[dict[str, str]],
+    phase: PhaseSpec,
+    phase_index: int,
+) -> dict[str, str] | None:
+    if phase.readme_summary_query:
+        query = phase.readme_summary_query.strip().lower()
+        for summary in readme_summaries:
+            label = (summary.get("label") or "").strip().lower()
+            heading = (summary.get("heading") or "").strip().lower()
+            if query == label or query == heading or query in label or query in heading:
+                return summary
+    if phase_index < len(readme_summaries):
+        return readme_summaries[phase_index]
+    return None
 
 
 def validate_readme_structure(readme_text: str, lab_name: str) -> list[dict[str, Any]]:
@@ -1404,7 +1423,7 @@ def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | Non
         return None
     clean_summary = normalize_summary_source_text(strip_ansi(summary_text))
     match = re.search(
-        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
+        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+)(?:,\s*Errors:\s*(?P<errors>\d+))?",
         clean_summary,
     )
     if not match:
@@ -1432,7 +1451,7 @@ def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | Non
         "passed": int(match.group("successes")),
         "failed": int(match.group("failures")),
         "skipped": 0,
-        "other": int(match.group("errors")),
+        "other": int(match.group("errors") or 0),
     }
 
 

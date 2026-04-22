@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,7 @@ README_FILE = UPSTREAM_LAB / "README.md"
 SPECMATIC_FILE = UPSTREAM_LAB / "specmatic.yaml"
 OUTPUT_DIR = ROOT / "order-bff" / "output"
 LAB_COMMAND = ["docker", "compose", "--profile", "test", "up", "--abort-on-container-exit"]
+CONTAINER_NAMES = ["order-bff", "order-bff-contract-suite"]
 
 
 def main() -> int:
@@ -68,6 +70,7 @@ def build_lab_spec() -> LabSpec:
                 description="Run the order-bff CI-style suite and validate the published summary and generated reports.",
                 expected_exit_code=0,
                 output_dir_name="suite",
+                readme_summary_query="2. Using Docker (Recommended for CI)",
                 expected_console_phrases=("Tests run: 227, Successes: 223, Failures: 0, Errors: 4",),
                 include_readme_structure_checks=True,
                 readme_assertions=(readme_contains("Tests run: 227, Successes: 223, Failures: 0, Errors: 4", "README documents the CI-style test summary for the BFF suite.", "README is missing the CI-style test summary for the BFF suite."),),
@@ -98,11 +101,17 @@ def suite_assertions(context: ValidationContext) -> list[dict]:
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
+    cleanup_stale_containers()
     clear_docker_owned_build_dir(spec)
 
 
 def teardown_compose(spec: LabSpec) -> None:
     docker_compose_down(spec, "--profile", "test", "down", "-v")
+    cleanup_stale_containers()
+
+
+def cleanup_stale_containers() -> None:
+    subprocess.run(["docker", "rm", "-f", *CONTAINER_NAMES], check=False, text=True, capture_output=True)
 
 
 def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:

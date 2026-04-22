@@ -21,6 +21,7 @@ from lablib.readme_expectations import (
     title_present,
     unexpected_h2_titles_for_lab,
 )
+from lablib.provenance import detect_report_provenance
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/|/var/|/home/|/opt/|/etc/)[^\s`]+)")
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
+TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+(?:,\s*Errors:\s*\d+)?")
 EXAMPLES_SUMMARY_RE = re.compile(r"Examples:\s*(?P<passed>\d+)\s+passed\s+and\s+(?P<failed>\d+)\s+failed\s+out of\s+(?P<tests>\d+)\s+total", re.IGNORECASE)
 MCP_SUMMARY_RE = re.compile(
     r"(?:(?P<prefix>SUMMARY:)\s*)?Total:\s*(?P<tests>\d+)\s*(?:\||\n|\r\n)\s*Passed:\s*(?P<passed>\d+)\s*(?:\||\n|\r\n)\s*Failed:\s*(?P<failed>\d+)",
@@ -55,6 +56,7 @@ def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | No
     labs = [build_lab_profile(path.parent) for path in run_files]
     payload = {
         "generatedAt": datetime.now(UTC).isoformat(),
+        "provenance": detect_report_provenance(),
         "summary": build_summary(labs),
         "commonalities": build_commonalities(labs),
         "differences": build_differences(labs),
@@ -114,7 +116,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
     test_count_consistency = build_test_count_consistency_profile(
-        spec.name,
+        spec,
         upstream_readme_text,
         report_snapshot,
         expected_missing=spec.expected_missing_test_counts,
@@ -853,6 +855,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     )
     matrix = payload.get("validationMatrix", {"columns": [], "rows": []})
     consolidated_href = escape(payload.get("navigation", {}).get("consolidatedReportHref", "consolidated-report.html"))
+    provenance_html = render_provenance_html(payload.get("provenance"))
     matrix_header = "".join(
         f"<th class='matrix-lab'>{render_lab_link(column['name'], column['href'])}</th>"
         for column in matrix.get("columns", [])
@@ -1273,6 +1276,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     <section class="panel">
       <h1>Labs Similarities And Differences</h1>
       <p class="muted">Generated at {escape(payload['generatedAt'])}</p>
+      {provenance_html}
       <p class="nav-link"><a href="{consolidated_href}">Back to consolidated report</a></p>
       <table>{summary_rows}</table>
     </section>
@@ -1550,6 +1554,17 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
 </body>
 </html>
 """
+
+
+def render_provenance_html(provenance: dict[str, Any] | None) -> str:
+    if not provenance:
+        return ""
+    label = escape(str(provenance.get("label", "Generated from")))
+    display = escape(str(provenance.get("display", "n/a")))
+    href = str(provenance.get("href", "") or "")
+    if href:
+        return f'<p class="muted"><strong>{label}:</strong> <a href="{escape(href)}" target="_blank" rel="noopener noreferrer">{display}</a></p>'
+    return f'<p class="muted"><strong>{label}:</strong> {display}</p>'
 
 
 def render_lab_link(name: str, href: str) -> str:
@@ -2346,7 +2361,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
     }
 
 def build_test_count_consistency_profile(
-    lab_name: str,
+    spec: Any,
     readme_text: str,
     snapshot: dict[str, Any] | None,
     *,
@@ -2367,11 +2382,14 @@ def build_test_count_consistency_profile(
     comparisons: list[dict[str, Any]] = []
     all_consistent = True
     snapshot_root = snapshot.get("root")
+    spec_phases = list(getattr(spec, "phases", ()))
     for index, phase in enumerate(report_phases):
         phase_path = phase_artifact_root(snapshot_root, phase)
         console_summary = extract_phase_command_log_summary(phase_path) or extract_tests_run_summary(phase.get("consoleSnippet", ""))
-        readme_summary = readme_summaries[index]["summary"] if index < len(readme_summaries) else None
-        readme_phase_name = readme_summaries[index]["label"] if index < len(readme_summaries) else None
+        spec_phase = spec_phases[index] if index < len(spec_phases) else None
+        selected_summary = select_readme_summary_for_phase(readme_summaries, spec_phase, index)
+        readme_summary = selected_summary["summary"] if selected_summary else None
+        readme_phase_name = selected_summary["label"] if selected_summary else None
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -2401,7 +2419,7 @@ def build_test_count_consistency_profile(
             all_consistent = all_consistent and consistent
         comparisons.append(
             {
-                "phase": readme_phase_name or phase.get("name", f"Phase {index + 1}"),
+                "phase": getattr(spec_phase, "readme_summary_query", None) or readme_phase_name or phase.get("name", f"Phase {index + 1}"),
                 "readme": format_tests_run_counts(readme_counts) if readme_counts else "not-available",
                 "console": format_tests_run_counts(console_counts) if console_counts else "not-available",
                 "ctrf": format_tests_run_counts(ctrf_summary) if ctrf_summary else "not-available",
@@ -2418,6 +2436,24 @@ def build_test_count_consistency_profile(
         "expectedMissingReason": expected_missing_reason,
         "phases": comparisons,
     }
+
+
+def select_readme_summary_for_phase(
+    readme_summaries: list[dict[str, str]],
+    phase_spec: Any,
+    phase_index: int,
+) -> dict[str, str] | None:
+    query = getattr(phase_spec, "readme_summary_query", None)
+    if query:
+        normalized_query = query.strip().lower()
+        for summary in readme_summaries:
+            label = (summary.get("label") or "").strip().lower()
+            heading = (summary.get("heading") or "").strip().lower()
+            if normalized_query == label or normalized_query == heading or normalized_query in label or normalized_query in heading:
+                return summary
+    if phase_index < len(readme_summaries):
+        return readme_summaries[phase_index]
+    return None
 
 
 def load_lab_report_snapshot(lab_name: str) -> dict[str, Any] | None:
@@ -2520,7 +2556,7 @@ def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
         return None
     clean_summary = normalize_summary_source_text(ANSI_ESCAPE_RE.sub("", summary_text))
     match = re.search(
-        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
+        r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+)(?:,\s*Errors:\s*(?P<errors>\d+))?",
         clean_summary,
     )
     if not match:
@@ -2548,7 +2584,7 @@ def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
         "passed": int(match.group("successes")),
         "failed": int(match.group("failures")),
         "skipped": 0,
-        "other": int(match.group("errors")),
+        "other": int(match.group("errors") or 0),
     }
 
 
