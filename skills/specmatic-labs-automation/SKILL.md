@@ -255,6 +255,11 @@ Rules:
 - the GitHub Actions summary should mention both the consolidated report and comparison report locations when they are available
 - do not hardcode only the labs that existed at one point in time, because new lab reports will then be missing from the archived artifact and consolidated report links will fail for downloaded reports
 - after adding a new lab harness, verify that its `output/report.json` and `output/report.html` are both included by the artifact upload pattern
+- in the comparison report, be explicit about counting scope:
+  - artifact availability rows such as `Generated artifacts include ctrf-report.json` and `Generated artifacts include the sibling Specmatic HTML report` are counted per lab
+  - count-consistency details such as `Test counts match across the README, console output, CTRF JSON, and Specmatic HTML` may show `not-available` per phase
+  - do not compare those two counts directly without normalizing them to the same unit first
+  - when a source is absent, show `not-available` rather than `missing` so the report distinguishes unavailable data from a true mismatch
 
 ## Close-out requirements
 
