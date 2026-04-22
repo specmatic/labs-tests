@@ -97,6 +97,8 @@ class LabSpec:
     runtime_warnings: tuple[str, ...] = ()
     known_limitations: tuple[str, ...] = ()
     intentional_differences: tuple[str, ...] = ()
+    expected_missing_test_counts: bool = False
+    expected_missing_test_counts_reason: str = ""
 
 
 @dataclass
@@ -1341,10 +1343,31 @@ def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
         summaries.append(
             {
                 "heading": heading_before_line_text(readme_text, line),
+                "label": summary_label_before_line(readme_text, line),
                 "summary": match.group(0),
             }
         )
     return summaries
+
+
+def summary_label_before_line(readme_text: str, line_number: int) -> str:
+    lines = readme_text.splitlines()
+    start_index = max(0, line_number - 2)
+    for index in range(start_index, -1, -1):
+        raw = lines[index].strip()
+        if not raw:
+            continue
+        if raw.startswith("```"):
+            continue
+        if raw.startswith("#"):
+            return raw.lstrip("#").strip()
+        if re.match(r"^\d+\.\s+", raw):
+            return raw
+        if re.match(r"^[-*]\s+", raw):
+            return raw[2:].strip()
+        if raw.endswith(":") or raw.endswith("."):
+            return raw.rstrip(":")
+    return heading_before_line_text(readme_text, line_number)
 
 
 def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | None:

@@ -107,7 +107,13 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         if artifact["label"] not in REPORT_ARTIFACT_LABELS and artifact["label"] not in IGNORED_ARTIFACT_LABELS
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
-    test_count_consistency = build_test_count_consistency_profile(spec.name, upstream_readme_text, report_snapshot)
+    test_count_consistency = build_test_count_consistency_profile(
+        spec.name,
+        upstream_readme_text,
+        report_snapshot,
+        expected_missing=spec.expected_missing_test_counts,
+        expected_missing_reason=spec.expected_missing_test_counts_reason,
+    )
     override = get_lab_readme_override(spec.name)
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
 
@@ -1137,6 +1143,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       text-align: left;
       vertical-align: top;
       overflow-wrap: break-word;
+      white-space: pre-line;
     }}
     .matrix-tooltip-details thead th {{
       font-weight: 700;
@@ -2329,10 +2336,22 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
         },
     }
 
-
-def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapshot: dict[str, Any] | None) -> dict[str, Any]:
+def build_test_count_consistency_profile(
+    lab_name: str,
+    readme_text: str,
+    snapshot: dict[str, Any] | None,
+    *,
+    expected_missing: bool = False,
+    expected_missing_reason: str = "",
+) -> dict[str, Any]:
     if not snapshot:
-        return {"available": False, "consistent": True, "phases": []}
+        return {
+            "available": False,
+            "consistent": True,
+            "expectedMissing": expected_missing,
+            "expectedMissingReason": expected_missing_reason,
+            "phases": [],
+        }
 
     readme_summaries = extract_tests_run_summaries(readme_text)
     report_phases = snapshot.get("phases", [])
@@ -2343,7 +2362,7 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
         phase_path = phase_artifact_root(snapshot_root, phase)
         console_summary = extract_phase_command_log_summary(phase_path) or extract_tests_run_summary(phase.get("consoleSnippet", ""))
         readme_summary = readme_summaries[index]["summary"] if index < len(readme_summaries) else None
-        readme_phase_name = readme_summaries[index]["heading"] if index < len(readme_summaries) else None
+        readme_phase_name = readme_summaries[index]["label"] if index < len(readme_summaries) else None
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -2353,25 +2372,27 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
                 ctrf_summary = format_tests_run_summary_from_report_json(ctrf_artifact)
             if html_artifact.exists():
                 html_summary = format_tests_run_summary_from_html(html_artifact)
+        readme_counts = parse_tests_run_counts(readme_summary)
+        console_counts = parse_tests_run_counts(console_summary)
         counts = [
-            parse_tests_run_counts(readme_summary),
-            parse_tests_run_counts(console_summary),
+            readme_counts,
+            console_counts,
             ctrf_summary,
             html_summary,
         ]
         present_counts = [item for item in counts if item is not None]
         comparable = len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
-        status = "match" if consistent else "mismatch" if comparable else "not-available"
+        status = "match" if consistent else "mismatch" if comparable else "expected-not-available" if expected_missing else "not-available"
         if comparable:
             all_consistent = all_consistent and consistent
         comparisons.append(
             {
                 "phase": readme_phase_name or phase.get("name", f"Phase {index + 1}"),
-                "readme": readme_summary or "not-available",
-                "console": console_summary or "not-available",
-                "ctrf": format_tests_run_counts_short(ctrf_summary) if ctrf_summary else "not-available",
-                "html": format_tests_run_counts_short(html_summary) if html_summary else "not-available",
+                "readme": format_tests_run_counts(readme_counts) if readme_counts else "not-available",
+                "console": format_tests_run_counts(console_counts) if console_counts else "not-available",
+                "ctrf": format_tests_run_counts(ctrf_summary) if ctrf_summary else "not-available",
+                "html": format_tests_run_counts(html_summary) if html_summary else "not-available",
                 "consistent": consistent,
                 "status": status,
             }
@@ -2380,6 +2401,8 @@ def build_test_count_consistency_profile(lab_name: str, readme_text: str, snapsh
     return {
         "available": bool(snapshot),
         "consistent": all_consistent,
+        "expectedMissing": expected_missing,
+        "expectedMissingReason": expected_missing_reason,
         "phases": comparisons,
     }
 
@@ -2404,10 +2427,31 @@ def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
         summaries.append(
             {
                 "heading": heading["text"] if heading else "",
+                "label": summary_label_before_line(readme_text, line, heading["text"] if heading else ""),
                 "summary": match.group(0),
             }
         )
     return summaries
+
+
+def summary_label_before_line(readme_text: str, line_number: int, fallback_heading: str) -> str:
+    lines = readme_text.splitlines()
+    start_index = max(0, line_number - 2)
+    for index in range(start_index, -1, -1):
+        raw = lines[index].strip()
+        if not raw:
+            continue
+        if raw.startswith("```"):
+            continue
+        if raw.startswith("#"):
+            return raw.lstrip("#").strip()
+        if re.match(r"^\d+\.\s+", raw):
+            return raw
+        if re.match(r"^[-*]\s+", raw):
+            return raw[2:].strip()
+        if raw.endswith(":") or raw.endswith("."):
+            return raw.rstrip(":")
+    return fallback_heading
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:
@@ -2458,15 +2502,12 @@ def format_tests_run_counts(counts: dict[str, int] | None) -> str:
     if not counts:
         return "not-available"
     return (
-        f"Tests run: {counts['tests']}, Successes: {counts['passed']}, "
-        f"Failures: {counts['failed']}, Errors: {counts['other']}"
+        f"T={counts['tests']}\n"
+        f"P={counts['passed']}\n"
+        f"F={counts['failed']}\n"
+        f"S={counts['skipped']}\n"
+        f"O={counts['other']}"
     )
-
-
-def format_tests_run_counts_short(counts: dict[str, int] | None) -> str:
-    if not counts:
-        return "not-available"
-    return f"T={counts['tests']} P={counts['passed']} F={counts['failed']} S={counts['skipped']} O={counts['other']}"
 
 
 def format_tests_run_summary_from_report_json(report_path: Path) -> dict[str, int] | None:
@@ -2512,10 +2553,14 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
+        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-available"]
         if mismatch_phases:
             verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
         elif matched_phases:
             verdict_items.append(f"{lab['name']}: matching counts where data is available.")
+        elif expected_unavailable_phases:
+            reason = lab["testCountConsistency"].get("expectedMissingReason") or "This lab does not publish test-count summaries."
+            verdict_items.append(f"{lab['name']}: count data is expected to be not available. {reason}")
         elif unavailable_phases:
             verdict_items.append(f"{lab['name']}: count data is not-available for comparison.")
         else:
@@ -2525,7 +2570,7 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
                 "type": "table",
                 "title": lab["name"],
                 "href": lab["href"],
-                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available.",
+                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When a lab intentionally does not emit count summaries, the row is marked as expected.",
                 "headers": ["Phase", "README", "Console", "CTRF", "HTML", "Status"],
                 "rows": [
                     [
@@ -2571,6 +2616,8 @@ def format_count_status(status: str) -> str:
         return "Match"
     if status == "mismatch":
         return "Mismatch"
+    if status == "expected-not-available":
+        return "Expected"
     return "Not available"
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +30,8 @@ README_FILE = UPSTREAM_LAB / "README.md"
 ACCEPT_ORDER_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "acceptOrder.json"
 OUT_FOR_DELIVERY_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "outForDeliveryOrder.json"
 OUTPUT_DIR = ROOT / "async-event-flow" / "output"
-LAB_COMMAND = ["docker", "compose", "run", "--rm", "studio", "test"]
+LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d && docker compose exec -T studio specmatic run-suite"]
+CONTAINER_NAMES = ["studio", "order-service-sut", "kafka-init", "kafka"]
 BEFORE_FIXTURE = """  "before": [
     {
       "type": "http",
@@ -174,11 +176,17 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
+    cleanup_stale_containers()
     clear_docker_owned_build_dir(spec)
 
 
 def teardown_compose(spec: LabSpec) -> None:
     docker_compose_down(spec, "down", "-v")
+    cleanup_stale_containers()
+
+
+def cleanup_stale_containers() -> None:
+    subprocess.run(["docker", "rm", "-f", *CONTAINER_NAMES], check=False, text=True, capture_output=True)
 
 
 def set_accept_baseline(content: str) -> str:
