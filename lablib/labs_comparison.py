@@ -37,6 +37,10 @@ PATH_LIKE_RE = re.compile(r"([A-Za-z]:\\[^\s`]+|(?:\./|\.\./|/Users/|/usr/|/tmp/
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 TESTS_RUN_SUMMARY_RE = re.compile(r"Tests run:\s*\d+,\s*Successes:\s*\d+,\s*Failures:\s*\d+,\s*Errors:\s*\d+")
 EXAMPLES_SUMMARY_RE = re.compile(r"Examples:\s*(?P<passed>\d+)\s+passed\s+and\s+(?P<failed>\d+)\s+failed\s+out of\s+(?P<tests>\d+)\s+total", re.IGNORECASE)
+MCP_SUMMARY_RE = re.compile(
+    r"(?:(?P<prefix>SUMMARY:)\s*)?Total:\s*(?P<tests>\d+)\s*(?:\||\n|\r\n)\s*Passed:\s*(?P<passed>\d+)\s*(?:\||\n|\r\n)\s*Failed:\s*(?P<failed>\d+)",
+    re.IGNORECASE,
+)
 TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
@@ -2372,7 +2376,11 @@ def build_test_count_consistency_profile(
         html_summary = None
         if phase_path and phase_path.exists():
             ctrf_artifact = phase_path / "ctrf-report.json"
+            if not ctrf_artifact.exists():
+                ctrf_artifact = phase_path / "mcp" / "mcp_test_report.json"
             html_artifact = phase_path / "specmatic" / "test" / "html" / "index.html"
+            if not html_artifact.exists():
+                html_artifact = phase_path / "mcp" / "specmatic_report.html"
             if ctrf_artifact.exists():
                 ctrf_summary = format_tests_run_summary_from_report_json(ctrf_artifact)
             if html_artifact.exists():
@@ -2425,16 +2433,24 @@ def load_lab_report_snapshot(lab_name: str) -> dict[str, Any] | None:
 def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
     summaries: list[dict[str, str]] = []
     headings = extract_headings(readme_text)
-    matches = list(TESTS_RUN_SUMMARY_RE.finditer(readme_text)) + list(EXAMPLES_SUMMARY_RE.finditer(readme_text))
+    matches = (
+        list(TESTS_RUN_SUMMARY_RE.finditer(readme_text))
+        + list(EXAMPLES_SUMMARY_RE.finditer(readme_text))
+        + list(MCP_SUMMARY_RE.finditer(readme_text))
+    )
     matches.sort(key=lambda match: match.start())
     for match in matches:
         line = line_number_for_index(readme_text, match.start())
         heading = heading_before_line(headings, line)
+        if match.re is MCP_SUMMARY_RE:
+            summary_text = format_mcp_summary_match(match)
+        else:
+            summary_text = match.group(0)
         summaries.append(
             {
                 "heading": heading["text"] if heading else "",
                 "label": summary_label_before_line(readme_text, line, heading["text"] if heading else ""),
-                "summary": match.group(0),
+                "summary": summary_text,
             }
         )
     return summaries
@@ -2461,7 +2477,7 @@ def summary_label_before_line(readme_text: str, line_number: int, fallback_headi
 
 
 def extract_tests_run_summary(console_output: str) -> str | None:
-    clean_output = ANSI_ESCAPE_RE.sub("", console_output)
+    clean_output = normalize_summary_source_text(ANSI_ESCAPE_RE.sub("", console_output))
     tests_matches = TESTS_RUN_SUMMARY_RE.findall(clean_output)
     if tests_matches:
         return tests_matches[-1]
@@ -2469,7 +2485,15 @@ def extract_tests_run_summary(console_output: str) -> str | None:
     last_match = None
     for last_match in example_matches:
         pass
-    return last_match.group(0) if last_match else None
+    if last_match:
+        return last_match.group(0)
+    mcp_matches = MCP_SUMMARY_RE.finditer(clean_output)
+    last_match = None
+    for last_match in mcp_matches:
+        pass
+    if not last_match:
+        return None
+    return format_mcp_summary_match(last_match)
 
 
 def extract_phase_command_log_summary(phase_path: Path | None) -> str | None:
@@ -2494,19 +2518,28 @@ def phase_artifact_root(snapshot_root: Any, phase: dict[str, Any]) -> Path | Non
 def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
     if not summary_text:
         return None
-    clean_summary = ANSI_ESCAPE_RE.sub("", summary_text)
+    clean_summary = normalize_summary_source_text(ANSI_ESCAPE_RE.sub("", summary_text))
     match = re.search(
         r"Tests run:\s*(?P<tests>\d+),\s*Successes:\s*(?P<successes>\d+),\s*Failures:\s*(?P<failures>\d+),\s*Errors:\s*(?P<errors>\d+)",
         clean_summary,
     )
     if not match:
         example_match = EXAMPLES_SUMMARY_RE.search(clean_summary)
-        if not example_match:
+        if example_match:
+            return {
+                "tests": int(example_match.group("tests")),
+                "passed": int(example_match.group("passed")),
+                "failed": int(example_match.group("failed")),
+                "skipped": 0,
+                "other": 0,
+            }
+        mcp_match = MCP_SUMMARY_RE.search(clean_summary)
+        if not mcp_match:
             return None
         return {
-            "tests": int(example_match.group("tests")),
-            "passed": int(example_match.group("passed")),
-            "failed": int(example_match.group("failed")),
+            "tests": int(mcp_match.group("tests")),
+            "passed": int(mcp_match.group("passed")),
+            "failed": int(mcp_match.group("failed")),
             "skipped": 0,
             "other": 0,
         }
@@ -2533,6 +2566,16 @@ def format_tests_run_counts(counts: dict[str, int] | None) -> str:
 
 def format_tests_run_summary_from_report_json(report_path: Path) -> dict[str, int] | None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    if isinstance(report, list):
+        passed = sum(1 for item in report if item.get("verdict") == "PASSED")
+        failed = sum(1 for item in report if item.get("verdict") == "FAILED")
+        return {
+            "tests": len(report),
+            "passed": passed,
+            "failed": failed,
+            "skipped": 0,
+            "other": 0,
+        }
     summary = report.get("results", {}).get("summary", {})
     return {
         "tests": int(summary.get("tests", 0)),
@@ -2548,7 +2591,16 @@ def format_tests_run_summary_from_html(html_path: Path) -> dict[str, int] | None
     try:
         report = parse_html_embedded_report(html_text)
     except ValueError:
-        return None
+        mcp_match = MCP_SUMMARY_RE.search(html_text)
+        if not mcp_match:
+            return None
+        return {
+            "tests": int(mcp_match.group("tests")),
+            "passed": int(mcp_match.group("passed")),
+            "failed": int(mcp_match.group("failed")),
+            "skipped": 0,
+            "other": 0,
+        }
     summary = report.get("results", {}).get("summary", {})
     return {
         "tests": int(summary.get("tests", 0)),
@@ -2564,6 +2616,24 @@ def parse_html_embedded_report(html_text: str) -> dict[str, Any]:
     if not match:
         raise ValueError("Could not find the embedded Specmatic report payload inside the HTML report.")
     return json.loads(match.group(1))
+
+
+def format_mcp_summary_match(match: re.Match[str]) -> str:
+    prefix = f"{match.group('prefix').strip()}\n" if match.group("prefix") else ""
+    return (
+        f"{prefix}Total: {match.group('tests')}\n"
+        f"Passed: {match.group('passed')}\n"
+        f"Failed: {match.group('failed')}"
+    )
+
+
+def normalize_summary_source_text(text: str) -> str:
+    return re.sub(
+        r"^[^\n]*\|\s*(?=(?:Total:|Passed:|Failed:|Overall Success Rate:|SUMMARY:))",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
 
 
 def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
