@@ -1079,7 +1079,14 @@ def select_readme_summary_for_phase(
         for summary in readme_summaries:
             label = (summary.get("label") or "").strip().lower()
             heading = (summary.get("heading") or "").strip().lower()
-            if query == label or query == heading or query in label or query in heading:
+            heading_path = (summary.get("headingPath") or "").strip().lower()
+            if (
+                query == label
+                or query == heading
+                or query in label
+                or query in heading
+                or query in heading_path
+            ):
                 return summary
     if phase_index < len(readme_summaries):
         return readme_summaries[phase_index]
@@ -1194,6 +1201,21 @@ def heading_before_line_text(readme_text: str, line_number: int) -> str:
     headings = [(m.group(2).strip(), line_number_for_index(readme_text, m.start())) for m in HEADING_RE.finditer(readme_text)]
     before = [text for text, line in headings if line <= line_number]
     return before[-1] if before else ""
+
+
+def heading_path_before_line_text(readme_text: str, line_number: int) -> str:
+    headings = [
+        (len(m.group(1)), m.group(2).strip(), line_number_for_index(readme_text, m.start()))
+        for m in HEADING_RE.finditer(readme_text)
+    ]
+    path: list[tuple[int, str]] = []
+    for level, text, line in headings:
+        if line > line_number:
+            break
+        while path and path[-1][0] >= level:
+            path.pop()
+        path.append((level, text))
+    return " > ".join(text for _, text in path)
 
 
 def collect_preceding_context(readme_text: str, line_number: int, window: int = 4) -> str:
@@ -1409,6 +1431,7 @@ def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
         summaries.append(
             {
                 "heading": heading_before_line_text(readme_text, line),
+                "headingPath": heading_path_before_line_text(readme_text, line),
                 "label": summary_label_before_line(readme_text, line),
                 "summary": summary_text,
             }

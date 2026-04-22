@@ -2480,7 +2480,14 @@ def select_readme_summary_for_phase(
         for summary in readme_summaries:
             label = (summary.get("label") or "").strip().lower()
             heading = (summary.get("heading") or "").strip().lower()
-            if normalized_query == label or normalized_query == heading or normalized_query in label or normalized_query in heading:
+            heading_path = (summary.get("headingPath") or "").strip().lower()
+            if (
+                normalized_query == label
+                or normalized_query == heading
+                or normalized_query in label
+                or normalized_query in heading
+                or normalized_query in heading_path
+            ):
                 return summary
     if phase_index < len(readme_summaries):
         return readme_summaries[phase_index]
@@ -2516,11 +2523,23 @@ def extract_tests_run_summaries(readme_text: str) -> list[dict[str, str]]:
         summaries.append(
             {
                 "heading": heading["text"] if heading else "",
+                "headingPath": heading_path_before_line(headings, line),
                 "label": summary_label_before_line(readme_text, line, heading["text"] if heading else ""),
                 "summary": summary_text,
             }
         )
     return summaries
+
+
+def heading_path_before_line(headings: list[dict[str, Any]], line_number: int) -> str:
+    path: list[dict[str, Any]] = []
+    for heading in headings:
+        if heading["line"] > line_number:
+            break
+        while path and path[-1]["level"] >= heading["level"]:
+            path.pop()
+        path.append(heading)
+    return " > ".join(item["text"] for item in path)
 
 
 def summary_label_before_line(readme_text: str, line_number: int, fallback_heading: str) -> str:

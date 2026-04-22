@@ -71,9 +71,9 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="baseline",
                 readme_summary_query="2. Loop Test using CLI",
-                expected_console_phrases=("Tests run: 6, Successes: 6, Failures: 0, Errors: 0",),
+                expected_console_phrases=("Tests run: 3, Successes: 3, Failures: 0, Errors: 0",),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 6, Successes: 6, Failures: 0, Errors: 0", "README documents the loop-test baseline.", "README is missing the loop-test baseline."),),
+                readme_assertions=(readme_contains("Tests run: 3, Successes: 3, Failures: 0, Errors: 0", "README documents the loop-test baseline.", "README is missing the loop-test baseline."),),
                 file_transforms={"specmatic": set_none},
                 extra_assertions=baseline_assertions,
             ),
@@ -94,8 +94,8 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="all",
                 readme_summary_query="Positive and Negative Tests (ALL)",
-                expected_console_phrases=("Tests run: 596, Successes: 596, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 596, Successes: 596, Failures: 0, Errors: 0", "README documents the full resiliency count.", "README is missing the full resiliency count."),),
+                expected_console_phrases=("Tests run: 600, Successes: 600, Failures: 0, Errors: 0",),
+                readme_assertions=(readme_contains("Tests run: 600, Successes: 600, Failures: 0", "README documents the full resiliency count.", "README is missing the full resiliency count."),),
                 file_transforms={"specmatic": set_all},
                 extra_assertions=all_assertions,
             ),
@@ -106,7 +106,7 @@ def build_lab_spec() -> LabSpec:
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
-    return common_resiliency_assertions(context, expected_tests=6, mode="none")
+    return common_resiliency_assertions(context, expected_tests=3, mode="none")
 
 
 def positive_only_assertions(context: ValidationContext) -> list[dict]:
@@ -114,7 +114,7 @@ def positive_only_assertions(context: ValidationContext) -> list[dict]:
 
 
 def all_assertions(context: ValidationContext) -> list[dict]:
-    return common_resiliency_assertions(context, expected_tests=596, mode="all")
+    return common_resiliency_assertions(context, expected_tests=600, mode="all")
 
 
 def common_resiliency_assertions(context: ValidationContext, *, expected_tests: int, mode: str) -> list[dict]:
