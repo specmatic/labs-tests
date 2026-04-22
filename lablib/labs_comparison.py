@@ -1194,13 +1194,18 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-count.ok {{
       color: #245b34;
     }}
+    .matrix-tooltip-count {{
+      display: inline-block;
+      white-space: pre-line;
+      line-height: 1.35;
+      min-width: max-content;
+    }}
     .matrix-tooltip-count.mismatch {{
       color: #b42318;
       font-weight: 700;
       background: #fff1ea;
       border-radius: 0.35rem;
       padding: 0.2rem 0.35rem;
-      display: inline-block;
     }}
     .matrix-tooltip-count.na {{
       color: #5f6b74;
@@ -1520,14 +1525,18 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
               const td = document.createElement('td');
               const rawValue = (cell && typeof cell === 'object' && !Array.isArray(cell)) ? cell : null;
               const textValue = rawValue ? (rawValue.text || '') : cell;
-              td.textContent = textValue;
+              if (rawValue && rawValue.className) {{
+                const content = document.createElement('div');
+                content.textContent = textValue;
+                rawValue.className.split(/\s+/).filter(Boolean).forEach((name) => content.classList.add(name));
+                td.appendChild(content);
+              }} else {{
+                td.textContent = textValue;
+              }}
               if (rawValue && rawValue.title) {{
                 td.title = rawValue.title;
               }} else if (typeof textValue === 'string' && textValue.includes('T=') && textValue.includes('P=')) {{
                 td.title = 'T = Total, P = Passed, F = Failed, S = Skipped, O = Other';
-              }}
-              if (rawValue && rawValue.className) {{
-                rawValue.className.split(/\s+/).filter(Boolean).forEach((name) => td.classList.add(name));
               }}
               const header = headers[index] || '';
               if ((header === 'Status' || header === 'Present') && !rawValue?.className) {{
