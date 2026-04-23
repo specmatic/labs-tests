@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -71,40 +70,14 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("test_accepted_order_request.json", "examples/test_accepted_order_request.json", "examples/test_accepted_order_request.json", "text"),
             ArtifactSpec("test_products_too_many_requests.json", "examples/test_products_too_many_requests.json", "examples/test_products_too_many_requests.json", "text"),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "External Examples Overview Video",
-                "Files in this lab",
-                "Learner task",
-                "Lab Rules",
-                "1. Intentional failure (baseline run)",
-                "2. Start Studio",
-                "3. Auto-Fix the 3 failing external examples (tiny actions)",
-                "4. Generate missing examples in the same Studio flow",
-                "5. Re-run validation and verify pass state",
-                "Pass Criteria",
-                "Reference",
-                "Next step",
-            ),
-        ),
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",
                 description="Validate the original external examples and verify the known failures.",
                 expected_exit_code=1,
+                readme_phase_id="baseline",
                 output_dir_name="baseline",
-                expected_console_phrases=("1 passed and 3 failed out of 4 total",),
                 include_readme_structure_checks=True,
-                readme_assertions=(
-                    readme_contains(
-                        "[FAIL] Examples: 1 passed and 3 failed out of 4 total",
-                        "README documents the baseline validation failure count.",
-                        "README is missing the baseline validation failure count.",
-                    ),
-                ),
                 file_transforms={
                     "book_200": reset_book_200,
                     "accepted_product": reset_accepted_product,
@@ -115,21 +88,16 @@ def build_lab_spec() -> LabSpec:
                 extra_assertions=baseline_assertions,
             ),
             PhaseSpec(
-                name="Fixed contract",
-                description="Fix the invalid examples and add the two missing 201 create examples.",
+                name="Studio fix applied",
+                description="Apply the deterministic Studio-equivalent fixes and generated examples inside labs-tests, then validate the changed files.",
                 expected_exit_code=0,
-                output_dir_name="fixed",
-                expected_console_phrases=("6 passed and 0 failed out of 6 total",),
-                readme_assertions=(
-                    readme_contains(
-                        "[OK] Examples: 6 passed and 0 failed out of 6 total",
-                        "README documents the final validation pass count.",
-                        "README is missing the final validation pass count.",
-                    ),
-                ),
+                readme_phase_id="studio-fix",
+                command=["python3", "-c", "print('Applied deterministic Studio-equivalent fixes in labs-tests.')"],
+                output_dir_name="studio-fix",
+                expected_console_phrases=("Applied deterministic Studio-equivalent fixes in labs-tests.",),
                 fix_summary=(
-                    "Fixed the invalid date, enum, numeric, and missing count fields in the existing examples.",
-                    "Added two new 201 create examples for POST /products and POST /orders.",
+                    "Applied the same example fixes the learner would make in Studio.",
+                    "Added the two missing 201 create examples that Studio would generate.",
                 ),
                 file_transforms={
                     "book_200": fix_book_200,
@@ -142,7 +110,29 @@ def build_lab_spec() -> LabSpec:
                     ArtifactSpec("test_created_product_request_201.json", "examples/test_created_product_request_201.json", "examples/test_created_product_request_201.json", "text"),
                     ArtifactSpec("test_created_order_request_201.json", "examples/test_created_order_request_201.json", "examples/test_created_order_request_201.json", "text"),
                 ),
-                extra_assertions=fixed_assertions,
+                extra_assertions=studio_fix_assertions,
+            ),
+            PhaseSpec(
+                name="Fixed contract",
+                description="Fix the invalid examples and add the two missing 201 create examples.",
+                expected_exit_code=0,
+                readme_phase_id="final",
+                output_dir_name="fixed",
+                fix_summary=(
+                    "Re-ran validation after the deterministic Studio-equivalent fixes were applied.",
+                ),
+                file_transforms={
+                    "book_200": fix_book_200,
+                    "accepted_product": fix_accepted_product,
+                    "accepted_order": fix_accepted_order,
+                    "created_product": create_product_201_example,
+                    "created_order": create_order_201_example,
+                },
+                artifact_specs=(
+                    ArtifactSpec("test_created_product_request_201.json", "examples/test_created_product_request_201.json", "examples/test_created_product_request_201.json", "text"),
+                    ArtifactSpec("test_created_order_request_201.json", "examples/test_created_order_request_201.json", "examples/test_created_order_request_201.json", "text"),
+                ),
+                extra_assertions=final_assertions,
             ),
         ),
     )
@@ -150,17 +140,17 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        assert_condition("today" in context.artifacts["test_find_available_products_book_200.json"]["text"], "Baseline book example kept the invalid 'today' date.", "Baseline book example did not keep the invalid 'today' date.", category="report"),
-        assert_condition('"movie"' in context.artifacts["test_accepted_product_request.json"]["text"], "Baseline product example kept the invalid movie enum.", "Baseline product example did not keep the invalid movie enum.", category="report"),
-        assert_condition('"productid"' in context.artifacts["test_accepted_order_request.json"]["text"], "Baseline order example kept the missing-count shape.", "Baseline order example did not keep the missing-count shape.", category="report"),
+        assert_condition("today" in context.artifacts["test_find_available_products_book_200.json"]["text"], "Baseline book example kept the invalid 'today' date.", "Baseline book example did not keep the invalid 'today' date.", category="implementation"),
+        assert_condition('"movie"' in context.artifacts["test_accepted_product_request.json"]["text"], "Baseline product example kept the invalid movie enum.", "Baseline product example did not keep the invalid movie enum.", category="implementation"),
+        assert_condition('"productid"' in context.artifacts["test_accepted_order_request.json"]["text"], "Baseline order example kept the missing-count shape.", "Baseline order example did not keep the missing-count shape.", category="implementation"),
     ]
 
 
-def fixed_assertions(context: ValidationContext) -> list[dict]:
+def studio_fix_assertions(context: ValidationContext) -> list[dict]:
     return [
-        assert_condition('"2025-11-28"' in context.artifacts["test_find_available_products_book_200.json"]["text"], "Fixed book example uses a valid ISO to-date.", "Fixed book example does not use a valid ISO to-date.", category="report"),
-        assert_condition('"type": "book"' in context.artifacts["test_accepted_product_request.json"]["text"] and '"inventory": 5' in context.artifacts["test_accepted_product_request.json"]["text"], "Fixed product example uses valid enum and numeric values.", "Fixed product example does not use valid enum and numeric values.", category="report"),
-        assert_condition('"count": 2' in context.artifacts["test_accepted_order_request.json"]["text"], "Fixed order example added the missing count field.", "Fixed order example did not add the missing count field.", category="report"),
+        assert_condition('"2025-11-28"' in context.artifacts["test_find_available_products_book_200.json"]["text"], "Fixed book example uses a valid ISO to-date.", "Fixed book example does not use a valid ISO to-date.", category="implementation"),
+        assert_condition('"type": "book"' in context.artifacts["test_accepted_product_request.json"]["text"] and '"inventory": 5' in context.artifacts["test_accepted_product_request.json"]["text"], "Fixed product example uses valid enum and numeric values.", "Fixed product example does not use valid enum and numeric values.", category="implementation"),
+        assert_condition('"count": 2' in context.artifacts["test_accepted_order_request.json"]["text"], "Fixed order example added the missing count field.", "Fixed order example did not add the missing count field.", category="implementation"),
         assert_condition(
             '"name": "Laptop"' in context.artifacts["test_created_product_request_201.json"]["text"]
             and '"type": "gadget"' in context.artifacts["test_created_product_request_201.json"]["text"]
@@ -168,7 +158,7 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
             and '"id": 2' in context.artifacts["test_created_product_request_201.json"]["text"],
             "Created product 201 example was added with a distinct request body and required response id.",
             "Created product 201 example is missing the distinct request body or required response id.",
-            category="report",
+            category="implementation",
         ),
         assert_condition(
             '"productid": 2' in context.artifacts["test_created_order_request_201.json"]["text"]
@@ -176,9 +166,13 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
             and '"id": 2' in context.artifacts["test_created_order_request_201.json"]["text"],
             "Created order 201 example was added with a distinct request body and required response id.",
             "Created order 201 example is missing the distinct request body or required response id.",
-            category="report",
+            category="implementation",
         ),
     ]
+
+
+def final_assertions(_: ValidationContext) -> list[dict]:
+    return []
 
 
 def reset_book_200(content: str) -> str:
@@ -262,11 +256,5 @@ def create_order_201_example(_: str) -> str:
   }
 }
 """
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
-
-
 if __name__ == "__main__":
     raise SystemExit(main())

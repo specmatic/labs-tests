@@ -349,6 +349,18 @@ def render_html(payload: dict[str, Any]) -> str:
       font-size: 0.9rem;
       margin: 6px 0 12px;
     }}
+    .artifacts-list {{
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }}
+    .artifacts-list li {{
+      margin-bottom: 8px;
+    }}
+    .artifacts-list a {{
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
     .summary-row {{
       display: flex;
       align-items: center;
@@ -472,6 +484,15 @@ def render_phase(phase: dict[str, Any]) -> str:
     phase_css = "pass" if phase["status"] == "passed" else "fail"
     command_html = ""
     command = phase.get("command")
+    readme_phase = phase.get("readmePhase") or {}
+    readme_phase_html = ""
+    if readme_phase.get("id"):
+        readme_phase_html = (
+            "<p class=\"meta\">"
+            f"<strong>README phase:</strong> {escape(readme_phase.get('title') or '(missing)')} "
+            f"(id: <code>{escape(readme_phase.get('id') or '')}</code>, kind: <code>{escape(readme_phase.get('kind') or '')}</code>)"
+            "</p>"
+        )
     if command:
         command_html = (
             f"<p><strong>Command:</strong> {escape(command['display'])}<br>"
@@ -500,6 +521,7 @@ def render_phase(phase: dict[str, Any]) -> str:
         f"<summary><div class=\"summary-row\"><div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase['status'].upper())}</div><h2>{escape(phase['name'])}</h2></div></summary>"
         f"<p class=\"toggle-hint\">Click the section title to expand or collapse details.</p>"
         f"<p>{escape(phase['description'])}</p>"
+        f"{readme_phase_html}"
         f"{command_html}"
         f"{fix_html}"
         f"{warnings_html}"
@@ -545,7 +567,7 @@ def render_assertion_sections(phase: dict[str, Any]) -> str:
         grouped.setdefault(assertion.get("category", "other"), []).append(assertion)
 
     sections = "".join(
-        render_assertion_section(phase["name"], category, items) for category, items in grouped.items()
+        render_assertion_section(phase["name"], category, grouped[category]) for category in ordered_categories(grouped)
     )
     return f"<h3 class=\"section-heading\">Validations</h3>{sections}"
 
@@ -572,13 +594,13 @@ def render_artifacts_section(artifacts: list[dict[str, Any]]) -> str:
     if not artifacts:
         return ""
     artifact_links = "".join(
-        f'<a href="{escape(item["href"])}">{escape(item["label"])}</a>'
+        f'<li><a href="{escape(item["href"])}">{escape(item["label"])}</a></li>'
         for item in artifacts
     )
     return (
         "<details class=\"artifacts-block\">"
         "<summary><h3>Artifacts generated</h3></summary>"
-        f"<div class=\"artifacts\">{artifact_links}</div>"
+        f"<ul class=\"artifacts-list\">{artifact_links}</ul>"
         "</details>"
     )
 
@@ -638,7 +660,7 @@ def render_failure_index(failed_assertions: list[dict[str, str]]) -> str:
         grouped.setdefault(item["category"], []).append(item)
 
     groups_html = "".join(
-        render_failure_group(category, items) for category, items in grouped.items()
+        render_failure_group(category, grouped[category]) for category in ordered_categories(grouped)
     )
     return (
         '<section class="panel failure-index">'
@@ -664,8 +686,12 @@ def render_failure_group(category: str, items: list[dict[str, str]]) -> str:
 
 def category_label(category: str) -> str:
     labels = {
+        "command": "Command Failures",
+        "console": "Console Output Failures",
         "runtime": "Runtime Failures",
-        "readme": "README Failures",
+        "readme": "README Structure and Content Failures",
+        "implementation": "Implementation Phase Failures",
+        "report": "Generated Report Failures",
         "artifacts": "Artifact Failures",
         "setup": "Setup Failures",
     }
@@ -674,14 +700,44 @@ def category_label(category: str) -> str:
 
 def category_title(category: str) -> str:
     labels = {
-        "command": "Command Validations",
-        "console": "Console Validations",
-        "report": "Report Validations",
-        "readme": "README Validations",
+        "command": "Command Execution Validations",
+        "console": "Console Output Validations",
+        "implementation": "Implementation Phase Validations",
+        "report": "Generated Report Validations",
+        "readme": "README Structure and Content Validations",
         "artifacts": "Artifact Validations",
         "setup": "Setup Validations",
     }
     return labels.get(category, f"{category.title()} Validations")
+
+
+def ordered_categories(grouped: dict[str, Any]) -> list[str]:
+    preferred = [
+        "setup",
+        "readme",
+        "implementation",
+        "command",
+        "console",
+        "artifacts",
+        "report",
+        "runtime",
+        "other",
+    ]
+    present = list(grouped.keys())
+    return [category for category in preferred if category in grouped] + sorted(
+        category for category in present if category not in preferred
+    )
+
+
+def standard_report_categories() -> list[str]:
+    return [
+        "readme",
+        "implementation",
+        "command",
+        "console",
+        "artifacts",
+        "report",
+    ]
 
 
 def render_category_summary(phase: dict[str, Any]) -> str:
@@ -703,9 +759,13 @@ def render_category_summary(phase: dict[str, Any]) -> str:
         else:
             stats["other"] += 1
 
+    for category in standard_report_categories():
+        grouped.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "expected": 0, "other": 0})
+
     rows = "".join(
         f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['expected']}</td><td>{stats['other']}</td></tr>"
-        for category, stats in grouped.items()
+        for category in ordered_categories(grouped)
+        for stats in [grouped[category]]
     )
     return (
         '<section class="category-summary">'

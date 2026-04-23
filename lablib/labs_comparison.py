@@ -21,6 +21,7 @@ from lablib.readme_expectations import (
     title_present,
     unexpected_h2_titles_for_lab,
 )
+from lablib.readme_schema import expected_h2_titles_for_document, parse_readme_document, validate_external_link
 from lablib.provenance import detect_report_provenance
 from lablib.time_display import format_report_datetime
 
@@ -111,6 +112,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         phase_artifacts.extend(artifact_profile(artifact) for artifact in phase.artifact_specs)
 
     upstream_readme_text = spec.readme_path.read_text(encoding="utf-8")
+    readme_doc = parse_readme_document(upstream_readme_text)
     headings = extract_headings(upstream_readme_text)
     h2_headings = [heading["text"] for heading in headings if heading["level"] == 2]
     h3_headings = [heading["text"] for heading in headings if heading["level"] == 3]
@@ -131,6 +133,10 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
     shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
     os_documentation = analyze_readme_os_documentation(upstream_readme_text, headings, code_blocks)
+    if readme_doc.is_v2:
+        os_documentation = normalize_v2_os_documentation(os_documentation, readme_doc)
+    video_links = detect_video_links(readme_doc)
+    video_optional = overview_video_is_optional(readme_doc)
     additional_artifacts = sorted(
         artifact["target"]
         for artifact in generated_artifact_profiles
@@ -139,13 +145,15 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     report_snapshot = load_lab_report_snapshot(spec.name)
     test_count_consistency = build_test_count_consistency_profile(
         spec,
-        upstream_readme_text,
+        readme_doc,
         report_snapshot,
         expected_missing=spec.expected_missing_test_counts,
         expected_missing_reason=spec.expected_missing_test_counts_reason,
     )
     override = get_lab_readme_override(spec.name)
-    unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
+    required_h2 = list(expected_h2_titles_for_document(readme_doc) or shared_h2_titles())
+    unexpected_h2 = [] if readme_doc.is_v2 else unexpected_h2_titles_for_lab(spec.name, h2_headings)
+    shared_h2_matches = (h2_headings == required_h2) if readme_doc.is_v2 else shared_h2_sequence_matches(h2_headings)
 
     return {
         "name": spec.name,
@@ -176,8 +184,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         },
         "readme": {
             "h1": next((heading["text"] for heading in headings if heading["level"] == 1), ""),
-            "requiredH2": list(shared_h2_titles()),
-            "optionalH2": list(optional_h2_titles()),
+            "requiredH2": required_h2,
+            "optionalH2": [] if readme_doc.is_v2 else list(optional_h2_titles()),
             "additionalH2": list(override.allowed_additional_h2_titles),
             "actualH2": h2_headings,
             "actualH3": h3_headings,
@@ -201,8 +209,12 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "shellConsoleSections": shell_console_sections,
             "filesSectionText": extract_heading_section_text(upstream_readme_text, "Files in this lab", level=2),
             "osDocumentation": os_documentation,
+            "videoLinks": video_links,
+            "videoOptional": video_optional,
+            "hasOverviewVideo": bool(video_links),
             "unexpectedH2": unexpected_h2,
-            "sharedH2OrderMatches": shared_h2_sequence_matches(h2_headings),
+            "sharedH2OrderMatches": shared_h2_matches,
+            "schemaVersion": readme_doc.schema_version or "legacy",
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -238,6 +250,81 @@ def artifact_profile(artifact: Any) -> dict[str, Any]:
         "target": data["target_relpath"],
         "origin": classify_artifact_origin(data["source_relpath"]),
     }
+
+
+def normalize_v2_os_documentation(profile: dict[str, Any], readme_doc: Any) -> dict[str, Any]:
+    normalized = {**profile}
+    phase_scopes = {str(phase.metadata.get("os_scope", "")).strip().lower() for phase in readme_doc.phases}
+    common_command_issues: list[str] = []
+    common_output_issues: list[str] = []
+    common_phase_titles: list[str] = []
+    common_output_titles: list[str] = []
+    if phase_scopes and phase_scopes == {"all"}:
+        for phase in readme_doc.phases:
+            scope = str(phase.metadata.get("os_scope", "")).strip().lower()
+            if scope != "all":
+                continue
+            phase_text = phase.content.lower()
+            if phase.command_blocks:
+                invalid_languages = [
+                    block.language or "(none)"
+                    for block in phase.command_blocks
+                    if (block.language or "").lower() not in {"shell", "bash", "sh", "zsh"}
+                ]
+                has_os_specific_labels = any(token in phase_text for token in ("windows", "powershell", "cmd", "macos", "linux"))
+                if invalid_languages or has_os_specific_labels:
+                    issue = f"{phase.title}: os_scope=all but found OS-specific command content"
+                    if invalid_languages:
+                        issue += f" using {', '.join(invalid_languages)}"
+                    common_command_issues.append(issue)
+                else:
+                    common_phase_titles.append(phase.title)
+            if phase.output_blocks:
+                common_output_titles.append(phase.title)
+        if not common_command_issues:
+            normalized["missingCommandOs"] = []
+            normalized["missingOutputOs"] = []
+            normalized["missingOutputForCommandOs"] = []
+    normalized["commonCommandForAllOs"] = bool(common_phase_titles) and not common_command_issues
+    normalized["commonCommandPhaseTitles"] = common_phase_titles
+    normalized["commonOutputForAllOs"] = bool(common_output_titles) and not common_output_issues
+    normalized["commonOutputPhaseTitles"] = common_output_titles
+    normalized["commonCommandIssues"] = common_command_issues
+    normalized["commonOutputIssues"] = common_output_issues
+    if common_command_issues:
+        normalized["commandLanguageIssues"] = [
+            *normalized.get("commandLanguageIssues", []),
+            *[
+                {"os": "all", "heading": issue.split(":")[0], "language": "mixed/common-scope-mismatch"}
+                for issue in common_command_issues
+            ],
+        ]
+    return normalized
+
+
+def detect_video_links(readme_doc: Any) -> list[dict[str, str]]:
+    video_links: list[dict[str, str]] = []
+    for link in readme_doc.links:
+        target = link.target.strip()
+        lowered_target = target.lower()
+        lowered_label = link.label.strip().lower()
+        is_video = any(
+            token in lowered_target
+            for token in ("youtube.com", "youtu.be", "vimeo.com", "loom.com")
+        ) or any(token in lowered_label for token in ("video", "walkthrough", "overview"))
+        if is_video:
+            video_links.append({"label": link.label or target, "target": target})
+    return video_links
+
+
+def overview_video_is_optional(readme_doc: Any) -> bool:
+    metadata = readme_doc.metadata or {}
+    optional_components = metadata.get("optional_components", {}) or {}
+    if isinstance(optional_components, dict) and "overview_video" in optional_components:
+        return bool(optional_components.get("overview_video"))
+    if "overview_video_optional" in metadata:
+        return bool(metadata.get("overview_video_optional"))
+    return False
 
 
 def classify_artifact_origin(source_relpath: str) -> str:
@@ -609,8 +696,8 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
-    shared_h2 = tuple(shared_h2_titles())
-    common_required_h2 = list(shared_h2_titles())
+    shared_h2 = tuple(labs[0]["readme"]["requiredH2"]) if labs else ()
+    common_required_h2 = list(shared_h2)
     extra_h2_by_lab = {
         lab["name"]: list(lab["readme"]["unexpectedH2"])
         for lab in labs
@@ -646,9 +733,9 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["command"]) and lab["commandType"] != "other" for lab in labs],
         },
         {
-            "label": "README provides OS-specific command sections for Windows, macOS, and Linux when commands are documented",
+            "label": "README documents either one common command for all OSes or explicit commands for Windows, macOS, and Linux",
             "tooltip": {
-                "summary": ["When a README documents commands, it should show how to run them on Windows, macOS, and Linux."],
+                "summary": ["When a README documents commands, it should either show one command that applies to every OS or separate commands for Windows, macOS, and Linux."],
                 "details": build_os_command_coverage_details(labs),
             },
             "cells": [
@@ -732,14 +819,27 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
         },
         {
-            "label": "README provides OS-specific console output snippets for documented OS-specific commands",
+            "label": "README documents either one common output snippet for all OSes or matching output for each OS-specific command",
             "tooltip": {
-                "summary": ["When OS-specific command sections are documented, each OS-specific command should have a matching console output snippet."],
+                "summary": ["When commands are documented, the README should either show one shared output snippet for all OSes or provide matching output for each OS-specific command."],
                 "details": build_os_output_coverage_details(labs),
             },
             "cells": [
                 (not lab["readme"]["osDocumentation"]["hasCommands"])
                 or not lab["readme"]["osDocumentation"]["missingOutputForCommandOs"]
+                for lab in labs
+            ],
+        },
+        {
+            "label": "README overview video links are surfaced when present",
+            "tooltip": {
+                "summary": ["If a README includes an overview video, the comparison report should show it clearly and link back to the README."],
+                "details": build_video_link_details(labs),
+            },
+            "cells": [
+                (not lab["readme"]["videoLinks"])
+                or lab["readme"]["videoOptional"]
+                or all(validate_external_link(item["target"])[0] for item in lab["readme"]["videoLinks"])
                 for lab in labs
             ],
         },
@@ -1769,29 +1869,39 @@ def build_os_command_coverage_details(labs: list[dict[str, Any]]) -> dict[str, A
     sections = []
     for lab in labs:
         os_doc = lab["readme"]["osDocumentation"]
+        if os_doc.get("commonCommandForAllOs"):
+            found_items = [
+                "Common command flow for all OSes: "
+                + (", ".join(os_doc.get("commonCommandPhaseTitles", [])) or "(none)")
+            ]
+            missing_items = ["(none)"]
+            note = "The README marks these phases as using one common command flow for all OSes."
+        else:
+            found_items = [
+                f"{os_name}: "
+                + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
+                for os_name, entries in os_doc["commandCoverage"].items()
+            ] if os_doc["hasCommands"] else ["No command sections found in the README."]
+            missing_items = os_doc["missingCommandOs"] or ["(none)"]
+            note = "These OS-specific command sections were detected in the README."
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
                         "title": "Command sections found",
-                        "note": "These OS-specific command sections were detected in the README.",
-                        "items": [
-                            f"{os_name}: "
-                            + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
-                            for os_name, entries in os_doc["commandCoverage"].items()
-                        ]
-                        if os_doc["hasCommands"]
-                        else ["No command sections found in the README."],
+                        "note": note,
+                        "items": found_items,
                     },
                     {
                         "type": "bullets",
                         "title": "Add command sections",
-                        "tone": "attention" if os_doc["missingCommandOs"] else "ok",
-                        "note": "These OS-specific command variants are still missing.",
-                        "items": os_doc["missingCommandOs"] or ["(none)"],
+                        "tone": "attention" if os_doc["missingCommandOs"] and not os_doc.get("commonCommandForAllOs") else "ok",
+                        "note": "These command variants are still missing only when the README does not already declare one common command flow for all OSes.",
+                        "items": missing_items,
                     },
                 ],
             }
@@ -1799,7 +1909,7 @@ def build_os_command_coverage_details(labs: list[dict[str, Any]]) -> dict[str, A
     return {
         "type": "sections",
         "title": "OS-specific command coverage",
-        "note": "When commands are documented, the README should show Windows, macOS, and Linux variants.",
+        "note": "When commands are documented, the README should either show one common command for all OSes or separate variants for Windows, macOS, and Linux.",
         "sections": sections,
     }
 
@@ -1816,6 +1926,7 @@ def build_os_command_language_details(labs: list[dict[str, Any]]) -> dict[str, A
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -1865,6 +1976,7 @@ def build_files_under_test_details(labs: list[dict[str, Any]]) -> dict[str, Any]
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -1906,6 +2018,7 @@ def build_readme_section_presence_details(
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -1939,6 +2052,7 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -1973,6 +2087,7 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -1995,6 +2110,7 @@ def build_h3_details(labs: list[dict[str, Any]], extra_h2_by_lab: dict[str, list
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2038,6 +2154,7 @@ def build_console_section_details(labs: list[dict[str, Any]], which: str) -> dic
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2068,29 +2185,39 @@ def build_os_output_coverage_details(labs: list[dict[str, Any]]) -> dict[str, An
     sections = []
     for lab in labs:
         os_doc = lab["readme"]["osDocumentation"]
+        if os_doc.get("commonOutputForAllOs"):
+            found_items = [
+                "Common output flow for all OSes: "
+                + (", ".join(os_doc.get("commonOutputPhaseTitles", [])) or "(none)")
+            ]
+            missing_items = ["(none)"]
+            note = "The README marks these phases as using one shared output snippet for all OSes."
+        else:
+            found_items = [
+                f"{os_name}: "
+                + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
+                for os_name, entries in os_doc["outputCoverage"].items()
+            ] if os_doc["hasCommands"] else ["No OS-specific command sections detected."]
+            missing_items = os_doc["missingOutputForCommandOs"] or ["(none)"]
+            note = "These OS-specific output snippets were detected after OS-specific command sections."
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
-                        "title": "OS-specific command outputs found",
-                        "note": "These OS-specific output snippets were detected after OS-specific command sections.",
-                        "items": [
-                            f"{os_name}: "
-                            + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
-                            for os_name, entries in os_doc["outputCoverage"].items()
-                        ]
-                        if os_doc["hasCommands"]
-                        else ["No OS-specific command sections detected."],
+                        "title": "Command outputs found",
+                        "note": note,
+                        "items": found_items,
                     },
                     {
                         "type": "bullets",
-                        "title": "Add OS-specific output snippets",
-                        "tone": "attention" if os_doc["missingOutputForCommandOs"] else "ok",
-                        "note": "These OS-specific command variants still need matching terminaloutput snippets.",
-                        "items": os_doc["missingOutputForCommandOs"] or ["(none)"],
+                        "title": "Add output snippets",
+                        "tone": "attention" if os_doc["missingOutputForCommandOs"] and not os_doc.get("commonOutputForAllOs") else "ok",
+                        "note": "These output variants are still missing only when the README does not already declare one shared output flow for all OSes.",
+                        "items": missing_items,
                     },
                 ],
             }
@@ -2098,7 +2225,7 @@ def build_os_output_coverage_details(labs: list[dict[str, Any]]) -> dict[str, An
     return {
         "type": "sections",
         "title": "OS-specific output coverage",
-        "note": "When the README documents OS-specific command sections, each OS-specific command should have a matching console output snippet.",
+        "note": "When commands are documented, the README should either show one shared output snippet for all OSes or provide matching output for each OS-specific command.",
         "sections": sections,
     }
 
@@ -2111,6 +2238,7 @@ def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2146,6 +2274,7 @@ def build_command_output_presence_details(labs: list[dict[str, Any]]) -> dict[st
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2183,6 +2312,7 @@ def build_terminal_output_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2225,6 +2355,7 @@ def build_studio_component_details(labs: list[dict[str, Any]]) -> dict[str, Any]
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2249,6 +2380,67 @@ def build_studio_component_details(labs: list[dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        video_links = lab["readme"]["videoLinks"]
+        optional = lab["readme"].get("videoOptional", False)
+        validated_links = []
+        for item in video_links:
+            ok, detail_value = validate_external_link(item["target"])
+            environmental = "nodename nor servname provided" in detail_value.lower() or "name or service not known" in detail_value.lower()
+            validated_links.append({**item, "ok": ok, "detail": detail_value, "environmental": environmental})
+        sections.append(
+            {
+                "type": "sections",
+                "title": lab["name"],
+                "href": lab["href"],
+                "sections": [
+                    {
+                        "type": "bullets",
+                        "title": "Metadata policy",
+                        "tone": "ok",
+                        "items": [
+                            "Overview video is optional via README metadata."
+                            if optional
+                            else "Overview video is treated as required when present because README metadata does not mark it optional."
+                        ],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Overview video links",
+                        "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
+                        "note": "These overview video links were detected in the README.",
+                        "items": [
+                            f"{item['label']}: {item['target']} ({item['detail']})"
+                            for item in validated_links
+                        ] or ["(none)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Action",
+                        "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
+                        "items": [
+                            "No change needed."
+                            if optional or not validated_links or all(item["ok"] for item in validated_links)
+                            else "No overview video link is documented in this README."
+                            if not validated_links
+                            else "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
+                            if any(item["environmental"] for item in validated_links)
+                            else "Fix or replace the broken overview video link in the README."
+                        ],
+                    },
+                ],
+            }
+        )
+    return {
+        "type": "sections",
+        "title": "Overview video links",
+        "note": "Overview videos are optional, but when present they should be easy to discover from the comparison report and the README.",
+        "sections": sections,
+    }
+
+
 def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, Any]:
     sections = []
     for lab in labs:
@@ -2257,6 +2449,7 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2288,6 +2481,7 @@ def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2346,6 +2540,7 @@ def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, A
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "sections": [
                     {
                         "type": "bullets",
@@ -2389,6 +2584,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
             {
                 "type": "sections",
                 "title": lab["name"],
+                "href": lab["href"],
                 "note": "These are the concrete README heading changes needed for this lab.",
                 "sections": [
                     {
@@ -2460,7 +2656,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
 
 def build_test_count_consistency_profile(
     spec: Any,
-    readme_text: str,
+    readme_doc: Any,
     snapshot: dict[str, Any] | None,
     *,
     expected_missing: bool = False,
@@ -2475,7 +2671,7 @@ def build_test_count_consistency_profile(
             "phases": [],
         }
 
-    readme_summaries = extract_tests_run_summaries(readme_text)
+    readme_summaries = extract_tests_run_summaries(readme_doc.body_text)
     report_phases = snapshot.get("phases", [])
     comparisons: list[dict[str, Any]] = []
     all_consistent = True
@@ -2485,9 +2681,16 @@ def build_test_count_consistency_profile(
         phase_path = phase_artifact_root(snapshot_root, phase)
         console_summary = extract_phase_command_log_summary(phase_path) or extract_tests_run_summary(phase.get("consoleSnippet", ""))
         spec_phase = spec_phases[index] if index < len(spec_phases) else None
-        selected_summary = select_readme_summary_for_phase(readme_summaries, spec_phase, index)
+        readme_phase = readme_doc.phase_by_id(getattr(spec_phase, "readme_phase_id", None)) if getattr(readme_doc, "is_v2", False) else None
+        selected_summary = (
+            select_readme_summary_for_v2_phase(readme_phase)
+            if readme_phase is not None
+            else select_readme_summary_for_phase(readme_summaries, spec_phase, index)
+        )
         readme_summary = selected_summary["summary"] if selected_summary else None
-        readme_phase_name = selected_summary["label"] if selected_summary else None
+        readme_phase_name = readme_phase.title if readme_phase is not None else (selected_summary["label"] if selected_summary else None)
+        expected_sources = expected_report_sources_for_phase(readme_doc, readme_phase)
+        validates_counts = validates_test_counts_for_phase(readme_phase)
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -2501,18 +2704,24 @@ def build_test_count_consistency_profile(
                 ctrf_summary = format_tests_run_summary_from_report_json(ctrf_artifact)
             if html_artifact.exists():
                 html_summary = format_tests_run_summary_from_html(html_artifact)
-        readme_counts = parse_tests_run_counts(readme_summary)
-        console_counts = parse_tests_run_counts(console_summary)
-        counts = [
-            readme_counts,
-            console_counts,
-            ctrf_summary,
-            html_summary,
-        ]
+        readme_counts = parse_tests_run_counts(readme_summary) if expected_sources["readme_summary"] else None
+        console_counts = parse_tests_run_counts(console_summary) if expected_sources["console_summary"] else None
+        ctrf_counts = ctrf_summary if expected_sources["ctrf"] else None
+        html_counts = html_summary if expected_sources["html"] else None
+        counts = [readme_counts, console_counts, ctrf_counts, html_counts]
         present_counts = [item for item in counts if item is not None]
-        comparable = len(present_counts) >= 2
+        expected_source_count = sum(1 for enabled in expected_sources.values() if enabled)
+        comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
-        status = "match" if consistent else "mismatch" if comparable else "expected-not-available" if expected_missing else "not-available"
+        status = (
+            "match"
+            if consistent
+            else "mismatch"
+            if comparable
+            else "expected-not-available"
+            if expected_missing or not validates_counts or expected_source_count < 2
+            else "not-available"
+        )
         if comparable:
             all_consistent = all_consistent and consistent
         comparisons.append(
@@ -2520,10 +2729,11 @@ def build_test_count_consistency_profile(
                 "phase": getattr(spec_phase, "readme_summary_query", None) or readme_phase_name or phase.get("name", f"Phase {index + 1}"),
                 "readmeCounts": readme_counts,
                 "consoleCounts": console_counts,
-                "ctrfCounts": ctrf_summary,
-                "htmlCounts": html_summary,
+                "ctrfCounts": ctrf_counts,
+                "htmlCounts": html_counts,
                 "consistent": consistent,
                 "status": status,
+                "expectedSources": expected_sources,
             }
         )
 
@@ -2534,6 +2744,40 @@ def build_test_count_consistency_profile(
         "expectedMissingReason": expected_missing_reason,
         "phases": comparisons,
     }
+
+
+def select_readme_summary_for_v2_phase(readme_phase: Any) -> dict[str, str] | None:
+    summaries = extract_tests_run_summaries(readme_phase.content)
+    if not summaries:
+        return None
+    return {
+        "label": readme_phase.title,
+        "summary": summaries[0]["summary"],
+    }
+
+
+def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dict[str, bool]:
+    defaults = {
+        "readme_summary": bool(readme_doc.metadata.get("reports", {}).get("readme_summary", False)),
+        "console_summary": bool(readme_doc.metadata.get("reports", {}).get("console_summary", False)),
+        "ctrf": bool(readme_doc.metadata.get("reports", {}).get("ctrf", False)),
+        "html": bool(readme_doc.metadata.get("reports", {}).get("html", False)),
+    }
+    if readme_phase is None:
+        return defaults
+    phase_reports = readme_phase.metadata.get("expected_reports", {}) or {}
+    return {
+        "readme_summary": bool(phase_reports.get("readme_summary", defaults["readme_summary"])),
+        "console_summary": bool(phase_reports.get("console_summary", defaults["console_summary"])),
+        "ctrf": bool(phase_reports.get("ctrf", defaults["ctrf"])),
+        "html": bool(phase_reports.get("html", defaults["html"])),
+    }
+
+
+def validates_test_counts_for_phase(readme_phase: Any) -> bool:
+    if readme_phase is None:
+        return True
+    return bool(readme_phase.metadata.get("validates_test_counts", False))
 
 
 def select_readme_summary_for_phase(

@@ -31,6 +31,23 @@ WINDOWS_COMMAND_FENCE_LANGUAGES = (
 
 OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 
+README_V2_H2_SEQUENCE = (
+    "Objective",
+    "Why this lab matters",
+    "Time required",
+    "Prerequisites",
+    "Architecture",
+    "Files in this lab",
+    "Lab Rules",
+    "Specmatic references",
+    "Lab Implementation Phases",
+    "Pass Criteria",
+    "Troubleshooting",
+    "Cleanup",
+    "What you learned",
+    "Next step",
+)
+
 
 @dataclass(frozen=True)
 class SectionContentRule:

@@ -23,6 +23,16 @@ from lablib.readme_expectations import (
     title_present,
     unexpected_h2_titles_for_lab,
 )
+from lablib.readme_schema import (
+    ALLOWED_PHASE_KINDS,
+    V2_SCHEMA_VERSION,
+    command_fence_languages,
+    expected_h2_titles_for_document,
+    parse_readme_document,
+    phase_sequence_is_valid,
+    validate_external_link,
+    validate_internal_link,
+)
 from lablib.reporting import build_report, write_html, write_json
 from lablib.workspace_setup import run_setup
 
@@ -46,6 +56,7 @@ CONSOLE_FENCE_LANGUAGES = set(EXECUTABLE_COMMAND_FENCE_LANGUAGES)
 TERMINAL_OUTPUT_FENCE_LANGUAGE = OUTPUT_FENCE_LANGUAGE
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
+EXTERNAL_LINK_CACHE: dict[str, tuple[bool, str]] = {}
 
 
 @dataclass
@@ -70,6 +81,8 @@ class PhaseSpec:
     name: str
     description: str
     expected_exit_code: int
+    readme_phase_id: str | None = None
+    command: list[str] | None = None
     output_dir_name: str | None = None
     expected_console_phrases: tuple[str, ...] = ()
     readme_assertions: tuple[dict[str, str], ...] = ()
@@ -116,7 +129,9 @@ class ValidationContext:
     phase: PhaseSpec
     target_dir: Path
     command_result: CommandResult
+    executed_command: list[str]
     readme_text: str
+    readme_doc: Any
     artifacts: dict[str, dict[str, Any]]
     original_files: dict[str, str | None]
 
@@ -153,6 +168,7 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 
 def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     readme_text = spec.readme_path.read_text(encoding="utf-8")
+    readme_doc = parse_readme_document(readme_text)
     original_files = {
         alias: path.read_text(encoding="utf-8") if path.exists() else None
         for alias, path in spec.files.items()
@@ -163,7 +179,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 
     if args.refresh_report:
         print("Refreshing the report from existing captured artifacts...")
-        phases = rebuild_phases_from_artifacts(spec, readme_text, original_files)
+        phases = rebuild_phases_from_artifacts(spec, readme_text, readme_doc, original_files)
     else:
         phases = []
         try:
@@ -183,7 +199,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
             for phase in spec.phases:
                 print(f"Preparing {phase.name.lower()} lab state...")
                 apply_phase_files(spec, phase, original_files)
-                phase_result = execute_phase(spec, phase, readme_text, original_files)
+                phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
                 phases.append(phase_result)
         finally:
             restore_original_files(spec, original_files)
@@ -270,6 +286,7 @@ def execute_phase(
     spec: LabSpec,
     phase: PhaseSpec,
     readme_text: str,
+    readme_doc: Any,
     original_files: dict[str, str | None],
 ) -> dict[str, Any]:
     target_dir = spec.output_dir / phase_dir_name(phase)
@@ -280,8 +297,9 @@ def execute_phase(
         spec.clear_reports(spec)
 
     print(f"{phase.name}: starting verification...")
+    phase_command = phase.command or spec.command
     result = run_command(
-        spec.command,
+        phase_command,
         spec.upstream_lab,
         env=spec.command_env,
         stream_output=True,
@@ -310,14 +328,16 @@ def execute_phase(
         phase=phase,
         target_dir=target_dir,
         command_result=result,
+        executed_command=phase_command,
         readme_text=readme_text,
+        readme_doc=readme_doc,
         artifacts=artifacts,
         original_files=original_files,
     )
     return build_phase_result(context)
 
 
-def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_files: dict[str, str | None]) -> list[dict[str, Any]]:
+def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, readme_doc: Any, original_files: dict[str, str | None]) -> list[dict[str, Any]]:
     previous_commands = load_previous_phase_commands(spec.output_dir)
     phases: list[dict[str, Any]] = []
     for phase in spec.phases:
@@ -328,7 +348,7 @@ def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_file
             artifacts = load_copied_artifacts(spec, phase, target_dir)
             command_output = (target_dir / "command.log").read_text(encoding="utf-8")
             result = CommandResult(
-                command=spec.command,
+                command=phase.command or spec.command,
                 cwd=str(spec.upstream_lab),
                 exit_code=command_info.get("exitCode", phase.expected_exit_code),
                 stdout=command_output,
@@ -343,7 +363,9 @@ def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, original_file
                 phase=phase,
                 target_dir=target_dir,
                 command_result=result,
+                executed_command=phase.command or spec.command,
                 readme_text=readme_text,
+                readme_doc=readme_doc,
                 artifacts=artifacts,
                 original_files=original_files,
             )
@@ -357,6 +379,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
     spec = context.lab
     phase = context.phase
     command_result = context.command_result
+    readme_phase = context.readme_doc.phase_by_id(phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
     assertions: list[dict[str, Any]] = []
 
     assertions.append(
@@ -369,7 +392,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
             details=[
                 detail("Expected exit code", phase.expected_exit_code),
                 detail("Actual exit code", command_result.exit_code),
-                detail("Command", " ".join(spec.command)),
+                detail("Command", " ".join(context.executed_command)),
             ],
         )
     )
@@ -382,6 +405,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
                 category="command",
                 details=[
                     detail("Command", " ".join(spec.command)),
+                    detail("Executed command", " ".join(context.executed_command)),
                     detail("Timeout reason", command_result.timeout_reason),
                     detail("Exit code", command_result.exit_code),
                 ],
@@ -408,11 +432,13 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         assertions.extend(filter_relevant_lab_assertions(phase.extra_assertions(context), context))
 
     assertions.extend(evaluate_readme_assertions(context))
+    assertions.extend(evaluate_v2_phase_readme_alignment(context))
     assertions.extend(evaluate_readme_console_structure(context))
     assertions.extend(evaluate_readme_os_documentation(context))
     assertions.extend(evaluate_runtime_summary_drift(context))
     if phase.include_readme_structure_checks:
-        assertions.extend(validate_readme_structure(context.readme_text, spec.name))
+        assertions.extend(validate_readme_structure(context))
+        assertions.extend(evaluate_readme_links(context))
     assertions = apply_readme_annotation_overrides(assertions, context.readme_text)
 
     phase_status = "passed" if all(item["status"] != "failed" for item in assertions) else "failed"
@@ -420,8 +446,13 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         "name": phase.name,
         "description": phase.description,
         "status": phase_status,
+        "readmePhase": {
+            "id": phase.readme_phase_id,
+            "title": readme_phase.title if readme_phase is not None else "",
+            "kind": readme_phase.kind if readme_phase is not None else "",
+        },
         "command": {
-            "display": " ".join(spec.command),
+            "display": " ".join(context.executed_command),
             "exitCode": command_result.exit_code,
             "durationSeconds": round(command_result.duration_seconds, 2),
         },
@@ -686,7 +717,7 @@ def build_missing_artifact_phase_result(
         "description": phase.description,
         "status": "failed",
         "command": {
-            "display": " ".join(spec.command),
+            "display": " ".join(phase.command or spec.command),
             "exitCode": command_info.get("exitCode", "n/a"),
             "durationSeconds": round(command_info.get("durationSeconds", 0.0), 2),
         },
@@ -864,6 +895,8 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
 
 
 def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[str, Any]]:
+    if getattr(context.readme_doc, "is_v2", False):
+        return []
     profile = analyze_readme_os_documentation(context.readme_text)
     assertions: list[dict[str, Any]] = []
 
@@ -961,16 +994,23 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
 
 
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
-    has_report_artifacts = (
-        "ctrf-report.json" in context.artifacts
-        or first_html_artifact(context.artifacts) is not None
-    )
-    if not has_report_artifacts:
-        return []
+    phase_doc = context.readme_doc.phase_by_id(context.phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
+    phase_metadata = phase_doc.metadata if phase_doc is not None else {}
+    expected_reports = phase_metadata.get("expected_reports", {})
+    expect_ctrf = bool(expected_reports.get("ctrf", "ctrf-report.json" in context.artifacts))
+    expect_html = bool(expected_reports.get("html", first_html_artifact(context.artifacts) is not None))
+    expect_readme_summary = bool(phase_metadata.get("validates_test_counts", False) or expected_reports.get("readme_summary"))
+    if not any((expect_ctrf, expect_html, expect_readme_summary)):
+        has_report_artifacts = (
+            "ctrf-report.json" in context.artifacts
+            or first_html_artifact(context.artifacts) is not None
+        )
+        if not has_report_artifacts:
+            return []
 
-    readme_summaries = extract_tests_run_summaries(context.readme_text)
+    readme_summaries = extract_tests_run_summaries(phase_doc.content if phase_doc is not None else context.readme_text)
     phase_index = next((index for index, phase in enumerate(context.lab.phases) if phase is context.phase), 0)
-    selected_summary = select_readme_summary_for_phase(readme_summaries, context.phase, phase_index)
+    selected_summary = readme_summaries[0] if phase_doc is not None and readme_summaries else select_readme_summary_for_phase(readme_summaries, context.phase, phase_index)
     readme_summary = selected_summary["summary"] if selected_summary else None
     console_summary = extract_tests_run_summary(context.command_result.combined_output)
     assertions: list[dict[str, Any]] = []
@@ -991,20 +1031,21 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
     if console_summary is None:
         return assertions
 
-    assertions.append(
-        assert_equal(
-            readme_summary,
-            console_summary,
-            "README test summary matched the console test summary.",
-            "README test summary did not match the console test summary. Impact: the README is no longer describing the actual runtime result. Action required: update the README test summary block or fix the lab so the console output matches the documented counts.",
-            category="readme",
-            code="readme.tests_run_summary.matches_console",
-            details=[
-                detail("README summary", readme_summary or "(missing)"),
-                detail("Console summary", console_summary),
-            ],
+    if expect_readme_summary or readme_summary is not None:
+        assertions.append(
+            assert_equal(
+                readme_summary,
+                console_summary,
+                "README test summary matched the console test summary.",
+                "README test summary did not match the console test summary. Impact: the README is no longer describing the actual runtime result. Action required: update the README test summary block or fix the lab so the console output matches the documented counts.",
+                category="readme",
+                code="readme.tests_run_summary.matches_console",
+                details=[
+                    detail("README summary", readme_summary or "(missing)"),
+                    detail("Console summary", console_summary),
+                ],
+            )
         )
-    )
 
     console_counts = parse_console_test_summary(console_summary)
     if console_counts is None:
@@ -1012,12 +1053,12 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
 
     report_summaries: list[tuple[str, dict[str, int]]] = []
     ctrf_artifact = context.artifacts.get("ctrf-report.json")
-    if ctrf_artifact and "json" in ctrf_artifact:
+    if expect_ctrf and ctrf_artifact and "json" in ctrf_artifact:
         report_summary = ctrf_artifact["json"].get("results", {}).get("summary", {})
         report_summaries.append(("CTRF", normalize_report_test_summary(report_summary)))
 
     html_artifact = first_html_artifact(context.artifacts)
-    if html_artifact is not None:
+    if expect_html and html_artifact is not None:
         try:
             html_report = parse_html_embedded_report(html_artifact["text"])
         except ValueError as exc:
@@ -1093,7 +1134,285 @@ def select_readme_summary_for_phase(
     return None
 
 
-def validate_readme_structure(readme_text: str, lab_name: str) -> list[dict[str, Any]]:
+def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[str, Any]]:
+    document = context.readme_doc
+    if not getattr(document, "is_v2", False):
+        return []
+
+    phase_doc = document.phase_by_id(context.phase.readme_phase_id)
+    if phase_doc is None:
+        return [
+            assert_condition(
+                False,
+                "README contains the mapped implementation phase.",
+                "README is missing the implementation phase mapped to this automated phase.",
+                category="readme",
+                code="readme.v2.phase_mapping.present",
+                details=[detail("Expected phase id", context.phase.readme_phase_id or "(missing)")],
+            )
+        ]
+
+    commands = phase_doc.command_blocks
+    outputs = phase_doc.output_blocks
+    expected_reports = phase_doc.metadata.get("expected_reports", {})
+    validates_counts = bool(phase_doc.metadata.get("validates_test_counts"))
+    os_scope = str(phase_doc.metadata.get("os_scope", "")).strip().lower()
+    invalid_common_languages = [
+        block.language or "(none)"
+        for block in commands
+        if (block.language or "").lower() not in {"shell", "bash", "sh", "zsh"}
+    ]
+    has_os_specific_labels = any(
+        token in phase_doc.content.lower()
+        for token in ("windows", "powershell", "cmd", "macos", "linux")
+    )
+    assertions = [
+        assert_condition(
+            phase_doc.metadata.get("id") == context.phase.readme_phase_id,
+            "README phase metadata includes the expected phase id.",
+            "README phase metadata does not include the expected phase id.",
+            category="readme",
+            code="readme.v2.phase.id",
+            details=[
+                detail("Expected phase id", context.phase.readme_phase_id or "(missing)"),
+                detail("Actual phase id", phase_doc.metadata.get("id", "(missing)")),
+            ],
+        ),
+        assert_condition(
+            phase_doc.kind in ALLOWED_PHASE_KINDS,
+            "README phase metadata uses an allowed phase kind.",
+            "README phase metadata uses an unsupported phase kind.",
+            category="readme",
+            code="readme.v2.phase.kind",
+            details=[
+                detail("Phase title", phase_doc.title),
+                detail("Phase kind", phase_doc.kind or "(missing)"),
+                detail("Allowed phase kinds", ", ".join(ALLOWED_PHASE_KINDS)),
+            ],
+        ),
+        assert_condition(
+            bool(commands),
+            "README phase documents at least one executable command.",
+            "README phase does not document any executable command.",
+            category="readme",
+            code="readme.v2.phase.commands",
+            details=[detail("Phase title", phase_doc.title)],
+        ),
+        assert_condition(
+            len(outputs) >= len(commands),
+            "README phase includes relevant command output snippets.",
+            "README phase does not include enough output snippets for its documented commands.",
+            category="readme",
+            code="readme.v2.phase.outputs",
+            details=[
+                detail("Phase title", phase_doc.title),
+                detail("Command blocks", len(commands)),
+                detail("Output blocks", len(outputs)),
+            ],
+        ),
+        assert_condition(
+            all(block.language in command_fence_languages() for block in commands),
+            "README phase command blocks use executable fence languages.",
+            "README phase command blocks use unsupported fence languages.",
+            category="readme",
+            code="readme.v2.phase.command_fences",
+            details=[
+                detail(
+                    "Invalid command fence languages",
+                    ", ".join(sorted({block.language for block in commands if block.language not in command_fence_languages()})) or "(none)",
+                )
+            ],
+        ),
+        assert_condition(
+            all(block.language == TERMINAL_OUTPUT_FENCE_LANGUAGE for block in outputs),
+            "README phase output blocks use terminaloutput fences.",
+            "README phase output blocks do not consistently use terminaloutput fences.",
+            category="readme",
+            code="readme.v2.phase.output_fences",
+            details=[
+                detail(
+                    "Invalid output fence languages",
+                    ", ".join(sorted({block.language for block in outputs if block.language != TERMINAL_OUTPUT_FENCE_LANGUAGE})) or "(none)",
+                )
+            ],
+        ),
+    ]
+
+    if os_scope == "all":
+        assertions.append(
+            assert_condition(
+                not invalid_common_languages and not has_os_specific_labels,
+                "README phase with os_scope=all uses one common cross-OS command style.",
+                "README phase with os_scope=all mixes in OS-specific command content. Impact: the phase is declared as common across OSes, but the documented commands are platform-specific. Action required: either keep one common shell-style command flow for all OSes or change the README/metadata to provide explicit OS-specific variants.",
+                category="readme",
+                code="readme.v2.phase.os_scope_all.common_command_style",
+                details=[
+                    detail("Phase title", phase_doc.title),
+                    detail("Invalid command fence languages", ", ".join(invalid_common_languages) or "(none)"),
+                    detail("OS-specific labels detected", str(has_os_specific_labels)),
+                ],
+            )
+        )
+
+    if validates_counts:
+        assertions.append(
+            assert_condition(
+                bool(extract_tests_run_summaries(phase_doc.content)),
+                "README phase includes a summary block for runtime count validation.",
+                "README phase is missing the documented summary block required for runtime count validation.",
+                category="readme",
+                code="readme.v2.phase.summary",
+                details=[detail("Phase title", phase_doc.title)],
+            )
+        )
+
+    if expected_reports:
+        assertions.append(
+            assert_condition(
+                isinstance(expected_reports, dict),
+                "README phase metadata declares expected report sources.",
+                "README phase metadata does not declare any expected report sources.",
+                category="readme",
+                code="readme.v2.phase.expected_reports",
+                details=[
+                    detail(
+                        "Declared report sources",
+                        ", ".join(f"{name}={enabled}" for name, enabled in expected_reports.items()) or "(none)",
+                    )
+                ],
+            )
+        )
+    return assertions
+
+
+def evaluate_readme_links(context: ValidationContext) -> list[dict[str, Any]]:
+    assertions: list[dict[str, Any]] = []
+    for link in context.readme_doc.links:
+        if link.target.startswith("mailto:"):
+            continue
+        if link.is_external:
+            cached = EXTERNAL_LINK_CACHE.get(link.target)
+            if cached is None:
+                cached = validate_external_link(link.target)
+                EXTERNAL_LINK_CACHE[link.target] = cached
+            ok, detail_value = cached
+            assertions.append(
+                assert_condition(
+                    ok,
+                    f"External README link resolved successfully: {link.target}",
+                    f"External README link did not resolve successfully: {link.target}",
+                    category="readme",
+                    code="readme.links.external",
+                    details=[
+                        detail("Line", link.line),
+                        detail("Target", link.target),
+                        detail("Result", detail_value),
+                    ],
+                )
+            )
+            continue
+
+        ok, detail_value = validate_internal_link(link, readme_path=context.lab.readme_path, headings=context.readme_doc.headings)
+        assertions.append(
+            assert_condition(
+                ok,
+                f"Internal README link resolved successfully: {link.target}",
+                f"Internal README link did not resolve successfully: {link.target}",
+                category="readme",
+                code="readme.links.internal",
+                details=[
+                    detail("Line", link.line),
+                    detail("Target", link.target),
+                    detail("Result", detail_value),
+                ],
+            )
+        )
+    return assertions
+
+
+def validate_readme_structure(context: ValidationContext) -> list[dict[str, Any]]:
+    if getattr(context.readme_doc, "is_v2", False):
+        return validate_v2_readme_structure(context)
+    return validate_legacy_readme_structure(context.readme_text, context.lab.name)
+
+
+def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, Any]]:
+    document = context.readme_doc
+    actual_h2 = document.h2_titles
+    expected_h2 = list(expected_h2_titles_for_document(document))
+    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases)
+    runner_phase_ids = [phase.readme_phase_id for phase in context.lab.phases if phase.readme_phase_id]
+    readme_phase_ids = [phase.id for phase in document.phases if phase.id]
+    assertions: list[dict[str, Any]] = [
+        assert_equal(
+            document.schema_version,
+            V2_SCHEMA_VERSION,
+            "README declares schema version v2.",
+            f"README does not declare schema version {V2_SCHEMA_VERSION}.",
+            category="readme",
+            code="readme.v2.schema_version",
+            details=[detail("Declared schema version", document.schema_version or "(missing)")],
+        ),
+        assert_condition(
+            bool(document.h1_title),
+            "README contains one top-level H1 title.",
+            "README is missing the top-level H1 title.",
+            category="readme",
+            code="readme.v2.h1.present",
+            details=[detail("H1 title", document.h1_title or "(missing)")],
+        ),
+        assert_equal(
+            actual_h2,
+            expected_h2,
+            "README H2 sections match the canonical v2 sequence.",
+            "README H2 sections do not match the canonical v2 sequence.",
+            category="readme",
+            code="readme.v2.h2_sequence",
+            details=[
+                detail("Expected H2 sequence", " -> ".join(expected_h2)),
+                detail("Actual H2 sequence", " -> ".join(actual_h2) or "(none)"),
+            ],
+        ),
+        assert_condition(
+            sequence_ok,
+            "README lab implementation phases follow the required baseline-to-final flow.",
+            "README lab implementation phases do not follow the required baseline-to-final flow.",
+            category="readme",
+            code="readme.v2.phase_sequence",
+            details=[
+                detail("Phase validation", sequence_message),
+                detail("Phase ids", ", ".join(phase.id for phase in document.phases) or "(none)"),
+                detail("Phase kinds", ", ".join(phase.kind for phase in document.phases) or "(none)"),
+            ],
+        ),
+        assert_equal(
+            runner_phase_ids,
+            readme_phase_ids,
+            "Automated lab phases align with the README phase ids.",
+            "Automated lab phases do not align with the README phase ids.",
+            category="readme",
+            code="readme.v2.phase_mapping.sequence",
+            details=[
+                detail("README phase ids", ", ".join(readme_phase_ids) or "(none)"),
+                detail("Automated phase ids", ", ".join(runner_phase_ids) or "(none)"),
+            ],
+        ),
+    ]
+    for phase in document.phases:
+        assertions.append(
+            assert_condition(
+                bool(phase.metadata),
+                f"README phase '{phase.title}' includes YAML metadata.",
+                f"README phase '{phase.title}' is missing YAML metadata.",
+                category="readme",
+                code="readme.v2.phase.metadata",
+                details=[detail("Phase title", phase.title)],
+            )
+        )
+    return assertions
+
+
+def validate_legacy_readme_structure(readme_text: str, lab_name: str) -> list[dict[str, Any]]:
     headings = [(len(m.group(1)), m.group(2).strip()) for m in HEADING_RE.finditer(readme_text)]
     assertions: list[dict[str, Any]] = []
     h1_headings = [text for level, text in headings if level == 1]

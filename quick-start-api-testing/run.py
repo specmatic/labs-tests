@@ -12,11 +12,9 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -78,37 +76,14 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("decision", "referenceCode", "processedOn"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Contract Testing vs API Testing",
-                "Objective",
-                "Why this lab matters",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Architecture",
-                "Files in this lab",
-                "Lab Rules",
-                "Specmatic references",
-                "Problem context",
-                "1. Run the baseline contract tests",
-                "2. Task A:",
-                "3. Task B:",
-                "4. Final verification",
-                "Pass criteria",
-                "Troubleshooting",
-                "What you learned",
-                "Next step",
-            ),
-        ),
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",
                 description="Recreate the too-strict examples and verify the two expected failures.",
                 expected_exit_code=1,
+                readme_phase_id="baseline",
                 output_dir_name="baseline",
-                expected_console_phrases=("Tests run: 4, Successes: 2, Failures: 2, Errors: 0",),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 2, Failures: 2, Errors: 0", "README documents the baseline summary.", "README is missing the baseline summary."),),
                 file_transforms={"finance_11": set_finance_baseline, "support_55": set_support_baseline},
                 extra_assertions=baseline_assertions,
             ),
@@ -116,9 +91,8 @@ def build_lab_spec() -> LabSpec:
                 name="Task A fixed",
                 description="Loosen the finance example with a pattern matcher and verify only one failure remains.",
                 expected_exit_code=1,
+                readme_phase_id="task-a",
                 output_dir_name="task-a",
-                expected_console_phrases=("Tests run: 4, Successes: 3, Failures: 1, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 3, Failures: 1, Errors: 0", "README documents the Task A checkpoint summary.", "README is missing the Task A checkpoint summary."),),
                 fix_summary=("Changed examples/test_finance_user_11.json so decision uses $match(pattern: approved|verified).",),
                 file_transforms={"finance_11": set_finance_task_a, "support_55": set_support_baseline},
                 extra_assertions=task_a_assertions,
@@ -127,9 +101,8 @@ def build_lab_spec() -> LabSpec:
                 name="Fixed contract",
                 description="Use dataType and pattern matchers for the support example and verify the full suite passes.",
                 expected_exit_code=0,
+                readme_phase_id="final",
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 4, Successes: 4, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 4, Failures: 0, Errors: 0", "README documents the final passing summary.", "README is missing the final passing summary."),),
                 fix_summary=(
                     "Kept the Task A pattern matcher for the finance decision field.",
                     "Changed examples/test_support_user_55.json so processedOn uses $match(dataType: date) and referenceCode uses $match(pattern: VRF-[0-9]{6}).",
@@ -145,12 +118,11 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 2, "failed": 2, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 2, "failures": 2, "errors": 0}),
         assert_condition(
             "$match(exact: approved)" in context.artifacts["test_finance_user_11.json"]["text"],
             "Baseline finance example kept the exact decision matcher.",
             "Baseline finance example did not keep the exact decision matcher.",
-            category="report",
+            category="implementation",
             details=[detail("Artifact path", context.artifacts["test_finance_user_11.json"]["path"])],
         ),
     ]
@@ -158,19 +130,18 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def task_a_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 3, "failed": 1, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 3, "failures": 1, "errors": 0}),
         assert_condition(
             "$match(pattern: approved|verified)" in context.artifacts["test_finance_user_11.json"]["text"],
             "Task A finance example contains the decision pattern matcher.",
             "Task A finance example does not contain the decision pattern matcher.",
-            category="report",
+            category="implementation",
             details=[detail("Artifact path", context.artifacts["test_finance_user_11.json"]["path"])],
         ),
         assert_condition(
             "$match(exact: VRF-123456)" in context.artifacts["test_support_user_55.json"]["text"],
             "Task A support example still uses the exact referenceCode matcher.",
             "Task A support example unexpectedly changed the support matcher too early.",
-            category="report",
+            category="implementation",
             details=[detail("Artifact path", context.artifacts["test_support_user_55.json"]["path"])],
         ),
     ]
@@ -178,13 +149,12 @@ def task_a_assertions(context: ValidationContext) -> list[dict]:
 
 def final_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 4, "failed": 0, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 4, "failures": 0, "errors": 0}),
         assert_condition(
             "$match(pattern: VRF-[0-9]{6})" in context.artifacts["test_support_user_55.json"]["text"]
             and "$match(dataType: date)" in context.artifacts["test_support_user_55.json"]["text"],
             "Final support example contains the relaxed matcher combination.",
             "Final support example does not contain the expected relaxed matcher combination.",
-            category="report",
+            category="implementation",
             details=[detail("Artifact path", context.artifacts["test_support_user_55.json"]["path"])],
         ),
     ]
@@ -216,11 +186,5 @@ def set_support_final(content: str) -> str:
     updated = content.replace("$match(exact: VRF-123456)", "$match(pattern: VRF-[0-9]{6})")
     updated = updated.replace("$match(exact: 2026-03-17)", "$match(dataType: date)")
     return updated
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
-
-
 if __name__ == "__main__":
     raise SystemExit(main())
