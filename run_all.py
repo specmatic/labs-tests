@@ -6,6 +6,7 @@ from html import escape
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import shutil
 from typing import Any
@@ -214,7 +215,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def write_run_metadata() -> None:
-    metadata = build_run_metadata()
+    metadata = build_run_metadata(command=current_run_command())
     lines = [
         "Specmatic Labs Reports Metadata",
         "==============================",
@@ -225,6 +226,18 @@ def write_run_metadata() -> None:
     )
     lines.append(f"Generated at (UTC): {datetime.now(UTC).isoformat()}")
     RUN_METADATA_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def current_run_command() -> str:
+    workflow_command = os.getenv("SPECMATIC_LABS_RUN_COMMAND", "").strip()
+    if workflow_command:
+        return workflow_command
+    original_args = getattr(sys, "orig_argv", None)
+    if original_args:
+        return shlex.join(original_args)
+    executable = os.path.basename(sys.executable) or sys.executable or "python3"
+    args = [executable, *sys.argv]
+    return shlex.join(args)
 
 
 def running_in_github_actions() -> bool:

@@ -40,7 +40,7 @@ def detect_report_provenance() -> dict[str, Any]:
     }
 
 
-def build_run_metadata() -> dict[str, str]:
+def build_run_metadata(command: str = "") -> dict[str, str]:
     run_id = os.getenv("GITHUB_RUN_ID")
     repository = os.getenv("GITHUB_REPOSITORY")
     server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
@@ -73,6 +73,7 @@ def build_run_metadata() -> dict[str, str]:
             "Trigger": trigger,
             "Actor": actor,
             "Commit": sha,
+            "Command": command,
         }
 
     hostname = socket.gethostname().split(".")[0]
@@ -87,4 +88,5 @@ def build_run_metadata() -> dict[str, str]:
         "Trigger": trigger or "manual",
         "Actor": actor or username,
         "Commit": sha,
+        "Command": command,
     }

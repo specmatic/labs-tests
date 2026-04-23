@@ -32,6 +32,8 @@ jobs:
       - name: Run all lab harnesses
         id: run_labs
         shell: bash
+        env:
+          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --refresh-labs --force
         timeout-minutes: 40
         run: |
           set +e
