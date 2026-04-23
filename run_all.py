@@ -19,6 +19,7 @@ from lablib.command_runner import run_command
 from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
 from lablib.provenance import build_run_metadata
 from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref, upstream_readme_href
+from lablib.time_display import format_report_datetime
 from lablib.workspace_setup import (
     run_setup,
     setup_failure_action_lines,
@@ -120,9 +121,10 @@ def main() -> int:
             for line in setup_failure_action_lines(setup_result.commands):
                 print(line)
             print(f"Setup details: {SETUP_OUTPUT_PATH}")
+            completed_at = report_timestamp()
             write_consolidated_report(
                 {
-                    "generatedAt": datetime.now(UTC).isoformat(),
+                    "generatedAt": completed_at.isoformat(),
                     "status": "failed",
                     "summary": [
                         {"label": "Labs discovered", "value": 0},
@@ -133,7 +135,8 @@ def main() -> int:
                     "labs": [],
                 }
             )
-            archive_local_output_snapshot()
+            generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
+            archive_local_output_snapshot(completed_at)
             return 1
 
     labs_git_ref = upstream_labs_git_ref()
@@ -174,17 +177,19 @@ def main() -> int:
             }
         )
 
+    completed_at = report_timestamp()
     consolidated = build_consolidated_payload(
         setup_payload=setup_payload,
         labs_git_ref=labs_git_ref,
         lab_results=lab_results,
+        generated_at=completed_at.isoformat(),
     )
     consolidated["navigation"] = {
         "comparisonReportHref": "labs-comparison.html",
     }
     write_consolidated_report(consolidated)
-    generate_labs_comparison(ROOT, labs)
-    archive_local_output_snapshot()
+    generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
+    archive_local_output_snapshot(completed_at)
     print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
@@ -226,6 +231,10 @@ def write_run_metadata() -> None:
     )
     lines.append(f"Generated at (UTC): {datetime.now(UTC).isoformat()}")
     RUN_METADATA_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def report_timestamp() -> datetime:
+    return datetime.now().astimezone()
 
 
 def current_run_command() -> str:
@@ -277,10 +286,10 @@ def preserve_existing_local_output() -> None:
     print(f"Preserved existing local output snapshot at {snapshot_dir}")
 
 
-def archive_local_output_snapshot() -> None:
+def archive_local_output_snapshot(timestamp: datetime) -> None:
     if running_in_github_actions() or not has_generated_output():
         return
-    snapshot_dir = archive_output_snapshot(datetime.now())
+    snapshot_dir = archive_output_snapshot(timestamp)
     update_latest_output_link(snapshot_dir)
     print(f"Archived local output snapshot at {snapshot_dir}")
 
@@ -432,6 +441,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     comparison_href = escape(payload.get("navigation", {}).get("comparisonReportHref", "labs-comparison.html"))
     report_nav_html = f'<p class="report-nav"><a href="{comparison_href}">Open comparison report</a></p>' if comparison_href else ""
     provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -500,6 +510,7 @@ def render_consolidated_html(payload: dict[str, Any]) -> str:
     <section class="panel">
       <div class="status">{escape(payload['status'].upper())}</div>
       <h1>Consolidated Labs Report</h1>
+      {generated_at_html}
       {provenance_html}
       {report_nav_html}
       <ul>{summary_items}</ul>

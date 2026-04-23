@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, is_dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from html import escape
 import importlib.util
 import json
@@ -22,6 +22,7 @@ from lablib.readme_expectations import (
     unexpected_h2_titles_for_lab,
 )
 from lablib.provenance import detect_report_provenance
+from lablib.time_display import format_report_datetime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,15 +48,19 @@ IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.js
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 
 
-def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | None = None) -> dict[str, Any]:
+def generate_labs_comparison(
+    root: Path | None = None,
+    lab_names: list[str] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
     repo_root = root or ROOT
-    selected = set(lab_names or [])
+    selected = set(discover_report_lab_names(repo_root) if lab_names is None else lab_names)
     run_files = sorted(repo_root.glob("*/run.py"))
     if selected:
         run_files = [path for path in run_files if path.parent.name in selected]
     labs = [build_lab_profile(path.parent) for path in run_files]
     payload = {
-        "generatedAt": datetime.now(UTC).isoformat(),
+        "generatedAt": generated_at or datetime.now().astimezone().isoformat(),
         "provenance": detect_report_provenance(),
         "summary": build_summary(labs),
         "commonalities": build_commonalities(labs),
@@ -73,6 +78,23 @@ def generate_labs_comparison(root: Path | None = None, lab_names: list[str] | No
     COMPARISON_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
     return payload
+
+
+def discover_report_lab_names(root: Path | None = None) -> list[str]:
+    repo_root = root or ROOT
+    snapshot_dir = repo_root / "output" / "labs"
+    discovered = (
+        sorted(
+            path.name.removesuffix("-output")
+            for path in snapshot_dir.iterdir()
+            if path.is_dir() and path.name.endswith("-output")
+        )
+        if snapshot_dir.exists()
+        else []
+    )
+    if discovered:
+        return discovered
+    return sorted(path.parent.name for path in repo_root.glob("*/run.py"))
 
 
 def discover_lab_names(root: Path | None = None) -> list[str]:
@@ -1174,6 +1196,32 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-details td:last-child {{
       width: 52%;
     }}
+    .matrix-tooltip-details table.matrix-tooltip-counts-table {{
+      table-layout: fixed;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th,
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td {{
+      font-size: 0.92rem;
+      padding: 9px 6px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:first-child,
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:first-child {{
+      width: 27%;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:nth-child(2),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:nth-child(2),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:nth-child(3),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:nth-child(3),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:nth-child(4),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:nth-child(4),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:nth-child(5),
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:nth-child(5) {{
+      width: 14%;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-counts-table th:last-child,
+    .matrix-tooltip-details table.matrix-tooltip-counts-table td:last-child {{
+      width: 17%;
+    }}
     .matrix-tooltip-cell-status {{
       font-weight: 700;
       white-space: nowrap;
@@ -1196,12 +1244,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     }}
     .matrix-tooltip-count {{
       display: block;
-      white-space: pre-line;
-      line-height: 1.35;
+      white-space: pre;
+      line-height: 1.25;
+      font-size: 0.88rem;
       min-width: 0;
       max-width: 100%;
-      overflow-wrap: anywhere;
-      word-break: break-word;
+      overflow-wrap: normal;
+      word-break: normal;
     }}
     .matrix-tooltip-count.mismatch {{
       color: #b42318;
@@ -1298,7 +1347,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
   <main>
     <section class="panel">
       <h1>Labs Similarities And Differences</h1>
-      <p class="muted">Generated at {escape(payload['generatedAt'])}</p>
+      <p class="muted">{escape(format_report_datetime(payload['generatedAt']))}</p>
       {provenance_html}
       <p class="nav-link"><a href="{consolidated_href}">Back to consolidated report</a></p>
       <table>{summary_rows}</table>
@@ -1514,6 +1563,17 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           const thead = document.createElement('thead');
           const headerRow = document.createElement('tr');
           const headers = detailsData.headers || [];
+          if (
+            headers.length === 6 &&
+            headers[0] === 'Phase' &&
+            headers[1] === 'README' &&
+            headers[2] === 'Console' &&
+            headers[3] === 'CTRF' &&
+            headers[4] === 'HTML' &&
+            headers[5] === 'Status'
+          ) {{
+            table.classList.add('matrix-tooltip-counts-table');
+          }}
           headers.forEach((header) => {{
             const th = document.createElement('th');
             th.textContent = header;
@@ -1539,9 +1599,10 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
               }} else {{
                 td.textContent = textValue;
               }}
-              if (rawValue && rawValue.title && !(rawValue.className || '').includes('matrix-tooltip-count')) {{
+              if (rawValue && rawValue.title) {{
                 td.title = rawValue.title;
               }} else if (typeof textValue === 'string' && textValue.includes('T=') && textValue.includes('P=')) {{
+                td.title = 'T = Total\\nP = Passed\\nF = Failed\\nS = Skipped\\nO = Other';
                 td.setAttribute('aria-label', 'T = Total, P = Passed, F = Failed, S = Skipped, O = Other');
               }}
               const header = headers[index] || '';
@@ -2680,7 +2741,7 @@ def choose_reference_counts(item: dict[str, Any]) -> dict[str, int] | None:
 def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any]) -> dict[str, str]:
     reference = choose_reference_counts(comparison_item)
     text = count_cell_text(counts)
-    count_legend = "T = Total, P = Passed, F = Failed, S = Skipped, O = Other"
+    count_legend = "T = Total\nP = Passed\nF = Failed\nS = Skipped\nO = Other"
     if counts is None:
         return {
             "text": text,
@@ -2698,7 +2759,7 @@ def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, A
     return {
         "text": text,
         "className": "matrix-tooltip-count mismatch",
-        "title": f"This count block does not match the other available sources. {count_legend}",
+        "title": f"This count block does not match the other available sources.\n\n{count_legend}",
         "ariaLabel": f"This count block does not match the other available sources. {count_legend}",
     }
 

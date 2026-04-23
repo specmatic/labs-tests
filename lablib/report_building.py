@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
 from pathlib import Path
 import re
@@ -76,6 +75,7 @@ def build_consolidated_payload(
     setup_payload: dict[str, Any] | None,
     labs_git_ref: str,
     lab_results: list[dict[str, Any]],
+    generated_at: str,
 ) -> dict[str, Any]:
     passed = sum(1 for item in lab_results if item["status"] == "passed")
     failed = len(lab_results) - passed
@@ -83,7 +83,7 @@ def build_consolidated_payload(
     total_failures = sum(summary_value(item, "Failures") for item in lab_results)
     total_tests = sum(summary_value(item, "Validations") for item in lab_results)
     return {
-        "generatedAt": datetime.now(UTC).isoformat(),
+        "generatedAt": generated_at,
         "provenance": detect_report_provenance(),
         "status": "passed" if failed == 0 else "failed",
         "summary": [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 import sys
@@ -32,6 +33,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     run_all_module.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    generated_at = datetime.now().astimezone().isoformat()
 
     available_labs = discover_snapshot_lab_names()
     if not available_labs:
@@ -49,9 +51,10 @@ def main() -> int:
         setup_payload=setup_payload,
         labs_git_ref=upstream_labs_git_ref(),
         lab_results=lab_results,
+        generated_at=generated_at,
     )
     run_all_module.write_consolidated_report(consolidated)
-    generate_labs_comparison(ROOT, selected_labs)
+    generate_labs_comparison(ROOT, selected_labs, generated_at=generated_at)
     print(f"Wrote consolidated JSON report to {run_all_module.CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {run_all_module.CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")

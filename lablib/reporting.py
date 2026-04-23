@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from lablib.provenance import detect_report_provenance
+from lablib.time_display import format_report_datetime
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -20,18 +21,10 @@ def write_html(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(render_html(payload), encoding="utf-8")
 
 
-def format_display_datetime(value: str) -> str:
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return value
-    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
 def render_html(payload: dict[str, Any]) -> str:
     phases_with_ids, failed_assertions = assign_assertion_ids(payload.get("phases", []))
     title = escape(payload["lab"]["name"])
-    generated_at = escape(format_display_datetime(payload["generatedAt"]))
+    generated_at = escape(format_report_datetime(payload["generatedAt"]))
     overall_status = escape(payload["status"].upper())
     summary_items = "".join(
         f"<li><strong>{escape(item['label'])}:</strong> {escape(str(item['value']))}</li>"
@@ -427,7 +420,7 @@ def render_html(payload: dict[str, Any]) -> str:
       <div class="status {'pass' if payload['status'] == 'passed' else 'fail'}">{overall_status}</div>
       <h1>{title}</h1>
       <p>{escape(payload['lab']['description'])}</p>
-      <p class="meta">Generated at {generated_at}</p>
+      <p class="meta">{generated_at}</p>
       {provenance_html}
       {report_nav_html}
       <div class="grid">
