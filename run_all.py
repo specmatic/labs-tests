@@ -29,6 +29,7 @@ OUTPUT_DIR = ROOT / "output"
 LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
 CONSOLIDATED_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 RUN_METADATA_PATH = OUTPUT_DIR / "workflow-run-details.txt"
+LATEST_OUTPUT_LINK = OUTPUT_DIR / "latest"
 SETUP_OUTPUT_PATH = CONSOLIDATED_OUTPUT_DIR / "setup-output.json"
 CONSOLIDATED_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.json"
 CONSOLIDATED_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.html"
@@ -79,6 +80,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    preserve_existing_local_output()
     # `run_all.py` owns the destructive cleanup so one end-to-end run always starts
     # from a clean generated-output tree. `rebuild_reports.py` deliberately skips this
     # so the existing lab snapshots remain available for report regeneration.
@@ -130,6 +132,7 @@ def main() -> int:
                     "labs": [],
                 }
             )
+            archive_local_output_snapshot()
             return 1
 
     labs_git_ref = upstream_labs_git_ref()
@@ -180,6 +183,7 @@ def main() -> int:
     }
     write_consolidated_report(consolidated)
     generate_labs_comparison(ROOT, labs)
+    archive_local_output_snapshot()
     print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
@@ -221,6 +225,89 @@ def write_run_metadata() -> None:
     )
     lines.append(f"Generated at (UTC): {datetime.now(UTC).isoformat()}")
     RUN_METADATA_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def running_in_github_actions() -> bool:
+    return bool(os.getenv("GITHUB_RUN_ID"))
+
+
+def generated_output_paths() -> list[Path]:
+    paths = [
+        LABS_OUTPUT_DIR,
+        CONSOLIDATED_OUTPUT_DIR,
+        RUN_METADATA_PATH,
+        LEGACY_CONSOLIDATED_JSON_PATH,
+        LEGACY_CONSOLIDATED_HTML_PATH,
+        LEGACY_CONSOLIDATED_REPORT_JSON_PATH,
+        LEGACY_CONSOLIDATED_REPORT_HTML_PATH,
+        LEGACY_COMPARISON_JSON_PATH,
+        LEGACY_COMPARISON_HTML_PATH,
+    ]
+    paths.extend(
+        path
+        for path in OUTPUT_DIR.iterdir()
+        if path.is_dir() and path.name.endswith("-output")
+    )
+    return paths
+
+
+def has_generated_output() -> bool:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return any(path.exists() for path in generated_output_paths())
+
+
+def preserve_existing_local_output() -> None:
+    if running_in_github_actions() or not has_generated_output() or LATEST_OUTPUT_LINK.exists():
+        return
+    snapshot_dir = archive_output_snapshot(datetime.now())
+    update_latest_output_link(snapshot_dir)
+    print(f"Preserved existing local output snapshot at {snapshot_dir}")
+
+
+def archive_local_output_snapshot() -> None:
+    if running_in_github_actions() or not has_generated_output():
+        return
+    snapshot_dir = archive_output_snapshot(datetime.now())
+    update_latest_output_link(snapshot_dir)
+    print(f"Archived local output snapshot at {snapshot_dir}")
+
+
+def archive_output_snapshot(timestamp: datetime) -> Path:
+    snapshot_dir = build_snapshot_dir(timestamp)
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    for source in generated_output_paths():
+        if not source.exists():
+            continue
+        target = snapshot_dir / source.name
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+    return snapshot_dir
+
+
+def build_snapshot_dir(timestamp: datetime) -> Path:
+    month_dir = OUTPUT_DIR / timestamp.strftime("%b-%Y")
+    day_dir = month_dir / timestamp.strftime("%d-%b")
+    base_dir = day_dir / timestamp.strftime("%H-%M-%S")
+    if not base_dir.exists():
+        return base_dir
+    suffix = 1
+    while True:
+        candidate = day_dir / f"{timestamp.strftime('%H-%M-%S')}-{suffix:02d}"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def update_latest_output_link(snapshot_dir: Path) -> None:
+    if LATEST_OUTPUT_LINK.exists() or LATEST_OUTPUT_LINK.is_symlink():
+        if LATEST_OUTPUT_LINK.is_dir() and not LATEST_OUTPUT_LINK.is_symlink():
+            shutil.rmtree(LATEST_OUTPUT_LINK)
+        else:
+            LATEST_OUTPUT_LINK.unlink()
+    relative_target = os.path.relpath(snapshot_dir, start=OUTPUT_DIR)
+    LATEST_OUTPUT_LINK.symlink_to(relative_target, target_is_directory=True)
 
 
 def write_consolidated_report(payload: dict[str, Any]) -> None:
