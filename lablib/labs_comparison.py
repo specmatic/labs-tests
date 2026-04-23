@@ -1195,10 +1195,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       color: #245b34;
     }}
     .matrix-tooltip-count {{
-      display: inline-block;
+      display: block;
       white-space: pre-line;
       line-height: 1.35;
-      min-width: max-content;
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }}
     .matrix-tooltip-count.mismatch {{
       color: #b42318;
@@ -1529,14 +1532,17 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
                 const content = document.createElement('div');
                 content.textContent = textValue;
                 rawValue.className.split(/\s+/).filter(Boolean).forEach((name) => content.classList.add(name));
+                if (rawValue.ariaLabel) {{
+                  content.setAttribute('aria-label', rawValue.ariaLabel);
+                }}
                 td.appendChild(content);
               }} else {{
                 td.textContent = textValue;
               }}
-              if (rawValue && rawValue.title) {{
+              if (rawValue && rawValue.title && !(rawValue.className || '').includes('matrix-tooltip-count')) {{
                 td.title = rawValue.title;
               }} else if (typeof textValue === 'string' && textValue.includes('T=') && textValue.includes('P=')) {{
-                td.title = 'T = Total, P = Passed, F = Failed, S = Skipped, O = Other';
+                td.setAttribute('aria-label', 'T = Total, P = Passed, F = Failed, S = Skipped, O = Other');
               }}
               const header = headers[index] || '';
               if ((header === 'Status' || header === 'Present') && !rawValue?.className) {{
@@ -2674,22 +2680,26 @@ def choose_reference_counts(item: dict[str, Any]) -> dict[str, int] | None:
 def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any]) -> dict[str, str]:
     reference = choose_reference_counts(comparison_item)
     text = count_cell_text(counts)
+    count_legend = "T = Total, P = Passed, F = Failed, S = Skipped, O = Other"
     if counts is None:
         return {
             "text": text,
             "className": "matrix-tooltip-count na",
             "title": "No count data was available for this source.",
+            "ariaLabel": "No count data was available for this source.",
         }
     if reference is None or counts == reference:
         return {
             "text": text,
             "className": "matrix-tooltip-count ok",
-            "title": "T = Total, P = Passed, F = Failed, S = Skipped, O = Other",
+            "title": count_legend,
+            "ariaLabel": count_legend,
         }
     return {
         "text": text,
         "className": "matrix-tooltip-count mismatch",
-        "title": "This count block does not match the other available sources. T = Total, P = Passed, F = Failed, S = Skipped, O = Other",
+        "title": f"This count block does not match the other available sources. {count_legend}",
+        "ariaLabel": f"This count block does not match the other available sources. {count_legend}",
     }
 
 
