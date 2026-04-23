@@ -13,8 +13,10 @@ from lablib.command_runner import CommandResult, run_command
 from lablib.readme_expectations import (
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     OUTPUT_FENCE_LANGUAGE,
+    command_block_language,
     get_lab_readme_override,
     heading_matches,
+    command_blocks_have_any_language,
     missing_shared_h2_titles,
     normalize_heading_title,
     optional_h2_titles,
@@ -1157,15 +1159,18 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     expected_reports = phase_doc.metadata.get("expected_reports", {})
     validates_counts = bool(phase_doc.metadata.get("validates_test_counts"))
     os_scope = str(phase_doc.metadata.get("os_scope", "")).strip().lower()
+    shell_languages = {"shell", "bash", "sh", "zsh"}
+    windows_languages = {"powershell", "ps1", "cmd", "bat"}
     invalid_common_languages = [
         block.language or "(none)"
         for block in commands
-        if (block.language or "").lower() not in {"shell", "bash", "sh", "zsh"}
+        if command_block_language(block) not in (shell_languages | windows_languages)
     ]
     has_os_specific_labels = any(
         token in phase_doc.content.lower()
         for token in ("windows", "powershell", "cmd", "macos", "linux")
     )
+    has_os_specific_variants = command_blocks_have_any_language(commands, shell_languages) and command_blocks_have_any_language(commands, windows_languages)
     assertions = [
         assert_condition(
             phase_doc.metadata.get("id") == context.phase.readme_phase_id,
@@ -1241,7 +1246,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     if os_scope == "all":
         assertions.append(
             assert_condition(
-                not invalid_common_languages and not has_os_specific_labels,
+                not invalid_common_languages and has_os_specific_variants,
                 "README phase with os_scope=all uses one common cross-OS command style.",
                 "README phase with os_scope=all mixes in OS-specific command content. Impact: the phase is declared as common across OSes, but the documented commands are platform-specific. Action required: either keep one common shell-style command flow for all OSes or change the README/metadata to provide explicit OS-specific variants.",
                 category="readme",
@@ -1250,6 +1255,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
                     detail("Phase title", phase_doc.title),
                     detail("Invalid command fence languages", ", ".join(invalid_common_languages) or "(none)"),
                     detail("OS-specific labels detected", str(has_os_specific_labels)),
+                    detail("OS-specific variants", str(has_os_specific_variants)),
                 ],
             )
         )

@@ -118,6 +118,14 @@ class LabReadmeOverride:
     notes: tuple[str, ...] = ()
 
 
+def command_blocks_have_any_language(command_blocks, allowed_languages) -> bool:
+    return any(command_block_language(block) in allowed_languages for block in command_blocks)
+
+
+def command_block_language(command_block) -> str:
+    return (command_block.language or "").lower()
+
+
 README_TEMPLATE = ReadmeTemplate(
     version="1.0",
     h1_mode="lab-specific-title",

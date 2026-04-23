@@ -12,6 +12,8 @@ from typing import Any
 
 from lablib.readme_expectations import (
     EXPECTED_README_H2_SEQUENCE,
+    EXECUTABLE_COMMAND_FENCE_LANGUAGES,
+    command_block_language,
     README_TEMPLATE,
     get_lab_readme_override,
     heading_matches,
@@ -269,15 +271,15 @@ def normalize_v2_os_documentation(profile: dict[str, Any], readme_doc: Any) -> d
                 invalid_languages = [
                     block.language or "(none)"
                     for block in phase.command_blocks
-                    if (block.language or "").lower() not in {"shell", "bash", "sh", "zsh"}
+                    if command_block_language(block) not in EXECUTABLE_COMMAND_FENCE_LANGUAGES
                 ]
                 has_os_specific_labels = any(token in phase_text for token in ("windows", "powershell", "cmd", "macos", "linux"))
-                if invalid_languages or has_os_specific_labels:
+                if invalid_languages:
                     issue = f"{phase.title}: os_scope=all but found OS-specific command content"
                     if invalid_languages:
                         issue += f" using {', '.join(invalid_languages)}"
                     common_command_issues.append(issue)
-                else:
+                elif phase.command_blocks:
                     common_phase_titles.append(phase.title)
             if phase.output_blocks:
                 common_output_titles.append(phase.title)
