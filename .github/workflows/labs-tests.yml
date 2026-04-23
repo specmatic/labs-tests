@@ -122,9 +122,7 @@ jobs:
         with:
           name: specmatic-labs-reports
           if-no-files-found: error
-          path: |
-            output/
-            */output/
+          path: output/
 
       - name: Fail workflow when any lab fails
         if: steps.run_labs.outputs.exit_code != '0'

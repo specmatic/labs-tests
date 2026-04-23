@@ -38,3 +38,53 @@ def detect_report_provenance() -> dict[str, Any]:
         "display": f"{hostname}/{os_display}/{username}",
         "href": "",
     }
+
+
+def build_run_metadata() -> dict[str, str]:
+    run_id = os.getenv("GITHUB_RUN_ID")
+    repository = os.getenv("GITHUB_REPOSITORY")
+    server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    workflow_url = (
+        f"{server_url}/{repository}/actions/runs/{run_id}"
+        if run_id and repository
+        else ""
+    )
+
+    ref_name = (
+        os.getenv("GITHUB_HEAD_REF")
+        or os.getenv("GITHUB_REF_NAME")
+        or os.getenv("GITHUB_REF")
+        or ""
+    )
+    trigger = os.getenv("GITHUB_EVENT_NAME", "")
+    actor = os.getenv("GITHUB_ACTOR", "")
+    sha = os.getenv("GITHUB_SHA", "")
+
+    if run_id and repository:
+        return {
+            "Execution": "GitHub Actions",
+            "Repository": repository,
+            "Workflow": os.getenv("GITHUB_WORKFLOW", "GitHub Actions"),
+            "Run number": os.getenv("GITHUB_RUN_NUMBER", ""),
+            "Run ID": run_id,
+            "Run attempt": os.getenv("GITHUB_RUN_ATTEMPT", ""),
+            "Workflow URL": workflow_url,
+            "Branch / ref": ref_name,
+            "Trigger": trigger,
+            "Actor": actor,
+            "Commit": sha,
+        }
+
+    hostname = socket.gethostname().split(".")[0]
+    system = platform.system() or "UnknownOS"
+    username = getpass.getuser()
+    return {
+        "Execution": "Local",
+        "Host": hostname,
+        "OS": system,
+        "User": username,
+        "Branch / ref": ref_name,
+        "Trigger": trigger or "manual",
+        "Actor": actor or username,
+        "Commit": sha,
+    }

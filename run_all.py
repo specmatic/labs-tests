@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from lablib.command_runner import run_command
 from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
+from lablib.provenance import build_run_metadata
 from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref, upstream_readme_href
 from lablib.workspace_setup import (
     run_setup,
@@ -27,6 +28,7 @@ from lablib.workspace_setup import (
 OUTPUT_DIR = ROOT / "output"
 LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
 CONSOLIDATED_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
+RUN_METADATA_PATH = OUTPUT_DIR / "workflow-run-details.txt"
 SETUP_OUTPUT_PATH = CONSOLIDATED_OUTPUT_DIR / "setup-output.json"
 CONSOLIDATED_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.json"
 CONSOLIDATED_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "consolidated-report.html"
@@ -84,6 +86,7 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     LABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    write_run_metadata()
 
     setup_payload: dict[str, Any] | None = None
     if args.refresh_report:
@@ -204,6 +207,20 @@ def filter_labs(all_labs: list[str], selected_labs: list[str] | None) -> list[st
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_run_metadata() -> None:
+    metadata = build_run_metadata()
+    lines = [
+        "Specmatic Labs Reports Metadata",
+        "==============================",
+        "",
+    ]
+    lines.extend(
+        f"{label}: {value}" for label, value in metadata.items() if value
+    )
+    lines.append(f"Generated at (UTC): {datetime.now(UTC).isoformat()}")
+    RUN_METADATA_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def write_consolidated_report(payload: dict[str, Any]) -> None:
