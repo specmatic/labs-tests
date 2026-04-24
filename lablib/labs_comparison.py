@@ -185,7 +185,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "families": detect_artifact_families(generated_artifact_labels),
         },
         "readme": {
-            "h1": next((heading["text"] for heading in headings if heading["level"] == 1), ""),
+            "h1": next((heading["text"] for heading in headings[:1] if heading["level"] == 1), ""),
+            "actualH1": [heading["text"] for heading in headings if heading["level"] == 1],
             "requiredH2": required_h2,
             "optionalH2": [] if readme_doc.is_v2 else list(optional_h2_titles()),
             "additionalH2": list(override.allowed_additional_h2_titles),
@@ -2085,8 +2086,9 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
+        actual_h1 = list(lab["readme"]["actualH1"])
         h1_title = lab["readme"]["h1"] or "(missing)"
-        matching_h2 = [title for title in lab["readme"]["actualH2"] if heading_matches(title, h1_title)]
+        matching_h1 = actual_h1[1:] if lab["readme"]["h1"] else actual_h1
         sections.append(
             {
                 "type": "sections",
@@ -2096,13 +2098,14 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                     {
                         "type": "bullets",
                         "title": "H1 title",
+                        "tone": "ok" if lab["readme"]["h1"] else "attention",
                         "items": [h1_title],
                     },
                     {
                         "type": "bullets",
-                        "title": "Matching H2 headings",
-                        "tone": "attention" if matching_h2 else "ok",
-                        "items": matching_h2 or ["(none)"],
+                        "title": "Matching H1 title",
+                        "tone": "ok",
+                        "items": matching_h1 or ["(missing)"],
                     },
                 ],
             }
