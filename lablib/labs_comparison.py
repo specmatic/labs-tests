@@ -2089,6 +2089,15 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
         actual_h1 = list(lab["readme"]["actualH1"])
         h1_title = lab["readme"]["h1"] or "(missing)"
         matching_h1 = actual_h1[1:] if lab["readme"]["h1"] else actual_h1
+
+        # When H1 exists but is not in first position
+        if not lab["readme"]["h1"] and matching_h1:
+            section_label = "H1 title found (wrong position)"
+            section_note = "H1 title exists but is not the first heading."
+        else:
+            section_label = "Other H1 titles"
+            section_note = None
+
         sections.append(
             {
                 "type": "sections",
@@ -2103,8 +2112,9 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                     },
                     {
                         "type": "bullets",
-                        "title": "Matching H1 title",
+                        "title": section_label,
                         "tone": "ok",
+                        "note": section_note,
                         "items": matching_h1 or ["(missing)"],
                     },
                 ],
