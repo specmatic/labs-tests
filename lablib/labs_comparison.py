@@ -1914,7 +1914,6 @@ def build_os_command_coverage_details(labs: list[dict[str, Any]]) -> dict[str, A
                 "Common command flow for all OSes: "
                 + (", ".join(os_doc.get("commonCommandPhaseTitles", [])) or "(none)")
             ]
-            missing_items = ["(none)"]
             note = "The README marks these phases as using one common command flow for all OSes."
         else:
             found_items = [
@@ -1922,30 +1921,25 @@ def build_os_command_coverage_details(labs: list[dict[str, Any]]) -> dict[str, A
                 + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
                 for os_name, entries in os_doc["commandCoverage"].items()
             ] if os_doc["hasCommands"] else ["No command sections found in the README."]
-            missing_items = os_doc["missingCommandOs"] or ["(none)"]
             note = "These OS-specific command sections were detected in the README."
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Command sections found",
-                        "note": note,
-                        "items": found_items,
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Add command sections",
-                        "tone": "attention" if os_doc["missingCommandOs"] and not os_doc.get("commonCommandForAllOs") else "ok",
-                        "note": "These command variants are still missing only when the README does not already declare one common command flow for all OSes.",
-                        "items": missing_items,
-                    },
-                ],
-            }
+                "type": "bullets",
+                "title": "Command sections found",
+                "note": note,
+                "items": found_items,
+            },
+        ]
+        missing_items = os_doc["missingCommandOs"]
+        missing_section = build_bullet_section(
+            "Add command sections",
+            missing_items,
+            tone="attention" if missing_items and not os_doc.get("commonCommandForAllOs") else "ok",
+            note="These command variants are still missing only when the README does not already declare one common command flow for all OSes.",
         )
+        if missing_section:
+            lab_sections.append(missing_section)
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "OS-specific command coverage",
@@ -2197,7 +2191,6 @@ def build_os_output_coverage_details(labs: list[dict[str, Any]]) -> dict[str, An
                 "Common output flow for all OSes: "
                 + (", ".join(os_doc.get("commonOutputPhaseTitles", [])) or "(none)")
             ]
-            missing_items = ["(none)"]
             note = "The README marks these phases as using one shared output snippet for all OSes."
         else:
             found_items = [
@@ -2205,30 +2198,25 @@ def build_os_output_coverage_details(labs: list[dict[str, Any]]) -> dict[str, An
                 + (", ".join(entry["heading"] for entry in entries) if entries else "(none)")
                 for os_name, entries in os_doc["outputCoverage"].items()
             ] if os_doc["hasCommands"] else ["No OS-specific command sections detected."]
-            missing_items = os_doc["missingOutputForCommandOs"] or ["(none)"]
             note = "These OS-specific output snippets were detected after OS-specific command sections."
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Command outputs found",
-                        "note": note,
-                        "items": found_items,
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Add output snippets",
-                        "tone": "attention" if os_doc["missingOutputForCommandOs"] and not os_doc.get("commonOutputForAllOs") else "ok",
-                        "note": "These output variants are still missing only when the README does not already declare one shared output flow for all OSes.",
-                        "items": missing_items,
-                    },
-                ],
-            }
+                "type": "bullets",
+                "title": "Command outputs found",
+                "note": note,
+                "items": found_items,
+            },
+        ]
+        missing_items = os_doc["missingOutputForCommandOs"]
+        missing_section = build_bullet_section(
+            "Add output snippets",
+            missing_items,
+            tone="attention" if missing_items and not os_doc.get("commonOutputForAllOs") else "ok",
+            note="These output variants are still missing only when the README does not already declare one shared output flow for all OSes.",
         )
+        if missing_section:
+            lab_sections.append(missing_section)
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "OS-specific output coverage",
