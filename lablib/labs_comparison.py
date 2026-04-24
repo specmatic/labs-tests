@@ -61,6 +61,18 @@ def build_bullet_section(title: str, items: list[str] | None, ignorable_messages
     return {"type": "bullets", "title": title, "items": items, **kwargs}
 
 
+def add_lab_section(sections: list[dict[str, Any]], lab: dict[str, Any], lab_sections: list[dict[str, Any] | None]) -> None:
+    """Filter and append lab sections to parent sections list, skipping if all are None."""
+    visible_sections = [s for s in lab_sections if s is not None]
+    if visible_sections:
+        sections.append({
+            "type": "sections",
+            "title": lab["name"],
+            "href": lab["href"],
+            "sections": visible_sections,
+        })
+
+
 def generate_labs_comparison(
     root: Path | None = None,
     lab_names: list[str] | None = None,
@@ -1953,14 +1965,7 @@ def build_os_command_language_details(labs: list[dict[str, Any]]) -> dict[str, A
                 ),
             },
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "OS-specific command fence languages",
@@ -1999,14 +2004,7 @@ def build_files_under_test_details(labs: list[dict[str, Any]]) -> dict[str, Any]
                 note="These files are used by the lab but are not clearly listed in the 'Files in this lab' section.",
             ),
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Files used by each lab",
@@ -2121,14 +2119,7 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 note=section_note,
             ),
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "H1 titles",
@@ -2151,14 +2142,7 @@ def build_h3_details(labs: list[dict[str, Any]], extra_h2_by_lab: dict[str, list
                 note="These walkthrough sections are still at H2 level and should move to H3.",
             ),
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "H3 implementation steps",
@@ -2319,14 +2303,7 @@ def build_command_output_presence_details(labs: list[dict[str, Any]]) -> dict[st
                 ],
             },
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Command-output pairing",
@@ -2357,14 +2334,7 @@ def build_terminal_output_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 ],
             },
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "terminaloutput fence coverage",
@@ -2395,14 +2365,7 @@ def build_studio_component_details(labs: list[dict[str, Any]]) -> dict[str, Any]
                 "items": ["Studio component documented" if has_studio else "Studio component not documented"],
             },
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Studio component coverage",
@@ -2457,14 +2420,7 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 ],
             },
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Overview video links",
@@ -2523,14 +2479,7 @@ def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2
                 note="These extra H2 sections are allowed by the shared schema or lab override.",
             ),
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "H2 sections that should be H3",
@@ -2574,14 +2523,7 @@ def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, A
                 tone="attention" if extra else "ok",
             ),
         ]
-        sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [s for s in lab_sections if s is not None],
-            }
-        )
+        add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Additional artifact warnings",
