@@ -2606,13 +2606,6 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
                 "sections": [
                     {
                         "type": "bullets",
-                        "title": "Keep as H2",
-                        "tone": "ok",
-                        "note": "These shared H2 sections should remain at H2 level in this order.",
-                        "items": shared_scaffold,
-                    },
-                    {
-                        "type": "bullets",
                         "title": "Move to H3",
                         "tone": "attention",
                         "note": "These H2 sections are lab-specific walkthrough content and should move to H3.",
