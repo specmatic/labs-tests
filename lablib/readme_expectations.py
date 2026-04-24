@@ -280,7 +280,7 @@ def optional_h2_titles() -> tuple[str, ...]:
 
 def allowed_h2_titles_for_lab(lab_name: str) -> tuple[str, ...]:
     override = get_lab_readme_override(lab_name)
-    return (*shared_h2_titles(), *optional_h2_titles(), *override.allowed_additional_h2_titles)
+    return (*shared_h2_titles(), *optional_h2_titles(), *override.allowed_additional_h2_titles, *README_V2_H2_SEQUENCE)
 
 
 def unexpected_h2_titles_for_lab(lab_name: str, actual_h2_titles: list[str] | tuple[str, ...]) -> list[str]:
