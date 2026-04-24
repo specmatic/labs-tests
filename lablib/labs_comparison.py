@@ -154,7 +154,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     )
     override = get_lab_readme_override(spec.name)
     required_h2 = list(expected_h2_titles_for_document(readme_doc) or shared_h2_titles())
-    unexpected_h2 = [] if readme_doc.is_v2 else unexpected_h2_titles_for_lab(spec.name, h2_headings)
+    unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
     shared_h2_matches = (h2_headings == required_h2) if readme_doc.is_v2 else shared_h2_sequence_matches(h2_headings)
 
     return {
@@ -2085,6 +2085,8 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
+        h1_title = lab["readme"]["h1"] or "(missing)"
+        matching_h2 = [title for title in lab["readme"]["actualH2"] if heading_matches(title, h1_title)]
         sections.append(
             {
                 "type": "sections",
@@ -2094,7 +2096,13 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                     {
                         "type": "bullets",
                         "title": "H1 title",
-                        "items": [lab["readme"]["h1"] or "(missing)"],
+                        "items": [h1_title],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Matching H2 headings",
+                        "tone": "attention" if matching_h2 else "ok",
+                        "items": matching_h2 or ["(none)"],
                     },
                 ],
             }
@@ -2566,6 +2574,8 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
     for lab in labs:
         actual_h2 = list(lab["readme"]["actualH2"])
         extra_sections = list(lab["readme"]["unexpectedH2"])
+        h1_title = lab["readme"]["h1"] or ""
+        h1_as_h2 = [title for title in actual_h2 if heading_matches(title, h1_title)] if h1_title else []
         missing_sections = [section for section in common_required_h2 if not any(heading_matches(actual, section) for actual in actual_h2)]
         incorrect_order_sections = []
         actual_positions = []
@@ -2601,7 +2611,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
                         "title": "Move to H3",
                         "tone": "attention",
                         "note": "These H2 sections are lab-specific walkthrough content and should move to H3.",
-                        "items": extra_sections or ["(none)"],
+                        "items": extra_sections or h1_as_h2 or ["(none)"],
                     },
                     {
                         "type": "bullets",
