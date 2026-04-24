@@ -76,6 +76,28 @@ def add_lab_section(sections: list[dict[str, Any]], lab: dict[str, Any], lab_sec
         sections.append(section)
 
 
+def add_action_section(lab_sections: list[dict[str, Any]], issues: list[str] | None, action_messages: list[str] | str) -> None:
+    """Add Action section to lab_sections if there are issues.
+
+    Only adds Action section when issues exist. Skips when there are no issues.
+
+    Args:
+        lab_sections: List to append the Action section to
+        issues: List of issues (or any truthy value) to check if Action should be shown
+        action_messages: Single message or list of messages to display when there are issues
+    """
+    if not issues:
+        return
+
+    messages = [action_messages] if isinstance(action_messages, str) else action_messages
+    lab_sections.append({
+        "type": "bullets",
+        "title": "Action",
+        "tone": "attention",
+        "items": messages,
+    })
+
+
 def generate_labs_comparison(
     root: Path | None = None,
     lab_names: list[str] | None = None,
@@ -1854,37 +1876,27 @@ def build_execution_command_details(labs: list[dict[str, Any]]) -> dict[str, Any
     for lab in labs:
         command_text = " ".join(lab["command"]) if lab["command"] else "(missing)"
         recognized = bool(lab["command"]) and lab["commandType"] != "other"
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Primary command",
-                        "note": "This is the main shell command detected from the README.",
-                        "items": [command_text],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Execution style",
-                        "note": "This is how the README command is classified.",
-                        "items": [lab["commandType"]],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "attention" if not recognized else "ok",
-                        "note": "Use this to make the README command easier to understand and automate.",
-                        "items": (
-                            ["Rewrite the README so it shows one clear docker compose, docker run, or python command for the main lab flow."]
-                            if not recognized
-                            else ["No change needed."]
-                        ),
-                    },
-                ],
-            }
-        )
+                "type": "bullets",
+                "title": "Primary command",
+                "note": "This is the main shell command detected from the README.",
+                "items": [command_text],
+            },
+            {
+                "type": "bullets",
+                "title": "Execution style",
+                "note": "This is how the README command is classified.",
+                "items": [lab["commandType"]],
+            },
+        ]
+        issues = None if recognized else ["unrecognized command type"]
+        add_action_section(lab_sections, issues, "Rewrite the README so it shows one clear docker compose, docker run, or python command for the main lab flow.")
+        sections.append({
+            "type": "sections",
+            "title": lab["name"],
+            "sections": lab_sections,
+        })
     return {
         "type": "sections",
         "title": "Primary execution commands",
@@ -1954,20 +1966,11 @@ def build_os_command_language_details(labs: list[dict[str, Any]]) -> dict[str, A
             build_bullet_section(
                 "Fence language issues",
                 issues,
-                tone="attention" if issues else "ok",
+                tone="attention",
                 note="These command sections should use an OS-appropriate fenced code language.",
             ),
-            {
-                "type": "bullets",
-                "title": "Action",
-                "tone": "attention" if issues else "ok",
-                "items": (
-                    ["Use ```shell```/```bash``` for macOS and Linux sections, and ```powershell``` or ```cmd``` for Windows sections."]
-                    if issues
-                    else ["No change needed."]
-                ),
-            },
         ]
+        add_action_section(lab_sections, issues, "Use ```shell```/```bash``` for macOS and Linux sections, and ```powershell``` or ```cmd``` for Windows sections.")
         add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
@@ -2027,27 +2030,22 @@ def build_readme_section_presence_details(
     sections = []
     for lab in labs:
         present = accessor(lab)
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Status",
-                        "tone": "ok" if present else "attention",
-                        "items": ["Present" if present else "Missing"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "ok" if present else "attention",
-                        "items": [success_label if present else failure_label],
-                    },
-                ],
-            }
-        )
+                "type": "bullets",
+                "title": "Status",
+                "tone": "ok" if present else "attention",
+                "items": ["Present" if present else "Missing"],
+            },
+        ]
+        issues = None if present else ["missing"]
+        add_action_section(lab_sections, issues, failure_label)
+        sections.append({
+            "type": "sections",
+            "title": lab["name"],
+            "href": lab["href"],
+            "sections": lab_sections,
+        })
     return {
         "type": "sections",
         "title": title,
@@ -2061,30 +2059,21 @@ def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     for lab in labs:
         first_phase = lab["readme"]["openingShellConsoleSection"].get("heading") or "(missing)"
         ok = bool(first_phase) and "baseline" in first_phase.lower()
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "First phase",
-                        "items": [first_phase],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "ok" if ok else "attention",
-                        "items": [
-                            "No change needed."
-                            if ok
-                            else "Move the README baseline or intended-failure step to the start of the implementation flow."
-                        ],
-                    },
-                ],
-            }
-        )
+                "type": "bullets",
+                "title": "First phase",
+                "items": [first_phase],
+            },
+        ]
+        issues = None if ok else ["wrong phase start"]
+        add_action_section(lab_sections, issues, "Move the README baseline or intended-failure step to the start of the implementation flow.")
+        sections.append({
+            "type": "sections",
+            "title": lab["name"],
+            "href": lab["href"],
+            "sections": lab_sections,
+        })
     return {
         "type": "sections",
         "title": "Implementation phase starts",
@@ -2292,20 +2281,11 @@ def build_command_output_presence_details(labs: list[dict[str, Any]]) -> dict[st
             build_bullet_section(
                 "Commands missing output",
                 missing,
-                tone="attention" if missing else "ok",
+                tone="attention",
                 note="Each command section should be followed by a console output snippet.",
             ),
-            {
-                "type": "bullets",
-                "title": "Action",
-                "tone": "attention" if missing else "ok",
-                "items": [
-                    "Add a terminaloutput snippet immediately after each listed command section."
-                    if missing
-                    else "No change needed."
-                ],
-            },
         ]
+        add_action_section(lab_sections, missing, "Add a terminaloutput snippet immediately after each listed command section.")
         add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
@@ -2323,20 +2303,11 @@ def build_terminal_output_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             build_bullet_section(
                 "Output fence issues",
                 issues,
-                tone="attention" if issues else "ok",
+                tone="attention",
                 note="Console output snippets should use ```terminaloutput``` fences.",
             ),
-            {
-                "type": "bullets",
-                "title": "Action",
-                "tone": "attention" if issues else "ok",
-                "items": [
-                    "Change the listed output snippets to ```terminaloutput``` fenced blocks."
-                    if issues
-                    else "No change needed."
-                ],
-            },
         ]
+        add_action_section(lab_sections, issues, "Change the listed output snippets to ```terminaloutput``` fenced blocks.")
         add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
@@ -2408,21 +2379,14 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 tone="attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
                 note="These overview video links were detected in the README.",
             ),
-            {
-                "type": "bullets",
-                "title": "Action",
-                "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
-                "items": [
-                    "No change needed."
-                    if optional or not validated_links or all(item["ok"] for item in validated_links)
-                    else "No overview video link is documented in this README."
-                    if not validated_links
-                    else "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
-                    if any(item["environmental"] for item in validated_links)
-                    else "Fix or replace the broken overview video link in the README."
-                ],
-            },
         ]
+        has_issues = any((not item["ok"]) and not optional for item in validated_links)
+        if has_issues:
+            if any(item["environmental"] for item in validated_links):
+                action_messages = "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
+            else:
+                action_messages = "Fix or replace the broken overview video link in the README."
+            add_action_section(lab_sections, validated_links, action_messages)
         add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
@@ -2436,27 +2400,22 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
     sections = []
     for lab in labs:
         present = label in lab["artifacts"]["generatedLabels"]
-        sections.append(
+        lab_sections = [
             {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Status",
-                        "tone": "ok" if present else "attention",
-                        "items": ["Present" if present else "Missing"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "ok" if present else "attention",
-                        "items": ["No change needed." if present else f"Generate {label} for this lab output."],
-                    },
-                ],
-            }
-        )
+                "type": "bullets",
+                "title": "Status",
+                "tone": "ok" if present else "attention",
+                "items": ["Present" if present else "Missing"],
+            },
+        ]
+        issues = None if present else ["missing artifact"]
+        add_action_section(lab_sections, issues, f"Generate {label} for this lab output.")
+        sections.append({
+            "type": "sections",
+            "title": lab["name"],
+            "href": lab["href"],
+            "sections": lab_sections,
+        })
     return {
         "type": "sections",
         "title": f"{label} coverage",
@@ -2590,6 +2549,24 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
             ),
         ]
         add_lab_section(lab_sections, lab, lab_section_list, note="These are the concrete README heading changes needed for this lab.")
+    details_sections = [
+        {
+            "type": "bullets",
+            "title": "Configured shared H2 sequence",
+            "note": "These H2 sections should appear in this exact order after the H1 title.",
+            "items": shared_scaffold,
+        },
+        *lab_sections,
+    ]
+    if lab_sections:
+        details_sections.append({
+            "type": "bullets",
+            "title": "Action",
+            "items": [
+                "Keep the shared H2 sequence stable across labs.",
+                "Move lab-specific walkthrough steps into H3 headings.",
+            ],
+        })
     return {
         "summary": [
             "Every compared README should use the configured H2 sequence after the H1 title.",
@@ -2599,23 +2576,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
             "type": "sections",
             "title": "Configured shared H2 sequence and README differences",
             "note": "The shared H2 sequence is configurable in one place. Keep that sequence stable and move lab-specific walkthrough steps into H3 headings.",
-            "sections": [
-                {
-                    "type": "bullets",
-                    "title": "Configured shared H2 sequence",
-                    "note": "These H2 sections should appear in this exact order after the H1 title.",
-                    "items": shared_scaffold,
-                },
-                *lab_sections,
-                {
-                    "type": "bullets",
-                    "title": "Action",
-                    "items": [
-                        "Keep the shared H2 sequence stable across labs.",
-                        "Move lab-specific walkthrough steps into H3 headings.",
-                    ],
-                },
-            ],
+            "sections": details_sections,
         },
     }
 
