@@ -2584,14 +2584,19 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
             if matched is not None:
                 actual_positions.append((matched, index))
         previous_position = -1
+        previous_expected_title = ""
         for section in common_required_h2:
             current = next((index for matched, index in actual_positions if heading_matches(matched, section)), None)
             if current is None:
                 continue
             if current < previous_position:
-                incorrect_order_sections.append(section)
+                message = f"'{section}'"
+                if previous_expected_title:
+                    message += f" appears before '{previous_expected_title}'"
+                incorrect_order_sections.append(message)
             else:
                 previous_position = current
+                previous_expected_title = section
         lab_sections.append(
             {
                 "type": "sections",
