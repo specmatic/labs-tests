@@ -61,16 +61,19 @@ def build_bullet_section(title: str, items: list[str] | None, ignorable_messages
     return {"type": "bullets", "title": title, "items": items, **kwargs}
 
 
-def add_lab_section(sections: list[dict[str, Any]], lab: dict[str, Any], lab_sections: list[dict[str, Any] | None]) -> None:
+def add_lab_section(sections: list[dict[str, Any]], lab: dict[str, Any], lab_sections: list[dict[str, Any] | None], note: str | None = None) -> None:
     """Filter and append lab sections to parent sections list, skipping if all are None."""
     visible_sections = [s for s in lab_sections if s is not None]
     if visible_sections:
-        sections.append({
+        section = {
             "type": "sections",
             "title": lab["name"],
             "href": lab["href"],
             "sections": visible_sections,
-        })
+        }
+        if note:
+            section["note"] = note
+        sections.append(section)
 
 
 def generate_labs_comparison(
@@ -2586,15 +2589,7 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
                 note="These shared H2 sections appear out of sequence and should be reordered.",
             ),
         ]
-        lab_sections.append(
-            {
-                "type": "sections",
-                "title": lab["name"],
-                "href": lab["href"],
-                "note": "These are the concrete README heading changes needed for this lab.",
-                "sections": [s for s in lab_section_list if s is not None],
-            }
-        )
+        add_lab_section(lab_sections, lab, lab_section_list, note="These are the concrete README heading changes needed for this lab.")
     return {
         "summary": [
             "Every compared README should use the configured H2 sequence after the H1 title.",
