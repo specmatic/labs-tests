@@ -49,6 +49,16 @@ MCP_SUMMARY_RE = re.compile(
 TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
+IGNORABLE_MESSAGES = ("(none)",)
+
+
+def build_bullet_section(title: str, items: list[str] | None, ignorable_messages: tuple[str, ...] = IGNORABLE_MESSAGES, **kwargs) -> dict[str, Any] | None:
+    """Build a bullet section, returning None if items are only placeholders."""
+    if not items:
+        return None
+    if len(items) == 1 and items[0] in ignorable_messages:
+        return None
+    return {"type": "bullets", "title": title, "items": items, **kwargs}
 
 
 def generate_labs_comparison(
@@ -1925,30 +1935,30 @@ def build_os_command_language_details(labs: list[dict[str, Any]]) -> dict[str, A
             f"{issue['os']}: '{issue['heading']}' uses ```{issue['language']}```"
             for issue in os_doc["commandLanguageIssues"]
         ]
+        lab_sections = [
+            build_bullet_section(
+                "Fence language issues",
+                issues,
+                tone="attention" if issues else "ok",
+                note="These command sections should use an OS-appropriate fenced code language.",
+            ),
+            {
+                "type": "bullets",
+                "title": "Action",
+                "tone": "attention" if issues else "ok",
+                "items": (
+                    ["Use ```shell```/```bash``` for macOS and Linux sections, and ```powershell``` or ```cmd``` for Windows sections."]
+                    if issues
+                    else ["No change needed."]
+                ),
+            },
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Fence language issues",
-                        "tone": "attention" if issues else "ok",
-                        "note": "These command sections should use an OS-appropriate fenced code language.",
-                        "items": issues or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "attention" if issues else "ok",
-                        "items": (
-                            ["Use ```shell```/```bash``` for macOS and Linux sections, and ```powershell``` or ```cmd``` for Windows sections."]
-                            if issues
-                            else ["No change needed."]
-                        ),
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -1975,27 +1985,26 @@ def build_files_under_test_details(labs: list[dict[str, Any]]) -> dict[str, Any]
                 documented.append(f"{alias}: {path}")
             else:
                 missing.append(f"{alias}: {path}")
+        lab_sections = [
+            build_bullet_section(
+                "Documented in README",
+                documented,
+                tone="ok",
+                note="These files are already mentioned in the 'Files in this lab' section.",
+            ),
+            build_bullet_section(
+                "Add to README",
+                missing,
+                tone="attention" if missing else "ok",
+                note="These files are used by the lab but are not clearly listed in the 'Files in this lab' section.",
+            ),
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Documented in README",
-                        "tone": "ok",
-                        "note": "These files are already mentioned in the 'Files in this lab' section.",
-                        "items": documented or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Add to README",
-                        "tone": "attention" if missing else "ok",
-                        "note": "These files are used by the lab but are not clearly listed in the 'Files in this lab' section.",
-                        "items": missing or ["(none)"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2098,26 +2107,26 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             section_label = "Other H1 titles"
             section_note = None
 
+        lab_sections = [
+            {
+                "type": "bullets",
+                "title": "H1 title",
+                "tone": "ok" if lab["readme"]["h1"] else "attention",
+                "items": [h1_title],
+            },
+            build_bullet_section(
+                section_label,
+                matching_h1,
+                tone="ok",
+                note=section_note,
+            ),
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "H1 title",
-                        "tone": "ok" if lab["readme"]["h1"] else "attention",
-                        "items": [h1_title],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": section_label,
-                        "tone": "ok",
-                        "note": section_note,
-                        "items": matching_h1 or ["(missing)"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2129,26 +2138,25 @@ def build_h1_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 def build_h3_details(labs: list[dict[str, Any]], extra_h2_by_lab: dict[str, list[str]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
+        lab_sections = [
+            build_bullet_section(
+                "H3 headings",
+                lab["readme"]["actualH3"],
+                note="These are the implementation-step headings already using H3.",
+            ),
+            build_bullet_section(
+                "H2 sections to convert to H3",
+                extra_h2_by_lab[lab["name"]],
+                tone="attention",
+                note="These walkthrough sections are still at H2 level and should move to H3.",
+            ),
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "H3 headings",
-                        "note": "These are the implementation-step headings already using H3.",
-                        "items": lab["readme"]["actualH3"] or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "H2 sections to convert to H3",
-                        "tone": "attention",
-                        "note": "These walkthrough sections are still at H2 level and should move to H3.",
-                        "items": extra_h2_by_lab[lab["name"]] or ["(none)"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2293,30 +2301,30 @@ def build_command_output_presence_details(labs: list[dict[str, Any]]) -> dict[st
     sections = []
     for lab in labs:
         missing = lab["readme"]["osDocumentation"]["commandsMissingOutput"]
+        lab_sections = [
+            build_bullet_section(
+                "Commands missing output",
+                missing,
+                tone="attention" if missing else "ok",
+                note="Each command section should be followed by a console output snippet.",
+            ),
+            {
+                "type": "bullets",
+                "title": "Action",
+                "tone": "attention" if missing else "ok",
+                "items": [
+                    "Add a terminaloutput snippet immediately after each listed command section."
+                    if missing
+                    else "No change needed."
+                ],
+            },
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Commands missing output",
-                        "tone": "attention" if missing else "ok",
-                        "note": "Each command section should be followed by a console output snippet.",
-                        "items": missing or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "attention" if missing else "ok",
-                        "items": [
-                            "Add a terminaloutput snippet immediately after each listed command section."
-                            if missing
-                            else "No change needed."
-                        ],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2331,30 +2339,30 @@ def build_terminal_output_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
         issues = lab["readme"]["osDocumentation"]["outputLanguageIssues"]
+        lab_sections = [
+            build_bullet_section(
+                "Output fence issues",
+                issues,
+                tone="attention" if issues else "ok",
+                note="Console output snippets should use ```terminaloutput``` fences.",
+            ),
+            {
+                "type": "bullets",
+                "title": "Action",
+                "tone": "attention" if issues else "ok",
+                "items": [
+                    "Change the listed output snippets to ```terminaloutput``` fenced blocks."
+                    if issues
+                    else "No change needed."
+                ],
+            },
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Output fence issues",
-                        "tone": "attention" if issues else "ok",
-                        "note": "Console output snippets should use ```terminaloutput``` fences.",
-                        "items": issues or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "attention" if issues else "ok",
-                        "items": [
-                            "Change the listed output snippets to ```terminaloutput``` fenced blocks."
-                            if issues
-                            else "No change needed."
-                        ],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2374,25 +2382,25 @@ def build_studio_component_details(labs: list[dict[str, Any]]) -> dict[str, Any]
             studio_signals.append("README includes a Studio heading.")
         if lab["setup"]["hasStudioProfile"]:
             studio_signals.append("README command flow references --profile studio.")
+        lab_sections = [
+            build_bullet_section(
+                "Studio signals",
+                studio_signals,
+                tone="ok" if has_studio else "attention",
+            ),
+            {
+                "type": "bullets",
+                "title": "Status",
+                "tone": "ok" if has_studio else "attention",
+                "items": ["Studio component documented" if has_studio else "Studio component not documented"],
+            },
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Studio signals",
-                        "tone": "ok" if has_studio else "attention",
-                        "items": studio_signals or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Status",
-                        "tone": "ok" if has_studio else "attention",
-                        "items": ["Studio component documented" if has_studio else "Studio component not documented"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2413,47 +2421,48 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             ok, detail_value = validate_external_link(item["target"])
             environmental = "nodename nor servname provided" in detail_value.lower() or "name or service not known" in detail_value.lower()
             validated_links.append({**item, "ok": ok, "detail": detail_value, "environmental": environmental})
+        video_link_items = [
+            f"{item['label']}: {item['target']} ({item['detail']})"
+            for item in validated_links
+        ]
+        lab_sections = [
+            {
+                "type": "bullets",
+                "title": "Metadata policy",
+                "tone": "ok",
+                "items": [
+                    "Overview video is optional via README metadata."
+                    if optional
+                    else "Overview video is treated as required when present because README metadata does not mark it optional."
+                ],
+            },
+            build_bullet_section(
+                "Overview video links",
+                video_link_items,
+                tone="attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
+                note="These overview video links were detected in the README.",
+            ),
+            {
+                "type": "bullets",
+                "title": "Action",
+                "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
+                "items": [
+                    "No change needed."
+                    if optional or not validated_links or all(item["ok"] for item in validated_links)
+                    else "No overview video link is documented in this README."
+                    if not validated_links
+                    else "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
+                    if any(item["environmental"] for item in validated_links)
+                    else "Fix or replace the broken overview video link in the README."
+                ],
+            },
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Metadata policy",
-                        "tone": "ok",
-                        "items": [
-                            "Overview video is optional via README metadata."
-                            if optional
-                            else "Overview video is treated as required when present because README metadata does not mark it optional."
-                        ],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Overview video links",
-                        "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
-                        "note": "These overview video links were detected in the README.",
-                        "items": [
-                            f"{item['label']}: {item['target']} ({item['detail']})"
-                            for item in validated_links
-                        ] or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Action",
-                        "tone": "attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
-                        "items": [
-                            "No change needed."
-                            if optional or not validated_links or all(item["ok"] for item in validated_links)
-                            else "No overview video link is documented in this README."
-                            if not validated_links
-                            else "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
-                            if any(item["environmental"] for item in validated_links)
-                            else "Fix or replace the broken overview video link in the README."
-                        ],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2500,27 +2509,26 @@ def build_lab_specific_h2_details(labs: list[dict[str, Any]], common_required_h2
     sections = []
     for lab in labs:
         extra_h2 = list(lab["readme"]["unexpectedH2"])
+        lab_sections = [
+            build_bullet_section(
+                "Move to H3",
+                extra_h2,
+                tone="attention",
+                note="These walkthrough sections are currently H2 headings and should be converted to H3.",
+            ),
+            build_bullet_section(
+                "Allowed H2 exceptions",
+                lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"],
+                tone="ok",
+                note="These extra H2 sections are allowed by the shared schema or lab override.",
+            ),
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Move to H3",
-                        "tone": "attention",
-                        "note": "These walkthrough sections are currently H2 headings and should be converted to H3.",
-                        "items": extra_h2 or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Allowed H2 exceptions",
-                        "tone": "ok",
-                        "note": "These extra H2 sections are allowed by the shared schema or lab override.",
-                        "items": lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"] or ["(none)"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2559,19 +2567,19 @@ def build_additional_artifact_details(labs: list[dict[str, Any]]) -> dict[str, A
     sections = []
     for lab in labs:
         extra = lab["warnings"]["additionalArtifacts"]
+        lab_sections = [
+            build_bullet_section(
+                "Additional artifacts",
+                extra,
+                tone="attention" if extra else "ok",
+            ),
+        ]
         sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Additional artifacts",
-                        "tone": "attention" if extra else "ok",
-                        "items": extra or ["(none)"],
-                    },
-                ],
+                "sections": [s for s in lab_sections if s is not None],
             }
         )
     return {
@@ -2610,42 +2618,39 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
             else:
                 previous_position = current
                 previous_expected_title = section
+        lab_section_list = [
+            build_bullet_section(
+                "Move to H3",
+                extra_sections or h1_as_h2,
+                tone="attention",
+                note="These H2 sections are lab-specific walkthrough content and should move to H3.",
+            ),
+            build_bullet_section(
+                "Allowed optional H2",
+                lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"],
+                tone="ok",
+                note="These H2 sections are allowed by the shared template or lab override.",
+            ),
+            build_bullet_section(
+                "Add as H2",
+                missing_sections,
+                tone="attention",
+                note="These shared H2 sections are missing and should be added at H2 level.",
+            ),
+            build_bullet_section(
+                "Fix H2 order",
+                incorrect_order_sections,
+                tone="attention",
+                note="These shared H2 sections appear out of sequence and should be reordered.",
+            ),
+        ]
         lab_sections.append(
             {
                 "type": "sections",
                 "title": lab["name"],
                 "href": lab["href"],
                 "note": "These are the concrete README heading changes needed for this lab.",
-                "sections": [
-                    {
-                        "type": "bullets",
-                        "title": "Move to H3",
-                        "tone": "attention",
-                        "note": "These H2 sections are lab-specific walkthrough content and should move to H3.",
-                        "items": extra_sections or h1_as_h2 or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Allowed optional H2",
-                        "tone": "ok",
-                        "note": "These H2 sections are allowed by the shared template or lab override.",
-                        "items": lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"] or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Add as H2",
-                        "tone": "attention",
-                        "note": "These shared H2 sections are missing and should be added at H2 level.",
-                        "items": missing_sections or ["(none)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Fix H2 order",
-                        "tone": "attention",
-                        "note": "These shared H2 sections appear out of sequence and should be reordered.",
-                        "items": incorrect_order_sections or ["(none)"],
-                    },
-                ],
+                "sections": [s for s in lab_section_list if s is not None],
             }
         )
     return {
