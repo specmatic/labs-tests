@@ -204,6 +204,27 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
     shared_h2_matches = (h2_headings == required_h2) if readme_doc.is_v2 else shared_h2_sequence_matches(h2_headings)
 
+    # Helper function to parse report metadata with backward compatibility
+    def parse_report_metadata(report_metadata: Any) -> dict[str, bool]:
+        """
+        Parse report metadata, supporting both old boolean and new object formats.
+
+        Old format: ctrf: true
+        New format: ctrf: { expected: true, expected_failure: false }
+        """
+        if isinstance(report_metadata, bool):
+            # Old format: ctrf: true
+            return {"expected": report_metadata, "expected_failure": False}
+        elif isinstance(report_metadata, dict):
+            # New format: ctrf: { expected: true, expected_failure: false }
+            return {
+                "expected": report_metadata.get("expected", False),
+                "expected_failure": report_metadata.get("expected_failure", False)
+            }
+        else:
+            # Default
+            return {"expected": False, "expected_failure": False}
+
     # Create mapping from phase id to readme_doc phase metadata
     phase_metadata_map = {
         phase.id: phase.metadata.get("expected_reports", {})
@@ -227,8 +248,12 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
                 "expectedConsolePhrases": list(phase.expected_console_phrases),
                 "artifactLabels": [artifact.label for artifact in phase.artifact_specs],
                 "expectedReports": {
-                    "ctrf": bool(phase_metadata_map.get(phase.name, {}).get("ctrf", defaults_from_readme.get("ctrf", False))),
-                    "html": bool(phase_metadata_map.get(phase.name, {}).get("html", defaults_from_readme.get("html", False))),
+                    "ctrf": parse_report_metadata(
+                        phase_metadata_map.get(phase.name, {}).get("ctrf", defaults_from_readme.get("ctrf", False))
+                    ),
+                    "html": parse_report_metadata(
+                        phase_metadata_map.get(phase.name, {}).get("html", defaults_from_readme.get("html", False))
+                    ),
                 },
             }
             for phase in spec.phases
@@ -755,6 +780,43 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def check_expected_failure(lab: dict[str, Any], artifact_label: str, report_key: str) -> bool | str:
+    """
+    Check if an artifact passes validation, considering expected_failure.
+
+    Returns:
+    - True: Normal pass (report produced when expected, or not required)
+    - False: Normal fail (report missing when expected, or produced when marked as expected_failure)
+    - "expected_failure_pass": Special pass (! icon) when report not produced but marked as expected_failure
+
+    Args:
+        lab: Lab profile dictionary
+        artifact_label: The artifact file name (e.g., "ctrf-report.json")
+        report_key: The report type key (e.g., "ctrf" or "html")
+    """
+    artifact_exists = artifact_label in lab["artifacts"]["generatedLabels"]
+
+    # Check if any phase has this report marked as expected_failure
+    has_expected_failure = any(
+        phase["expectedReports"][report_key]["expected_failure"]
+        for phase in lab["phases"]
+    )
+
+    if has_expected_failure:
+        # Inverted logic: report should NOT be produced
+        if artifact_exists:
+            return False  # Fail - report was produced despite expected_failure
+        else:
+            return "expected_failure_pass"  # Special pass - ! icon
+    else:
+        # Normal logic: check if report is expected and exists
+        any_expected = any(
+            phase["expectedReports"][report_key]["expected"]
+            for phase in lab["phases"]
+        )
+        return (not any_expected) or artifact_exists
+
+
 def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     shared_h2 = tuple(labs[0]["readme"]["requiredH2"]) if labs else ()
@@ -991,8 +1053,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_artifact_details(labs, "ctrf-report.json"),
             },
             "cells": [
-                (not any(phase["expectedReports"]["ctrf"] for phase in lab["phases"]))
-                or ("ctrf-report.json" in lab["artifacts"]["generatedLabels"])
+                check_expected_failure(lab, "ctrf-report.json", "ctrf")
                 for lab in labs
             ],
         },
@@ -1003,8 +1064,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_artifact_details(labs, "specmatic-report.html"),
             },
             "cells": [
-                (not any(phase["expectedReports"]["html"] for phase in lab["phases"]))
-                or ("specmatic-report.html" in lab["artifacts"]["generatedLabels"])
+                check_expected_failure(lab, "specmatic-report.html", "html")
                 for lab in labs
             ],
         },
@@ -1301,6 +1361,16 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-section-ok .matrix-tooltip-section-note {{
       color: #245b34;
     }}
+    .matrix-tooltip-section-expected-failure {{
+      border-color: #fde047;
+      background: #fef9c3;
+    }}
+    .matrix-tooltip-section-expected-failure .matrix-tooltip-section-title {{
+      color: #ca8a04;
+    }}
+    .matrix-tooltip-section-expected-failure .matrix-tooltip-section-note {{
+      color: #a16207;
+    }}
     .matrix-tooltip-section:first-child {{
       margin-top: 0;
     }}
@@ -1488,6 +1558,11 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       color: #b42318;
       border: 1px solid #f0b39f;
     }}
+    .matrix-row-status.expected-failure {{
+      background: #fef9c3;
+      color: #ca8a04;
+      border: 1px solid #fde047;
+    }}
     .matrix-row-status:hover,
     .matrix-row-status:focus {{
       outline: none;
@@ -1511,6 +1586,9 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     }}
     .matrix-cell.no {{
       color: #b42318;
+    }}
+    .matrix-cell.expected-failure {{
+      color: #ca8a04;
     }}
   </style>
 </head>
@@ -1724,6 +1802,9 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
             if (section.tone === 'ok') {{
               sectionContainer.classList.add('matrix-tooltip-section-ok');
             }}
+            if (section.tone === 'expected-failure') {{
+              sectionContainer.classList.add('matrix-tooltip-section-expected-failure');
+            }}
             container.appendChild(sectionContainer);
             renderDetailsBlock(sectionContainer, section, false);
           }});
@@ -1806,7 +1887,12 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           const list = document.createElement('ul');
           (detailsData.items || []).forEach((item) => {{
             const li = document.createElement('li');
-            li.textContent = item;
+            // Support both plain text (string) and HTML content (object with html field)
+            if (typeof item === 'object' && item.html) {{
+              li.innerHTML = item.html;
+            }} else {{
+              li.textContent = item;
+            }}
             list.appendChild(li);
           }});
           container.appendChild(list);
@@ -1842,10 +1928,20 @@ def render_lab_link(name: str, href: str) -> str:
 
 def render_validation_matrix_row(row: dict[str, Any]) -> str:
     tooltip_attrs = render_matrix_trigger_attrs(row.get("tooltip", {}), row["label"])
-    cells = "".join(render_matrix_cell(bool(cell), row["label"]) for cell in row["cells"])
-    status_class = "pass" if row.get("overallPassed") else "fail"
-    status_text = "Pass" if row.get("overallPassed") else "Failed"
-    status_symbol = "&#10003;" if row.get("overallPassed") else "&#10007;"
+    cells = "".join(render_matrix_cell(cell, row["label"]) for cell in row["cells"])
+
+    # Check if any cell is an expected_failure_pass
+    has_expected_failure_pass = any(cell == "expected_failure_pass" for cell in row["cells"])
+
+    if has_expected_failure_pass:
+        status_class = "expected-failure"
+        status_text = "Pass"
+        status_symbol = "&#33;"
+    else:
+        status_class = "pass" if row.get("overallPassed") else "fail"
+        status_text = "Pass" if row.get("overallPassed") else "Failed"
+        status_symbol = "&#10003;" if row.get("overallPassed") else "&#10007;"
+
     return (
         "<tr>"
         "<th class='row-label'>"
@@ -1863,10 +1959,26 @@ def render_validation_matrix_row(row: dict[str, Any]) -> str:
     )
 
 
-def render_matrix_cell(present: bool, validation_label: str) -> str:
-    symbol = "&#10003;" if present else "&#10007;"
-    state = "yes" if present else "no"
-    title = "present" if present else "absent"
+def render_matrix_cell(cell_value: bool | str, validation_label: str) -> str:
+    """
+    Render a validation matrix cell, handling boolean and expected_failure_pass states.
+
+    Args:
+        cell_value: True (pass), False (fail), or "expected_failure_pass" (! icon)
+        validation_label: The validation label for title/aria attributes
+    """
+    if cell_value == "expected_failure_pass":
+        symbol = "&#33;"  # Exclamation mark
+        state = "expected-failure"
+        title = "expected failure - report not produced as intended"
+    elif cell_value:
+        symbol = "&#10003;"  # Checkmark
+        state = "yes"
+        title = "present"
+    else:
+        symbol = "&#10007;"  # X mark
+        state = "no"
+        title = "absent"
     return f"<td title='{escape(validation_label)} is {title}'><span class='matrix-cell {state}' aria-label='{escape(title)}'>{symbol}</span></td>"
 
 
@@ -2429,18 +2541,80 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, Any]:
     sections = []
+    # Map artifact labels to expected report keys
+    label_to_report_key = {
+        "ctrf-report.json": "ctrf",
+        "specmatic-report.html": "html",
+    }
+    report_key = label_to_report_key.get(label)
+
     for lab in labs:
         present = label in lab["artifacts"]["generatedLabels"]
-        lab_sections = [
-            {
-                "type": "bullets",
-                "title": "Status",
-                "tone": "ok" if present else "attention",
-                "items": ["Present" if present else "Missing"],
-            },
-        ]
-        issues = None if present else ["missing artifact"]
-        add_action_section(lab_sections, issues, f"Generate {label} for this lab output.")
+
+        # Check if this artifact has expected_failure or expected set
+        expected = False
+        expected_failure = False
+        if report_key:
+            for phase in lab["phases"]:
+                expected = expected or phase["expectedReports"][report_key]["expected"]
+                expected_failure = expected_failure or phase["expectedReports"][report_key]["expected_failure"]
+
+        # Build sections based on state
+        if expected_failure:
+            # Expected failure case
+            if present:
+                # Report was produced despite expected_failure - this is a problem
+                lab_sections = [
+                    {
+                        "type": "bullets",
+                        "title": "Status",
+                        "tone": "attention",
+                        "items": ["Produced (marked as expected failure)"],
+                    },
+                    {
+                        "type": "bullets",
+                        "title": "Issue",
+                        "tone": "attention",
+                        "items": [f"Report {label} was produced despite being marked as expected_failure. Remove the file or update metadata."],
+                    },
+                ]
+            else:
+                # Report not produced as expected - this is correct
+                lab_sections = [
+                    {
+                        "type": "bullets",
+                        "title": "Status",
+                        "tone": "expected-failure",
+                        "items": [
+                            {
+                                "html": "<span style='font-size: 1.2em; font-weight: 700; color: #ca8a04;'>&#33;</span> Expected Failure - report not produced as intended"
+                            }
+                        ],
+                    },
+                ]
+        elif expected:
+            # Normal expected case
+            lab_sections = [
+                {
+                    "type": "bullets",
+                    "title": "Status",
+                    "tone": "ok" if present else "attention",
+                    "items": ["Present" if present else "Missing"],
+                },
+            ]
+            if not present:
+                add_action_section(lab_sections, ["missing artifact"], f"Generate {label} for this lab output.")
+        else:
+            # Not required
+            lab_sections = [
+                {
+                    "type": "bullets",
+                    "title": "Status",
+                    "tone": "ok",
+                    "items": ["Not required (marked as optional in phase metadata)"],
+                },
+            ]
+
         sections.append({
             "type": "sections",
             "title": lab["name"],
