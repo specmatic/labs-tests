@@ -204,6 +204,13 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
     shared_h2_matches = (h2_headings == required_h2) if readme_doc.is_v2 else shared_h2_sequence_matches(h2_headings)
 
+    # Create mapping from phase id to readme_doc phase metadata
+    phase_metadata_map = {
+        phase.id: phase.metadata.get("expected_reports", {})
+        for phase in readme_doc.phases
+    }
+    defaults_from_readme = readme_doc.metadata.get("reports", {})
+
     return {
         "name": spec.name,
         "href": f"https://github.com/specmatic/labs/blob/main/{spec.upstream_lab.name}/README.md",
@@ -219,6 +226,10 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
                 "hasFixSummary": bool(phase.fix_summary),
                 "expectedConsolePhrases": list(phase.expected_console_phrases),
                 "artifactLabels": [artifact.label for artifact in phase.artifact_specs],
+                "expectedReports": {
+                    "ctrf": bool(phase_metadata_map.get(phase.name, {}).get("ctrf", defaults_from_readme.get("ctrf", False))),
+                    "html": bool(phase_metadata_map.get(phase.name, {}).get("html", defaults_from_readme.get("html", False))),
+                },
             }
             for phase in spec.phases
         ],
@@ -979,7 +990,11 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "summary": ["Each lab writes ctrf-report.json as the machine-readable test result."],
                 "details": build_artifact_details(labs, "ctrf-report.json"),
             },
-            "cells": ["ctrf-report.json" in lab["artifacts"]["generatedLabels"] for lab in labs],
+            "cells": [
+                (not any(phase["expectedReports"]["ctrf"] for phase in lab["phases"]))
+                or ("ctrf-report.json" in lab["artifacts"]["generatedLabels"])
+                for lab in labs
+            ],
         },
         {
             "label": "Generated artifacts include the sibling Specmatic HTML report",
@@ -987,7 +1002,11 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "summary": ["Each lab writes specmatic-report.html alongside the CTRF JSON output."],
                 "details": build_artifact_details(labs, "specmatic-report.html"),
             },
-            "cells": ["specmatic-report.html" in lab["artifacts"]["generatedLabels"] for lab in labs],
+            "cells": [
+                (not any(phase["expectedReports"]["html"] for phase in lab["phases"]))
+                or ("specmatic-report.html" in lab["artifacts"]["generatedLabels"])
+                for lab in labs
+            ],
         },
         {
             "label": "README does not keep extra, unwanted, or out-of-sequence implementation sections at H2 level",
