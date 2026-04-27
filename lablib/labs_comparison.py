@@ -166,7 +166,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     h2_headings = [heading["text"] for heading in headings if heading["level"] == 2]
     h3_headings = [heading["text"] for heading in headings if heading["level"] == 3]
     code_blocks = extract_fenced_code_blocks(upstream_readme_text)
-    readme_command = extract_primary_command(upstream_readme_text) or list(spec.command)
+    readme_command = extract_primary_command(upstream_readme_text)
     command_type = classify_command(readme_command)
     setup_types = detect_setup_types(readme_command)
     artifact_labels = sorted({artifact["label"] for artifact in [*common_artifacts, *phase_artifacts]})
@@ -887,9 +887,11 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_video_link_details(labs),
             },
             "cells": [
-                (not lab["readme"]["videoLinks"])
-                or lab["readme"]["videoOptional"]
-                or all(validate_external_link(item["target"])[0] for item in lab["readme"]["videoLinks"])
+                lab["readme"]["videoOptional"]
+                or (
+                    lab["readme"]["videoLinks"]
+                    and all(validate_external_link(item["target"])[0] for item in lab["readme"]["videoLinks"])
+                )
                 for lab in labs
             ],
         },
@@ -2350,6 +2352,10 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
             f"{item['label']}: {item['target']} ({item['detail']})"
             for item in validated_links
         ]
+
+        # NEW: Check if required video is missing
+        has_required_video_missing = (not optional) and (len(validated_links) == 0)
+
         lab_sections = [
             {
                 "type": "bullets",
@@ -2361,16 +2367,34 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                     else "Overview video is treated as required when present because README metadata does not mark it optional."
                 ],
             },
-            build_bullet_section(
-                "Overview video links",
-                video_link_items,
-                tone="attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
-                note="These overview video links were detected in the README.",
-            ),
         ]
-        has_issues = any((not item["ok"]) and not optional for item in validated_links)
+
+        # NEW: Add missing video message when required
+        if has_required_video_missing:
+            lab_sections.append({
+                "type": "bullets",
+                "title": "Overview video status",
+                "tone": "attention",
+                "items": ["No overview video link found in README."],
+            })
+
+        # Only show video links section if links exist
+        if video_link_items:
+            lab_sections.append(
+                build_bullet_section(
+                    "Overview video links",
+                    video_link_items,
+                    tone="attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
+                    note="These overview video links were detected in the README.",
+                )
+            )
+
+        # Check for issues: missing required video OR broken non-optional video links
+        has_issues = has_required_video_missing or any((not item["ok"]) and not optional for item in validated_links)
         if has_issues:
-            if any(item["environmental"] for item in validated_links):
+            if has_required_video_missing:
+                action_messages = "Add an overview video link to the README, or mark the video as optional in README frontmatter metadata."
+            elif any(item["environmental"] for item in validated_links):
                 action_messages = "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
             else:
                 action_messages = "Fix or replace the broken overview video link in the README."
