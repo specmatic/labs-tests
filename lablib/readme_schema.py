@@ -15,7 +15,30 @@ HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 MARKDOWN_LINK_RE = re.compile(r"(!)?\[(?P<label>[^\]]*)\]\((?P<target>[^)]+)\)")
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 V2_SCHEMA_VERSION = "v2"
-ALLOWED_PHASE_KINDS = ("baseline", "intermediate", "final", "studio", "inspection", "cleanup_verification")
+DEFAULT_REQUIRED_PHASES = ("baseline", "final")
+OPTIONAL_PHASE_KINDS = ("intermediate", "studio", "inspection", "cleanup_verification")
+ALLOWED_PHASE_KINDS = DEFAULT_REQUIRED_PHASES + OPTIONAL_PHASE_KINDS
+
+
+def parse_required_phase_kinds(metadata: dict[str, Any]) -> list[str]:
+    """Parse and merge required phase kinds from README metadata.
+
+    Args:
+        metadata: README frontmatter metadata dict
+
+    Returns:
+        List of required phase kinds (defaults + user-specified, no duplicates)
+    """
+    user_required = metadata.get("required_phases", [])
+
+    # Normalize to list if it's a single string
+    if isinstance(user_required, str):
+        user_required = [user_required]
+
+    # Merge: defaults + user-specified (avoiding duplicates)
+    return list(DEFAULT_REQUIRED_PHASES) + [
+        phase for phase in user_required if phase not in DEFAULT_REQUIRED_PHASES
+    ]
 
 
 @dataclass(frozen=True)
@@ -256,21 +279,46 @@ def validate_external_link(target: str, *, timeout_seconds: float = 5.0, retries
     return False, last_error or "Request failed"
 
 
-def phase_sequence_is_valid(phases: list[ReadmePhase]) -> tuple[bool, str]:
+def phase_sequence_is_valid(
+    phases: list[ReadmePhase],
+    required_phase_kinds: list[str]
+) -> tuple[bool, str]:
+    """Validate phase sequence including required phase kinds.
+
+    Args:
+        phases: List of phases to validate
+        required_phase_kinds: List of required phase kinds (already merged with defaults).
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
     if not phases:
         return False, "No H3 phases were found under 'Lab Implementation Phases'."
+
     kinds = [phase.kind for phase in phases]
+
+    # Baseline and final are always required
     if kinds.count("baseline") != 1:
         return False, f"Expected exactly one baseline phase, found {kinds.count('baseline')}."
     if kinds.count("final") != 1:
         return False, f"Expected exactly one final phase, found {kinds.count('final')}."
+
+    # Validate first and last phase positions
     if kinds[0] != "baseline":
         return False, "The first lab phase must be the baseline phase."
     if kinds[-1] != "final":
         return False, "The last lab phase must be the final phase."
+
+    # Check required phases from top-level metadata
+    for required_kind in required_phase_kinds:
+        if required_kind not in DEFAULT_REQUIRED_PHASES and kinds.count(required_kind) < 1:
+            return False, f"Phase kind '{required_kind}' is marked as required but not found in README."
+
+    # Check for unsupported phase kinds
     invalid = [phase.kind for phase in phases if phase.kind not in ALLOWED_PHASE_KINDS]
     if invalid:
         return False, f"Found unsupported phase kinds: {', '.join(invalid)}."
+
     return True, "Phase sequence is valid."
 
 

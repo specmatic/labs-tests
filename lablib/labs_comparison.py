@@ -23,7 +23,14 @@ from lablib.readme_expectations import (
     title_present,
     unexpected_h2_titles_for_lab,
 )
-from lablib.readme_schema import expected_h2_titles_for_document, parse_readme_document, validate_external_link
+from lablib.readme_schema import (
+    DEFAULT_REQUIRED_PHASES,
+    expected_h2_titles_for_document,
+    parse_readme_document,
+    parse_required_phase_kinds,
+    phase_sequence_is_valid,
+    validate_external_link,
+)
 from lablib.provenance import detect_report_provenance
 from lablib.time_display import format_report_datetime
 
@@ -232,6 +239,9 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     }
     defaults_from_readme = readme_doc.metadata.get("reports", {})
 
+    # Parse required_phases from README frontmatter
+    required_phase_kinds = parse_required_phase_kinds(readme_doc.metadata)
+
     return {
         "name": spec.name,
         "href": f"https://github.com/specmatic/labs/blob/main/{spec.upstream_lab.name}/README.md",
@@ -306,6 +316,11 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "additionalArtifacts": additional_artifacts,
         },
         "testCountConsistency": test_count_consistency,
+        "phaseRequirements": {
+            "requiredKinds": required_phase_kinds,
+            "actualKinds": [phase.kind for phase in readme_doc.phases],
+            "allRequiredPresent": set(required_phase_kinds) <= {phase.kind for phase in readme_doc.phases},
+        },
     }
 
 
@@ -940,6 +955,14 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_console_section_details(labs, "closing"),
             },
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
+        },
+        {
+            "label": "README includes all required phases",
+            "tooltip": {
+                "summary": ["The README must include baseline and final phases, plus any additional phases marked as required in the lab configuration."],
+                "details": build_required_phase_details(labs),
+            },
+            "cells": [lab.get("phaseRequirements", {}).get("allRequiredPresent", True) for lab in labs],
         },
         {
             "label": "README documents either one common output snippet for all OSes or matching output for each OS-specific command",
@@ -3274,6 +3297,45 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
                 "items": ["No copied lab report snapshots were available to validate."],
             },
         ],
+    }
+
+
+def build_required_phase_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build details for required phases validation.
+
+    Shows which phases are required vs actual for each lab.
+
+    Args:
+        labs: List of lab profiles
+
+    Returns:
+        Dictionary with title, note, and sections for each lab
+    """
+    sections = []
+
+    for lab in labs:
+        required = lab.get("phaseRequirements", {}).get("requiredKinds", [])
+        actual = lab.get("phaseRequirements", {}).get("actualKinds", [])
+        missing = [k for k in required if k not in actual]
+
+        lab_sections = [
+            build_bullet_section(
+                "Required phases",
+                required if required else ["(none - defaults to baseline, final)"],
+                tone="ok",
+            ),
+            build_bullet_section(
+                "Missing phases",
+                missing,
+                tone="attention",
+            ) if missing else None,
+        ]
+        add_lab_section(sections, lab, lab_sections)
+
+    return {
+        "title": "Required phase coverage",
+        "note": "Baseline and final are always required. Additional phases can be marked as required in the lab configuration.",
+        "sections": sections,
     }
 
 

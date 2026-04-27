@@ -27,10 +27,12 @@ from lablib.readme_expectations import (
 )
 from lablib.readme_schema import (
     ALLOWED_PHASE_KINDS,
+    DEFAULT_REQUIRED_PHASES,
     V2_SCHEMA_VERSION,
     command_fence_languages,
     expected_h2_titles_for_document,
     parse_readme_document,
+    parse_required_phase_kinds,
     phase_sequence_is_valid,
     validate_external_link,
     validate_internal_link,
@@ -1346,7 +1348,9 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
     document = context.readme_doc
     actual_h2 = document.h2_titles
     expected_h2 = list(expected_h2_titles_for_document(document))
-    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases)
+    # Merge user-specified required phases with defaults
+    required_phase_kinds = parse_required_phase_kinds(document.metadata)
+    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, required_phase_kinds)
     runner_phase_ids = [phase.readme_phase_id for phase in context.lab.phases if phase.readme_phase_id]
     readme_phase_ids = [phase.id for phase in document.phases if phase.id]
     assertions: list[dict[str, Any]] = [
