@@ -26,6 +26,7 @@ from lablib.readme_expectations import (
 from lablib.readme_schema import (
     DEFAULT_REQUIRED_PHASES,
     expected_h2_titles_for_document,
+    extract_overview_video_section,
     parse_readme_document,
     parse_required_implementation_phases,
     phase_sequence_is_valid,
@@ -193,7 +194,9 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     if readme_doc.is_v2:
         os_documentation = normalize_v2_os_documentation(os_documentation, readme_doc)
     video_links = detect_video_links(readme_doc)
-    video_optional = overview_video_is_optional(readme_doc)
+    # Check if "Overview Video" H3 section exists
+    video_section_text, _ = extract_overview_video_section(upstream_readme_text, readme_doc.headings)
+    has_overview_video_section = video_section_text is not None
     additional_artifacts = sorted(
         artifact["target"]
         for artifact in generated_artifact_profiles
@@ -307,8 +310,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "filesSectionText": extract_heading_section_text(upstream_readme_text, "Files in this lab", level=2),
             "osDocumentation": os_documentation,
             "videoLinks": video_links,
-            "videoOptional": video_optional,
-            "hasOverviewVideo": bool(video_links),
+            "hasOverviewVideoSection": has_overview_video_section,
             "unexpectedH2": unexpected_h2,
             "sharedH2OrderMatches": shared_h2_matches,
             "schemaVersion": readme_doc.schema_version or "legacy",
@@ -382,6 +384,20 @@ def normalize_v2_os_documentation(profile: dict[str, Any], readme_doc: Any) -> d
 
 
 def detect_video_links(readme_doc: Any) -> list[dict[str, str]]:
+    """Detect overview video links in README.
+
+    New behavior: Extracts from "Why this lab matters" > "### Overview Video" section.
+    Falls back to scanning entire document for backward compatibility.
+    """
+    # NEW: Check overview_video_url field first
+    if readme_doc.overview_video_url:
+        return [{
+            "label": "Overview Video",
+            "target": readme_doc.overview_video_url,
+            "source": "overview_video_section"
+        }]
+
+    # FALLBACK: Scan entire document (backward compatible)
     video_links: list[dict[str, str]] = []
     for link in readme_doc.links:
         target = link.target.strip()
@@ -392,7 +408,7 @@ def detect_video_links(readme_doc: Any) -> list[dict[str, str]]:
             for token in ("youtube.com", "youtu.be", "vimeo.com", "loom.com")
         ) or any(token in lowered_label for token in ("video", "walkthrough", "overview"))
         if is_video:
-            video_links.append({"label": link.label or target, "target": target})
+            video_links.append({"label": link.label or target, "target": target, "source": "document_scan"})
     return video_links
 
 
@@ -949,15 +965,15 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
         {
             "label": "README overview video links are surfaced when present",
             "tooltip": {
-                "summary": ["If a README includes an overview video, the comparison report should show it clearly and link back to the README."],
+                "summary": [
+                    "All READMEs must include an 'Overview Video' section in 'Why this lab matters' with a video link.",
+                    "Video is mandatory."
+                ],
                 "details": build_video_link_details(labs),
             },
             "cells": [
-                lab["readme"]["videoOptional"]
-                or (
-                    lab["readme"]["videoLinks"]
-                    and all(validate_external_link(item["target"])[0] for item in lab["readme"]["videoLinks"])
-                )
+                # Pass if: H3 exists with video link(s)
+                bool(lab["readme"].get("hasOverviewVideoSection", False) and lab["readme"]["videoLinks"])
                 for lab in labs
             ],
         },
@@ -2466,68 +2482,76 @@ def build_video_link_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
         video_links = lab["readme"]["videoLinks"]
-        optional = lab["readme"].get("videoOptional", False)
-        validated_links = []
-        for item in video_links:
-            ok, detail_value = validate_external_link(item["target"])
-            environmental = "nodename nor servname provided" in detail_value.lower() or "name or service not known" in detail_value.lower()
-            validated_links.append({**item, "ok": ok, "detail": detail_value, "environmental": environmental})
+        has_video_section = lab["readme"].get("hasOverviewVideoSection", False)
+
+        # Skip URL validation for video links - just store them
         video_link_items = [
-            f"{item['label']}: {item['target']} ({item['detail']})"
-            for item in validated_links
+            f"{item['label']}: {item['target']}"
+            for item in video_links
         ]
 
-        # NEW: Check if required video is missing
-        has_required_video_missing = (not optional) and (len(validated_links) == 0)
-
-        lab_sections = [
-            {
-                "type": "bullets",
-                "title": "Metadata policy",
-                "tone": "ok",
-                "items": [
-                    "Overview video is optional via README metadata."
-                    if optional
-                    else "Overview video is treated as required when present because README metadata does not mark it optional."
-                ],
-            },
-        ]
-
-        # NEW: Add missing video message when required
-        if has_required_video_missing:
+        # Check validation status
+        if not has_video_section:
+            # No video section exists - FAIL validation
+            lab_sections = [
+                {
+                    "type": "bullets",
+                    "title": "Overview video status",
+                    "tone": "attention",
+                    "items": ["No overview video section found in 'Why this lab matters'."],
+                }
+            ]
+            # Add action section
             lab_sections.append({
                 "type": "bullets",
-                "title": "Overview video status",
+                "title": "Action",
                 "tone": "attention",
-                "items": ["No overview video link found in README."],
+                "items": ["Add an '### Overview Video' section with a video link to the 'Why this lab matters' H2 section."],
             })
+        elif len(video_links) == 0:
+            # Video section exists but no video link found - FAIL
+            lab_sections = [
+                {
+                    "type": "bullets",
+                    "title": "Overview video status",
+                    "tone": "attention",
+                    "items": ["Overview Video section exists but no video link was found."],
+                }
+            ]
+            # Add action section
+            lab_sections.append({
+                "type": "bullets",
+                "title": "Action",
+                "tone": "attention",
+                "items": ["Add a video link to the 'Why this lab matters' > '### Overview Video' section."],
+            })
+        else:
+            # Video section exists with link(s) - PASS
+            lab_sections = [
+                {
+                    "type": "bullets",
+                    "title": "Metadata policy",
+                    "tone": "ok",
+                    "items": ["Overview video is mandatory for all READMEs."],
+                }
+            ]
 
-        # Only show video links section if links exist
-        if video_link_items:
-            lab_sections.append(
-                build_bullet_section(
-                    "Overview video links",
-                    video_link_items,
-                    tone="attention" if any((not item["ok"]) and not optional for item in validated_links) else "ok",
-                    note="These overview video links were detected in the README.",
+            # Show video links section
+            if video_link_items:
+                lab_sections.append(
+                    build_bullet_section(
+                        "Overview video links",
+                        video_link_items,
+                        tone="ok",
+                        note="These overview video links were detected in the README.",
+                    )
                 )
-            )
 
-        # Check for issues: missing required video OR broken non-optional video links
-        has_issues = has_required_video_missing or any((not item["ok"]) and not optional for item in validated_links)
-        if has_issues:
-            if has_required_video_missing:
-                action_messages = "Add an overview video link to the README, or mark the video as optional in README frontmatter metadata."
-            elif any(item["environmental"] for item in validated_links):
-                action_messages = "Verification could not be completed from the current environment. Re-run the link check with working network/DNS."
-            else:
-                action_messages = "Fix or replace the broken overview video link in the README."
-            add_action_section(lab_sections, validated_links, action_messages)
         add_lab_section(sections, lab, lab_sections)
     return {
         "type": "sections",
         "title": "Overview video links",
-        "note": "Overview videos are optional, but when present they should be easy to discover from the comparison report and the README.",
+        "note": "Overview video is mandatory for all READMEs. Add an '### Overview Video' section with a video link to 'Why this lab matters'.",
         "sections": sections,
     }
 

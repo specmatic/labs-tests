@@ -97,6 +97,7 @@ class ReadmeDocument:
     h2_titles: list[str]
     phases: list[ReadmePhase]
     links: list[MarkdownLink]
+    overview_video_url: str | None
 
     @property
     def is_v2(self) -> bool:
@@ -118,6 +119,11 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     h2_titles = [heading.title for heading in headings if heading.level == 2]
     phases = extract_v2_phases(body_text, headings) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
     links = extract_markdown_links(body_text)
+
+    # Extract overview video URL from "What you will learn" > "### Overview Video" section
+    video_section_text, _ = extract_overview_video_section(body_text, headings)
+    overview_video_url = extract_video_url_from_section(video_section_text)
+
     return ReadmeDocument(
         text=text,
         body_text=body_text,
@@ -128,6 +134,7 @@ def parse_readme_document(text: str) -> ReadmeDocument:
         h2_titles=h2_titles,
         phases=phases,
         links=links,
+        overview_video_url=overview_video_url,
     )
 
 
@@ -195,6 +202,88 @@ def extract_phase_metadata(section_text: str) -> dict[str, Any]:
     if body.startswith("phase-meta"):
         body = body[len("phase-meta") :].strip()
     return parse_simple_yaml(body)
+
+
+def extract_overview_video_section(text: str, headings: list[Heading]) -> tuple[str | None, Heading | None]:
+    """Extract the '### Overview Video' H3 section text and heading.
+
+    Only looks within 'Why this lab matters' H2 section.
+
+    Args:
+        text: Full README body text (after frontmatter)
+        headings: List of all extracted headings
+
+    Returns:
+        Tuple of (section_text, heading) or (None, None) if not found
+    """
+    # Find "Why this lab matters" H2
+    why_this_lab_matters_h2 = next(
+        (h for h in headings if h.level == 2 and h.title.lower() == "why this lab matters"),
+        None
+    )
+
+    if why_this_lab_matters_h2 is None:
+        return None, None
+
+    # Find the next H2 to bound the "Why this lab matters" section
+    next_h2 = next(
+        (h for h in headings if h.level == 2 and h.start > why_this_lab_matters_h2.start),
+        None
+    )
+
+    section_start = why_this_lab_matters_h2.start
+    section_end = next_h2.start if next_h2 else len(text)
+
+    # Find "Overview Video" H3 within this section
+    overview_video_h3 = next(
+        (h for h in headings
+         if h.level == 3
+         and h.title.lower() == "overview video"
+         and section_start < h.start < section_end),
+        None
+    )
+
+    if overview_video_h3 is None:
+        return None, None
+
+    # Find the end of the H3 section
+    next_h3 = next(
+        (h.start for h in headings
+         if h.level >= 3 and h.start > overview_video_h3.start and h.start < section_end),
+        section_end
+    )
+
+    h3_section_start = overview_video_h3.start
+    h3_section_end = next_h3
+    section_text = text[h3_section_start:h3_section_end].strip()
+
+    return section_text, overview_video_h3
+
+
+def extract_video_url_from_section(section_text: str | None) -> str | None:
+    """Extract video URL from markdown links in the Overview Video section.
+
+    Args:
+        section_text: Text content of the "### Overview Video" section
+
+    Returns:
+        First video URL found, or None if no video link exists
+    """
+    if section_text is None:
+        return None
+
+    # Extract all markdown links from the section
+    links = extract_markdown_links(section_text)
+
+    # Filter for video hosting platforms
+    video_domains = ("youtube.com", "youtu.be", "vimeo.com", "loom.com")
+
+    for link in links:
+        target = link.target.strip().lower()
+        if any(domain in target for domain in video_domains):
+            return link.target
+
+    return None
 
 
 def extract_code_blocks(text: str) -> list[CodeBlock]:
