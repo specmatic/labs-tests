@@ -62,7 +62,8 @@ IGNORABLE_MESSAGES = ("(none)",)
 def build_bullet_section(title: str, items: list[str] | None, ignorable_messages: tuple[str, ...] = IGNORABLE_MESSAGES, **kwargs) -> dict[str, Any] | None:
     """Build a bullet section, returning None if items are only placeholders."""
     if not items:
-        return None
+        # Return success message instead of None to show in modal
+        return {"type": "bullets", "title": title, "items": ["All passed"], **kwargs}
     if len(items) == 1 and items[0] in ignorable_messages:
         return None
     return {"type": "bullets", "title": title, "items": items, **kwargs}
@@ -957,14 +958,6 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [bool(lab["readme"]["closingShellConsoleSection"]) for lab in labs],
         },
         {
-            "label": "README includes all required phases",
-            "tooltip": {
-                "summary": ["The README must include baseline and final phases, plus any additional phases marked as required in the lab configuration."],
-                "details": build_required_phase_details(labs),
-            },
-            "cells": [lab.get("phaseRequirements", {}).get("allRequiredPresent", True) for lab in labs],
-        },
-        {
             "label": "README documents either one common output snippet for all OSes or matching output for each OS-specific command",
             "tooltip": {
                 "summary": ["When commands are documented, the README should either show one shared output snippet for all OSes or provide matching output for each OS-specific command."],
@@ -1106,6 +1099,14 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_additional_artifact_details(labs),
             },
             "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
+        },
+        {
+            "label": "README includes all required phases",
+            "tooltip": {
+                "summary": ["The README must include baseline and final phases, plus any additional phases marked as required in the lab configuration."],
+                "details": build_required_phase_details(labs),
+            },
+            "cells": [lab.get("phaseRequirements", {}).get("allRequiredPresent", True) for lab in labs],
         },
     ]
     rows = [add_row_status_prefix(index, row) for index, row in enumerate(row_definitions, start=1)]

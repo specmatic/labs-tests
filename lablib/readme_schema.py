@@ -310,9 +310,12 @@ def phase_sequence_is_valid(
         return False, "The last lab phase must be the final phase."
 
     # Check required phases from top-level metadata
-    for required_kind in required_phase_kinds:
-        if required_kind not in DEFAULT_REQUIRED_PHASES and kinds.count(required_kind) < 1:
-            return False, f"Phase kind '{required_kind}' is marked as required but not found in README."
+    missing_required = [
+        kind for kind in required_phase_kinds
+        if kind not in DEFAULT_REQUIRED_PHASES and kinds.count(kind) < 1
+    ]
+    if missing_required:
+        return False, f"Missing required phase: {', '.join(missing_required)}"
 
     # Check for unsupported phase kinds
     invalid = [phase.kind for phase in phases if phase.kind not in ALLOWED_PHASE_KINDS]
