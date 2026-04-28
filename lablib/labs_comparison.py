@@ -64,7 +64,9 @@ def build_bullet_section(title: str, items: list[str] | None, ignorable_messages
     """Build a bullet section, returning None if items are only placeholders."""
     if not items:
         # Return success message instead of None to show in modal
-        return {"type": "bullets", "title": title, "items": ["All passed"], **kwargs}
+        # Override tone to "ok" (green) when all items pass
+        kwargs_with_success_tone = {**kwargs, "tone": "ok"}
+        return {"type": "bullets", "title": title, "items": ["All passed"], **kwargs_with_success_tone}
     if len(items) == 1 and items[0] in ignorable_messages:
         return None
     return {"type": "bullets", "title": title, "items": items, **kwargs}
