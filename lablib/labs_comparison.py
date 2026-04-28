@@ -356,37 +356,14 @@ def artifact_profile(artifact: Any) -> dict[str, Any]:
 
 def normalize_v2_os_documentation(profile: dict[str, Any], readme_doc: Any) -> dict[str, Any]:
     normalized = {**profile}
-    phase_scopes = {str(phase.metadata.get("os_scope", "")).strip().lower() for phase in readme_doc.phases}
+    # os_scope metadata removed - no longer checking for common command scope
     common_command_issues: list[str] = []
     common_output_issues: list[str] = []
     common_phase_titles: list[str] = []
     common_output_titles: list[str] = []
-    if phase_scopes and phase_scopes == {"all"}:
-        for phase in readme_doc.phases:
-            scope = str(phase.metadata.get("os_scope", "")).strip().lower()
-            if scope != "all":
-                continue
-            phase_text = phase.content.lower()
-            if phase.command_blocks:
-                invalid_languages = [
-                    block.language or "(none)"
-                    for block in phase.command_blocks
-                    if command_block_language(block) not in EXECUTABLE_COMMAND_FENCE_LANGUAGES
-                ]
-                has_os_specific_labels = any(token in phase_text for token in ("windows", "powershell", "cmd", "macos", "linux"))
-                if invalid_languages:
-                    issue = f"{phase.title}: os_scope=all but found OS-specific command content"
-                    if invalid_languages:
-                        issue += f" using {', '.join(invalid_languages)}"
-                    common_command_issues.append(issue)
-                elif phase.command_blocks:
-                    common_phase_titles.append(phase.title)
-            if phase.output_blocks:
-                common_output_titles.append(phase.title)
-        if not common_command_issues:
-            normalized["missingCommandOs"] = []
-            normalized["missingOutputOs"] = []
-            normalized["missingOutputForCommandOs"] = []
+
+    # os_scope detection removed - phases now declare their OS specificity through structure
+
     normalized["commonCommandForAllOs"] = bool(common_phase_titles) and not common_command_issues
     normalized["commonCommandPhaseTitles"] = common_phase_titles
     normalized["commonOutputForAllOs"] = bool(common_output_titles) and not common_output_issues
@@ -2845,7 +2822,7 @@ def build_test_count_consistency_profile(
         readme_summary = selected_summary["summary"] if selected_summary else None
         readme_phase_name = readme_phase.title if readme_phase is not None else (selected_summary["label"] if selected_summary else None)
         expected_sources = expected_report_sources_for_phase(readme_doc, readme_phase)
-        validates_counts = validates_test_counts_for_phase(readme_phase)
+        validates_counts = test_counts_for_phase(readme_phase)
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -2929,10 +2906,10 @@ def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dic
     }
 
 
-def validates_test_counts_for_phase(readme_phase: Any) -> bool:
+def test_counts_for_phase(readme_phase: Any) -> bool:
     if readme_phase is None:
         return True
-    return bool(readme_phase.metadata.get("validates_test_counts", False))
+    return bool(readme_phase.metadata.get("test_counts", False))
 
 
 def select_readme_summary_for_phase(

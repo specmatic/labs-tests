@@ -1003,7 +1003,7 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
     expected_reports = phase_metadata.get("expected_reports", {})
     expect_ctrf = bool(expected_reports.get("ctrf", "ctrf-report.json" in context.artifacts))
     expect_html = bool(expected_reports.get("html", first_html_artifact(context.artifacts) is not None))
-    expect_readme_summary = bool(phase_metadata.get("validates_test_counts", False) or expected_reports.get("readme_summary"))
+    expect_readme_summary = bool(phase_metadata.get("test_counts", False) or expected_reports.get("readme_summary"))
     if not any((expect_ctrf, expect_html, expect_readme_summary)):
         has_report_artifacts = (
             "ctrf-report.json" in context.artifacts
@@ -1159,8 +1159,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     commands = phase_doc.command_blocks
     outputs = phase_doc.output_blocks
     expected_reports = phase_doc.metadata.get("expected_reports", {})
-    validates_counts = bool(phase_doc.metadata.get("validates_test_counts"))
-    os_scope = str(phase_doc.metadata.get("os_scope", "")).strip().lower()
+    validates_counts = bool(phase_doc.metadata.get("test_counts"))
     shell_languages = {"shell", "bash", "sh", "zsh"}
     windows_languages = {"powershell", "ps1", "cmd", "bat"}
     invalid_common_languages = [
@@ -1244,23 +1243,6 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             ],
         ),
     ]
-
-    if os_scope == "all":
-        assertions.append(
-            assert_condition(
-                not invalid_common_languages and has_os_specific_variants,
-                "README phase with os_scope=all uses one common cross-OS command style.",
-                "README phase with os_scope=all mixes in OS-specific command content. Impact: the phase is declared as common across OSes, but the documented commands are platform-specific. Action required: either keep one common shell-style command flow for all OSes or change the README/metadata to provide explicit OS-specific variants.",
-                category="readme",
-                code="readme.v2.phase.os_scope_all.common_command_style",
-                details=[
-                    detail("Phase title", phase_doc.title),
-                    detail("Invalid command fence languages", ", ".join(invalid_common_languages) or "(none)"),
-                    detail("OS-specific labels detected", str(has_os_specific_labels)),
-                    detail("OS-specific variants", str(has_os_specific_variants)),
-                ],
-            )
-        )
 
     if validates_counts:
         assertions.append(
