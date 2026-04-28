@@ -1076,15 +1076,7 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "details": build_additional_artifact_details(labs),
             },
             "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
-        },
-        {
-            "label": "README includes all required phases",
-            "tooltip": {
-                "summary": ["The README must include baseline and final phases, plus any additional phases marked as required in the lab configuration."],
-                "details": build_required_phase_details(labs),
-            },
-            "cells": [lab.get("phaseRequirements", {}).get("allRequiredPresent", True) for lab in labs],
-        },
+        }
     ]
     rows = [add_row_status_prefix(index, row) for index, row in enumerate(row_definitions, start=1)]
     return {"columns": columns, "rows": rows}
