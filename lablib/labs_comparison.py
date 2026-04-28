@@ -27,7 +27,7 @@ from lablib.readme_schema import (
     DEFAULT_REQUIRED_PHASES,
     expected_h2_titles_for_document,
     parse_readme_document,
-    parse_required_phase_kinds,
+    parse_required_implementation_phases,
     phase_sequence_is_valid,
     validate_external_link,
 )
@@ -240,8 +240,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     }
     defaults_from_readme = readme_doc.metadata.get("reports", {})
 
-    # Parse required_phases from README frontmatter
-    required_phase_kinds = parse_required_phase_kinds(readme_doc.metadata)
+    # Parse required_implementation_phases from README frontmatter
+    required_phase_kinds = parse_required_implementation_phases(readme_doc.metadata)
 
     return {
         "name": spec.name,
