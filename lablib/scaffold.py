@@ -999,10 +999,12 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
     phase_doc = context.readme_doc.phase_by_id(context.phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
     phase_metadata = phase_doc.metadata if phase_doc is not None else {}
-    expected_reports = phase_metadata.get("expected_reports", {})
-    expect_ctrf = bool(expected_reports.get("ctrf", "ctrf-report.json" in context.artifacts))
-    expect_html = bool(expected_reports.get("html", first_html_artifact(context.artifacts) is not None))
-    expect_readme_summary = bool(phase_metadata.get("test_counts", False) or expected_reports.get("readme_summary"))
+
+    # Use global report settings, not phase-level
+    global_reports = context.readme_doc.metadata.get("reports", {})
+    expect_ctrf = bool(global_reports.get("ctrf", False))
+    expect_html = bool(global_reports.get("html", False))
+    expect_readme_summary = bool(phase_metadata.get("test_counts", False) or global_reports.get("readme_summary", False))
     if not any((expect_ctrf, expect_html, expect_readme_summary)):
         has_report_artifacts = (
             "ctrf-report.json" in context.artifacts
@@ -1367,11 +1369,10 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
         assert_condition(
             sequence_ok,
             "README lab implementation phases follow the required baseline-to-final flow.",
-            "README lab implementation phases do not follow the required baseline-to-final flow.",
+            f"README lab implementation phases do not follow the required baseline-to-final flow: {sequence_message}",
             category="readme",
             code="readme.v2.phase_sequence",
             details=[
-                detail("Phase validation", sequence_message),
                 detail("Phase ids", ", ".join(phase.id for phase in document.phases) or "(none)"),
             ],
         ),

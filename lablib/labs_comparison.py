@@ -2905,20 +2905,12 @@ def select_readme_summary_for_v2_phase(readme_phase: Any) -> dict[str, str] | No
 
 
 def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dict[str, bool]:
-    defaults = {
+    # Only use global settings, ignore phase-level expected_reports
+    return {
         "readme_summary": bool(readme_doc.metadata.get("reports", {}).get("readme_summary", False)),
         "console_summary": bool(readme_doc.metadata.get("reports", {}).get("console_summary", False)),
         "ctrf": bool(readme_doc.metadata.get("reports", {}).get("ctrf", False)),
         "html": bool(readme_doc.metadata.get("reports", {}).get("html", False)),
-    }
-    if readme_phase is None:
-        return defaults
-    phase_reports = readme_phase.metadata.get("expected_reports", {}) or {}
-    return {
-        "readme_summary": bool(phase_reports.get("readme_summary", defaults["readme_summary"])),
-        "console_summary": bool(phase_reports.get("console_summary", defaults["console_summary"])),
-        "ctrf": bool(phase_reports.get("ctrf", defaults["ctrf"])),
-        "html": bool(phase_reports.get("html", defaults["html"])),
     }
 
 
