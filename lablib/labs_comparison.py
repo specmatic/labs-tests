@@ -319,8 +319,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         "testCountConsistency": test_count_consistency,
         "phaseRequirements": {
             "requiredKinds": required_phase_kinds,
-            "actualKinds": [phase.kind for phase in readme_doc.phases],
-            "allRequiredPresent": set(required_phase_kinds) <= {phase.kind for phase in readme_doc.phases},
+            "actualKinds": [phase.id for phase in readme_doc.phases],
+            "allRequiredPresent": set(required_phase_kinds) <= {phase.id for phase in readme_doc.phases},
         },
     }
 
