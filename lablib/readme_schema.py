@@ -317,6 +317,14 @@ def phase_sequence_is_valid(
     if missing_required:
         return False, f"Missing required phase: {', '.join(missing_required)}"
 
+    # Check for phases that exist but are not marked as required
+    extra_phases = [
+        kind for kind in kinds
+        if kind not in required_phase_kinds
+    ]
+    if extra_phases:
+        return False, f"Found phases not marked as required: {', '.join(extra_phases)}. Add them to required_implementation_phases in the README metadata."
+
     # Check for unsupported phase kinds
     invalid = [phase.kind for phase in phases if phase.kind not in ALLOWED_PHASE_KINDS]
     if invalid:
