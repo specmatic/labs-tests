@@ -20,8 +20,8 @@ OPTIONAL_PHASE_KINDS = ("intermediate", "studio", "inspection", "cleanup_verific
 ALLOWED_PHASE_KINDS = DEFAULT_REQUIRED_PHASES + OPTIONAL_PHASE_KINDS
 
 
-def parse_required_phase_kinds(metadata: dict[str, Any]) -> list[str]:
-    """Parse and merge required phase kinds from README metadata.
+def parse_required_implementation_phases(metadata: dict[str, Any]) -> list[str]:
+    """Parse and merge required implementation phase kinds from README metadata.
 
     Args:
         metadata: README frontmatter metadata dict
@@ -29,7 +29,7 @@ def parse_required_phase_kinds(metadata: dict[str, Any]) -> list[str]:
     Returns:
         List of required phase kinds (defaults + user-specified, no duplicates)
     """
-    user_required = metadata.get("required_phases", [])
+    user_required = metadata.get("required_implementation_phases", [])
 
     # Normalize to list if it's a single string
     if isinstance(user_required, str):
