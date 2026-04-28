@@ -453,7 +453,6 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
         "readmePhase": {
             "id": phase.readme_phase_id,
             "title": readme_phase.title if readme_phase is not None else "",
-            "kind": readme_phase.kind if readme_phase is not None else "",
         },
         "command": {
             "display": " ".join(context.executed_command),
@@ -1185,15 +1184,15 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             ],
         ),
         assert_condition(
-            phase_doc.kind in ALLOWED_PHASE_KINDS,
-            "README phase metadata uses an allowed phase kind.",
-            "README phase metadata uses an unsupported phase kind.",
+            phase_doc.id in ALLOWED_PHASE_KINDS,
+            "README phase metadata uses an allowed phase id.",
+            "README phase metadata uses an unsupported phase id.",
             category="readme",
-            code="readme.v2.phase.kind",
+            code="readme.v2.phase.id",
             details=[
                 detail("Phase title", phase_doc.title),
-                detail("Phase kind", phase_doc.kind or "(missing)"),
-                detail("Allowed phase kinds", ", ".join(ALLOWED_PHASE_KINDS)),
+                detail("Phase id", phase_doc.id or "(missing)"),
+                detail("Allowed phase ids", ", ".join(ALLOWED_PHASE_KINDS)),
             ],
         ),
         assert_condition(
@@ -1374,7 +1373,6 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
             details=[
                 detail("Phase validation", sequence_message),
                 detail("Phase ids", ", ".join(phase.id for phase in document.phases) or "(none)"),
-                detail("Phase kinds", ", ".join(phase.kind for phase in document.phases) or "(none)"),
             ],
         ),
         assert_equal(

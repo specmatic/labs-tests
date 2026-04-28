@@ -71,7 +71,6 @@ class MarkdownLink:
 class ReadmePhase:
     id: str
     title: str
-    kind: str
     heading: Heading
     metadata: dict[str, Any]
     content: str
@@ -174,12 +173,10 @@ def extract_v2_phases(text: str, headings: list[Heading]) -> list[ReadmePhase]:
         section_text = text[section_start:section_end].strip()
         metadata = extract_phase_metadata(section_text)
         phase_id = str(metadata.get("id", "")).strip()
-        phase_kind = str(metadata.get("kind", "")).strip()
         phases.append(
             ReadmePhase(
                 id=phase_id,
                 title=heading.title,
-                kind=phase_kind,
                 heading=heading,
                 metadata=metadata,
                 content=section_text,
@@ -295,38 +292,38 @@ def phase_sequence_is_valid(
     if not phases:
         return False, "No H3 phases were found under 'Lab Implementation Phases'."
 
-    kinds = [phase.kind for phase in phases]
+    ids = [phase.id for phase in phases]
 
     # Baseline and final are always required
-    if kinds.count("baseline") != 1:
-        return False, f"Expected exactly one baseline phase, found {kinds.count('baseline')}."
-    if kinds.count("final") != 1:
-        return False, f"Expected exactly one final phase, found {kinds.count('final')}."
+    if ids.count("baseline") != 1:
+        return False, f"Expected exactly one baseline phase, found {ids.count('baseline')}."
+    if ids.count("final") != 1:
+        return False, f"Expected exactly one final phase, found {ids.count('final')}."
 
     # Validate first and last phase positions
-    if kinds[0] != "baseline":
+    if ids[0] != "baseline":
         return False, "The first lab phase must be the baseline phase."
-    if kinds[-1] != "final":
+    if ids[-1] != "final":
         return False, "The last lab phase must be the final phase."
 
     # Check required phases from top-level metadata
     missing_required = [
         kind for kind in required_phase_kinds
-        if kind not in DEFAULT_REQUIRED_PHASES and kinds.count(kind) < 1
+        if kind not in DEFAULT_REQUIRED_PHASES and ids.count(kind) < 1
     ]
     if missing_required:
         return False, f"Missing required phase: {', '.join(missing_required)}"
 
     # Check for phases that exist but are not marked as required
     extra_phases = [
-        kind for kind in kinds
-        if kind not in required_phase_kinds
+        id for id in ids
+        if id not in required_phase_kinds
     ]
     if extra_phases:
         return False, f"Found phases not marked as required: {', '.join(extra_phases)}. Add them to required_implementation_phases in the README metadata."
 
     # Check for unsupported phase kinds
-    invalid = [phase.kind for phase in phases if phase.kind not in ALLOWED_PHASE_KINDS]
+    invalid = [phase.id for phase in phases if phase.id not in ALLOWED_PHASE_KINDS]
     if invalid:
         return False, f"Found unsupported phase kinds: {', '.join(invalid)}."
 
