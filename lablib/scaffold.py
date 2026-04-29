@@ -27,7 +27,9 @@ from lablib.readme_expectations import (
 )
 from lablib.readme_schema import (
     ALLOWED_PHASE_KINDS,
+    BASELINE_PHASE,
     DEFAULT_REQUIRED_PHASES,
+    FINAL_PHASE,
     V2_SCHEMA_VERSION,
     command_fence_languages,
     expected_h2_titles_for_document,

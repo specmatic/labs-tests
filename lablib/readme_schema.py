@@ -15,7 +15,9 @@ HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 MARKDOWN_LINK_RE = re.compile(r"(!)?\[(?P<label>[^\]]*)\]\((?P<target>[^)]+)\)")
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
 V2_SCHEMA_VERSION = "v2"
-DEFAULT_REQUIRED_PHASES = ("baseline", "final")
+BASELINE_PHASE = "baseline"
+FINAL_PHASE = "final"
+DEFAULT_REQUIRED_PHASES = (BASELINE_PHASE, FINAL_PHASE)
 OPTIONAL_PHASE_KINDS = ("intermediate", "studio", "inspection", "cleanup_verification")
 ALLOWED_PHASE_KINDS = DEFAULT_REQUIRED_PHASES + OPTIONAL_PHASE_KINDS
 
@@ -118,7 +120,7 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
     # Parse phases from global config
-    phase_ids = metadata.get("phases", [])
+    phase_ids = metadata.get("required_phases", list(DEFAULT_REQUIRED_PHASES))
     phases = extract_v2_phases(body_text, headings, phase_ids) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
     links = extract_markdown_links(body_text)
 
@@ -399,16 +401,16 @@ def phase_sequence_is_valid(
     ids = [phase.id for phase in phases]
 
     # Baseline and final are mandatory
-    if ids.count("baseline") != 1:
-        return False, f"Expected exactly one baseline phase, found {ids.count('baseline')}."
-    if ids.count("final") != 1:
-        return False, f"Expected exactly one final phase, found {ids.count('final')}."
+    if ids.count(BASELINE_PHASE) != 1:
+        return False, f"Expected exactly one {BASELINE_PHASE} phase, found {ids.count(BASELINE_PHASE)}."
+    if ids.count(FINAL_PHASE) != 1:
+        return False, f"Expected exactly one {FINAL_PHASE} phase, found {ids.count(FINAL_PHASE)}."
 
     # Validate first and last phase positions
-    if ids[0] != "baseline":
-        return False, "The first lab phase must be the baseline phase."
-    if ids[-1] != "final":
-        return False, "The last lab phase must be the final phase."
+    if ids[0] != BASELINE_PHASE:
+        return False, f"The first lab phase must be the {BASELINE_PHASE} phase."
+    if ids[-1] != FINAL_PHASE:
+        return False, f"The last lab phase must be the {FINAL_PHASE} phase."
 
     # Check for unsupported phase kinds
     invalid = [phase.id for phase in phases if phase.id not in ALLOWED_PHASE_KINDS]

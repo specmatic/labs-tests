@@ -24,6 +24,8 @@ from lablib.readme_expectations import (
     unexpected_h2_titles_for_lab,
 )
 from lablib.readme_schema import (
+    BASELINE_PHASE,
+    FINAL_PHASE,
     DEFAULT_REQUIRED_PHASES,
     expected_h2_titles_for_document,
     extract_overview_video_section,
@@ -300,6 +302,8 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "headingCount": len(headings),
             "h2Count": len(h2_headings),
             "h3Count": len(h3_headings),
+            "phaseIds": [phase.id for phase in readme_doc.phases],
+            "requiredPhases": readme_doc.metadata.get("required_phases", list(DEFAULT_REQUIRED_PHASES)),
             "shellConsoleBlockCount": len(shell_console_blocks),
             "consoleBlockCount": len(console_blocks),
             "hasAtLeastTwoShellConsoleBlocks": len(shell_console_blocks) >= 2,
@@ -2193,29 +2197,56 @@ def build_readme_section_presence_details(
 
 
 def build_phase_start_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build details for phase sequence validation."""
     sections = []
     for lab in labs:
-        first_phase = lab["readme"]["openingShellConsoleSection"].get("heading") or "(missing)"
-        ok = bool(first_phase) and "baseline" in first_phase.lower()
-        lab_sections = [
-            {
-                "type": "bullets",
-                "title": "First phase",
-                "items": [first_phase],
-            },
-        ]
-        issues = None if ok else ["wrong phase start"]
-        add_action_section(lab_sections, issues, "Move the README baseline or intended-failure step to the start of the implementation flow.")
-        sections.append({
-            "type": "sections",
-            "title": lab["name"],
-            "href": lab["href"],
-            "sections": lab_sections,
-        })
+        phase_ids = lab.get("readme", {}).get("phaseIds", [])
+
+        # Check if baseline is first and final is last
+        has_baseline = phase_ids and phase_ids[0] == BASELINE_PHASE
+        has_final = phase_ids and phase_ids[-1] == FINAL_PHASE
+        ok = has_baseline and has_final
+
+        # Skip if everything is OK (will show "All passed" automatically)
+        if ok:
+            continue
+
+        # Only build sections if there's an error
+        lab_sections = []
+
+        # Show current phase state
+        if phase_ids:
+            lab_sections.append(
+                build_bullet_section(
+                    "Phase sequence",
+                    [f"First: {phase_ids[0]}", f"Last: {phase_ids[-1]}"],
+                    tone="attention"
+                )
+            )
+
+        # Show what's missing
+        missing = []
+        if not has_baseline:
+            missing.append(BASELINE_PHASE)
+        if not has_final:
+            missing.append(FINAL_PHASE)
+
+        if missing:
+            lab_sections.append(
+                build_bullet_section("Missing required phases", missing, tone="attention")
+            )
+            issues = ["missing phases"]
+            add_action_section(
+                lab_sections,
+                issues,
+                [f'Add "### {p.replace("-", " ").title()} Phase"' for p in missing]
+            )
+
+        add_lab_section(sections, lab, lab_sections)
+
     return {
-        "type": "sections",
-        "title": "Implementation phase starts",
-        "note": "The first implementation phase should be the README's baseline or intended-failure step so the documented before/after flow stays consistent.",
+        "title": "Phase sequence coverage",
+        "note": f"First phase must be {BASELINE_PHASE}, last must be {FINAL_PHASE}.",
         "sections": sections,
     }
 
