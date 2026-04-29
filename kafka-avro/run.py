@@ -106,7 +106,7 @@ FIXED_IPHONE = """{
           "id": 1,
           "name": "iPhone",
           "quantity": 10,
-          "price": 5000.00
+          "price": 5000
         }
       ]
     }
@@ -133,7 +133,7 @@ FIXED_MACBOOK = """{
           "id": 1,
           "name": "Macbook",
           "quantity": 50,
-          "price": 6000.00
+          "price": 6000
         }
       ]
     }
@@ -289,7 +289,7 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
         assert_condition(
             '"id": 1' in context.artifacts["PLACE_IPHONE_ORDER.json"]["text"]
             and '"iPhone"' in context.artifacts["PLACE_IPHONE_ORDER.json"]["text"]
-            and '"price": 5000.00' in context.artifacts["PLACE_IPHONE_ORDER.json"]["text"],
+            and '"price": 5000' in context.artifacts["PLACE_IPHONE_ORDER.json"]["text"],
             "Fixed iPhone example uses values that satisfy the explicit Avro constraints.",
             "Fixed iPhone example does not use the expected valid values.",
             category="report",
