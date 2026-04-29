@@ -2917,9 +2917,8 @@ def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dic
 
 
 def test_counts_for_phase(readme_phase: Any) -> bool:
-    if readme_phase is None:
-        return True
-    return bool(readme_phase.metadata.get("test_counts", False))
+    # Always validate test counts - no longer configurable per phase
+    return True
 
 
 def select_readme_summary_for_phase(

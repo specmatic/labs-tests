@@ -117,7 +117,9 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     headings = extract_headings(body_text)
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
-    phases = extract_v2_phases(body_text, headings) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
+    # Parse phases from global config
+    phase_ids = metadata.get("phases", [])
+    phases = extract_v2_phases(body_text, headings, phase_ids) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
     links = extract_markdown_links(body_text)
 
     # Extract overview video URL from "What you will learn" > "### Overview Video" section
@@ -161,7 +163,8 @@ def extract_headings(text: str) -> list[Heading]:
     ]
 
 
-def extract_v2_phases(text: str, headings: list[Heading]) -> list[ReadmePhase]:
+def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) -> list[ReadmePhase]:
+    """Extract phases by matching H3 titles against phase IDs from global config."""
     implementation_h2 = next((heading for heading in headings if heading.level == 2 and heading.title == "Lab Implementation Phases"), None)
     if implementation_h2 is None:
         return []
@@ -174,24 +177,36 @@ def extract_v2_phases(text: str, headings: list[Heading]) -> list[ReadmePhase]:
     ]
     phases: list[ReadmePhase] = []
     for index, heading in enumerate(phase_headings):
-        next_heading = phase_headings[index + 1] if index + 1 < len(phase_headings) else None
-        section_start = heading.start
-        section_end = next_heading.start if next_heading is not None else implementation_end
-        section_text = text[section_start:section_end].strip()
-        metadata = extract_phase_metadata(section_text)
-        phase_id = str(metadata.get("id", "")).strip()
-        phases.append(
-            ReadmePhase(
-                id=phase_id,
-                title=heading.title,
-                heading=heading,
-                metadata=metadata,
-                content=section_text,
-                code_blocks=extract_code_blocks(section_text),
-                links=extract_markdown_links(section_text),
+        # Match H3 title to phase ID (case-insensitive substring match)
+        phase_id = match_title_to_phase_id(heading.title, phase_ids)
+
+        if phase_id:  # Only include if it matches a known phase
+            next_heading = phase_headings[index + 1] if index + 1 < len(phase_headings) else None
+            section_start = heading.start
+            section_end = next_heading.start if next_heading is not None else implementation_end
+            section_text = text[section_start:section_end].strip()
+
+            phases.append(
+                ReadmePhase(
+                    id=phase_id,
+                    title=heading.title,
+                    heading=heading,
+                    metadata={},  # Empty - all config is global now
+                    content=section_text,
+                    code_blocks=extract_code_blocks(section_text),
+                    links=extract_markdown_links(section_text),
+                )
             )
-        )
     return phases
+
+
+def match_title_to_phase_id(title: str, phase_ids: list[str]) -> str | None:
+    """Match H3 title to phase ID (case-insensitive substring match)."""
+    title_lower = title.lower()
+    for phase_id in phase_ids:
+        if phase_id in title_lower:
+            return phase_id
+    return None
 
 
 def extract_phase_metadata(section_text: str) -> dict[str, Any]:
@@ -367,13 +382,13 @@ def validate_external_link(target: str, *, timeout_seconds: float = 5.0, retries
 
 def phase_sequence_is_valid(
     phases: list[ReadmePhase],
-    required_phase_kinds: list[str]
+    phase_ids: list[str]
 ) -> tuple[bool, str]:
-    """Validate phase sequence including required phase kinds.
+    """Validate phase sequence. Baseline and final must be present and in correct positions.
 
     Args:
         phases: List of phases to validate
-        required_phase_kinds: List of required phase kinds (already merged with defaults).
+        phase_ids: List of phase IDs from global config
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -383,7 +398,7 @@ def phase_sequence_is_valid(
 
     ids = [phase.id for phase in phases]
 
-    # Baseline and final are always required
+    # Baseline and final are mandatory
     if ids.count("baseline") != 1:
         return False, f"Expected exactly one baseline phase, found {ids.count('baseline')}."
     if ids.count("final") != 1:
@@ -394,22 +409,6 @@ def phase_sequence_is_valid(
         return False, "The first lab phase must be the baseline phase."
     if ids[-1] != "final":
         return False, "The last lab phase must be the final phase."
-
-    # Check required phases from top-level metadata
-    missing_required = [
-        kind for kind in required_phase_kinds
-        if kind not in DEFAULT_REQUIRED_PHASES and ids.count(kind) < 1
-    ]
-    if missing_required:
-        return False, f"Missing required phase: {', '.join(missing_required)}"
-
-    # Check for phases that exist but are not marked as required
-    extra_phases = [
-        id for id in ids
-        if id not in required_phase_kinds
-    ]
-    if extra_phases:
-        return False, f"Found phases not marked as required: {', '.join(extra_phases)}. Add them to required_implementation_phases in the README metadata."
 
     # Check for unsupported phase kinds
     invalid = [phase.id for phase in phases if phase.id not in ALLOWED_PHASE_KINDS]

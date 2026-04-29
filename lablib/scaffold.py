@@ -1159,8 +1159,6 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
 
     commands = phase_doc.command_blocks
     outputs = phase_doc.output_blocks
-    expected_reports = phase_doc.metadata.get("expected_reports", {})
-    validates_counts = bool(phase_doc.metadata.get("test_counts"))
     shell_languages = {"shell", "bash", "sh", "zsh"}
     windows_languages = {"powershell", "ps1", "cmd", "bat"}
     invalid_common_languages = [
@@ -1174,29 +1172,6 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     )
     has_os_specific_variants = command_blocks_have_any_language(commands, shell_languages) and command_blocks_have_any_language(commands, windows_languages)
     assertions = [
-        assert_condition(
-            phase_doc.metadata.get("id") == context.phase.readme_phase_id,
-            "README phase metadata includes the expected phase id.",
-            "README phase metadata does not include the expected phase id.",
-            category="readme",
-            code="readme.v2.phase.id",
-            details=[
-                detail("Expected phase id", context.phase.readme_phase_id or "(missing)"),
-                detail("Actual phase id", phase_doc.metadata.get("id", "(missing)")),
-            ],
-        ),
-        assert_condition(
-            phase_doc.id in ALLOWED_PHASE_KINDS,
-            "README phase metadata uses an allowed phase id.",
-            "README phase metadata uses an unsupported phase id.",
-            category="readme",
-            code="readme.v2.phase.id",
-            details=[
-                detail("Phase title", phase_doc.title),
-                detail("Phase id", phase_doc.id or "(missing)"),
-                detail("Allowed phase ids", ", ".join(ALLOWED_PHASE_KINDS)),
-            ],
-        ),
         assert_condition(
             bool(commands),
             "README phase documents at least one executable command.",
@@ -1245,34 +1220,18 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
         ),
     ]
 
-    if validates_counts:
-        assertions.append(
-            assert_condition(
-                bool(extract_tests_run_summaries(phase_doc.content)),
-                "README phase includes a summary block for runtime count validation.",
-                "README phase is missing the documented summary block required for runtime count validation.",
-                category="readme",
-                code="readme.v2.phase.summary",
-                details=[detail("Phase title", phase_doc.title)],
-            )
+    # Always validate summary (test_counts is always True now)
+    assertions.append(
+        assert_condition(
+            bool(extract_tests_run_summaries(phase_doc.content)),
+            "README phase includes a summary block for runtime count validation.",
+            "README phase is missing the documented summary block required for runtime count validation.",
+            category="readme",
+            code="readme.v2.phase.summary",
+            details=[detail("Phase title", phase_doc.title)],
         )
+    )
 
-    if expected_reports:
-        assertions.append(
-            assert_condition(
-                isinstance(expected_reports, dict),
-                "README phase metadata declares expected report sources.",
-                "README phase metadata does not declare any expected report sources.",
-                category="readme",
-                code="readme.v2.phase.expected_reports",
-                details=[
-                    detail(
-                        "Declared report sources",
-                        ", ".join(f"{name}={enabled}" for name, enabled in expected_reports.items()) or "(none)",
-                    )
-                ],
-            )
-        )
     return assertions
 
 
@@ -1331,9 +1290,9 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
     document = context.readme_doc
     actual_h2 = document.h2_titles
     expected_h2 = list(expected_h2_titles_for_document(document))
-    # Merge user-specified required phases with defaults
-    required_phase_kinds = parse_required_implementation_phases(document.metadata)
-    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, required_phase_kinds)
+    # Get phase IDs from global config
+    phase_ids = document.metadata.get("phases", [])
+    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, phase_ids)
     runner_phase_ids = [phase.readme_phase_id for phase in context.lab.phases if phase.readme_phase_id]
     readme_phase_ids = [phase.id for phase in document.phases if phase.id]
     assertions: list[dict[str, Any]] = [
@@ -1389,17 +1348,6 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
             ],
         ),
     ]
-    for phase in document.phases:
-        assertions.append(
-            assert_condition(
-                bool(phase.metadata),
-                f"README phase '{phase.title}' includes YAML metadata.",
-                f"README phase '{phase.title}' is missing YAML metadata.",
-                category="readme",
-                code="readme.v2.phase.metadata",
-                details=[detail("Phase title", phase.title)],
-            )
-        )
     return assertions
 
 
