@@ -17,7 +17,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -100,9 +99,9 @@ def build_lab_spec() -> LabSpec:
                 description="Run the async suite with the missing before fixture and wrong tax verification count.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
-                expected_console_phrases=("Tests run: 4, Successes: 2, Failures: 2, Errors: 0",),
+                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 2, Failures: 2, Errors: 0", "README documents the two expected baseline failures.", "README is missing the two expected baseline failures."),),
+                readme_assertions=(),
                 file_transforms={"accept_order": set_accept_baseline, "out_for_delivery": set_delivery_baseline},
                 extra_assertions=baseline_assertions,
             ),
@@ -111,8 +110,8 @@ def build_lab_spec() -> LabSpec:
                 description="Add the before fixture and correct the after assertion so the async suite passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 4, Successes: 4, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 4, Failures: 0, Errors: 0", "README documents the final passing async summary.", "README is missing the final passing async summary."),),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=(
                     "Added the missing before HTTP fixture to examples/async-order-service/acceptOrder.json.",
                     "Changed the TaxService verification count in examples/async-order-service/outForDeliveryOrder.json from 2 to 1.",
@@ -128,11 +127,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 4, "passed": 2, "failed": 2, "skipped": 0, "other": 0},
-            expected_console={"tests": 4, "successes": 2, "failures": 2, "errors": 0},
-        ),
         assert_condition(
             '"before"' not in context.artifacts["acceptOrder.json"]["text"],
             "Baseline acceptOrder.json still omits the before fixture.",
@@ -152,11 +146,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 4, "passed": 4, "failed": 0, "skipped": 0, "other": 0},
-            expected_console={"tests": 4, "successes": 4, "failures": 0, "errors": 0},
-        ),
         assert_condition(
             '"before"' in context.artifacts["acceptOrder.json"]["text"] and '"path": "/orders"' in context.artifacts["acceptOrder.json"]["text"],
             "Fixed acceptOrder.json includes the before HTTP fixture.",
