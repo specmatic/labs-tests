@@ -2,10 +2,16 @@ name: Specmatic Labs Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      labs:
+        description: "Optional space-separated list of labs to run, for example: api-coverage external-examples"
+        required: false
+        type: string
   pull_request:
   push:
     branches:
       - main
+      - dynamic-labs
 
 permissions:
   contents: read
@@ -42,12 +48,19 @@ jobs:
         id: run_labs
         shell: bash
         env:
-          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --labs external-examples --branch dynamic-labs 
+          WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
         timeout-minutes: 40
         run: |
           set +e
           start_time=$(date +%s)
-          python3 -u run_all.py --refresh-labs --force --labs external-examples --branch dynamic-labs &
+          run_command=(python3 -u run_all.py --refresh-labs --force)
+          if [[ -n "${WORKFLOW_LABS_INPUT}" ]]; then
+            # Space-separated lab names from workflow_dispatch are appended as individual args.
+            read -r -a selected_labs <<< "${WORKFLOW_LABS_INPUT}"
+            run_command+=(--labs "${selected_labs[@]}")
+          fi
+          export SPECMATIC_LABS_RUN_COMMAND="${run_command[*]}"
+          "${run_command[@]}" &
           run_pid=$!
 
           while kill -0 "$run_pid" 2>/dev/null; do
