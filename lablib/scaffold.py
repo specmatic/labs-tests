@@ -127,6 +127,8 @@ class LabSpec:
     intentional_differences: tuple[str, ...] = ()
     expected_missing_test_counts: bool = False
     expected_missing_test_counts_reason: str = ""
+    expected_failure_mismatch: bool = False
+    expected_failure_mismatch_reason: str = ""
 
 
 @dataclass
