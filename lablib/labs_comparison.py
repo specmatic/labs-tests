@@ -238,10 +238,12 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     report_snapshot = load_lab_report_snapshot(spec.name)
     readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
     readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
+    readme_pcmo = readme_doc.metadata.get("passcount_match_only", False)
     readme_emtc = readme_doc.metadata.get("expected_missing_test_counts", False)
     readme_emtc_reason = readme_doc.metadata.get("expected_missing_test_counts_reason", "")
     effective_efm = spec.expected_failure_mismatch or bool(readme_efm)
     effective_efm_reason = spec.expected_failure_mismatch_reason or readme_efm_reason
+    effective_passcount_match_only = spec.passcount_match_only or bool(readme_pcmo)
     effective_emtc = spec.expected_missing_test_counts or bool(readme_emtc)
     effective_emtc_reason = spec.expected_missing_test_counts_reason or readme_emtc_reason
     test_count_consistency = build_test_count_consistency_profile(
@@ -252,6 +254,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         expected_missing_reason=effective_emtc_reason,
         expected_failure_mismatch=effective_efm,
         expected_failure_mismatch_reason=effective_efm_reason,
+        passcount_match_only=effective_passcount_match_only,
     )
     override = get_lab_readme_override(spec.name)
     required_h2 = list(expected_h2_titles_for_document(readme_doc) or shared_h2_titles())
@@ -3564,6 +3567,7 @@ def build_test_count_consistency_profile(
     expected_missing_reason: str = "",
     expected_failure_mismatch: bool = False,
     expected_failure_mismatch_reason: str = "",
+    passcount_match_only: bool = False,
 ) -> dict[str, Any]:
     if not snapshot:
         return {
@@ -3573,6 +3577,7 @@ def build_test_count_consistency_profile(
             "expectedMissingReason": expected_missing_reason,
             "expectedFailureMismatch": expected_failure_mismatch,
             "expectedFailureMismatchReason": expected_failure_mismatch_reason,
+            "passcountMatchOnly": passcount_match_only,
             "phases": [],
         }
 
@@ -3613,7 +3618,9 @@ def build_test_count_consistency_profile(
         console_counts = parse_tests_run_counts(console_summary) if expected_sources["console_summary"] else None
         ctrf_counts = ctrf_summary if expected_sources["ctrf"] else None
         html_counts = html_summary if expected_sources["html"] else None
-        if expected_failure_mismatch:
+        if passcount_match_only:
+            consistency_counts = [readme_counts, console_counts, ctrf_counts, html_counts]
+        elif expected_failure_mismatch:
             consistency_counts = [readme_counts, console_counts]
         else:
             consistency_counts = [readme_counts, console_counts, ctrf_counts, html_counts]
@@ -3623,8 +3630,11 @@ def build_test_count_consistency_profile(
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
         totals_match = comparable and len({c["tests"] for c in present_counts}) == 1
+        passed_match = comparable and len({c["passed"] for c in present_counts}) == 1
 
-        if expected_failure_mismatch and comparable and not consistent and totals_match:
+        if passcount_match_only and comparable and not consistent and passed_match:
+            status = "partial-match"
+        elif expected_failure_mismatch and comparable and not consistent and totals_match:
             status = "partial-match"
         else:
             status = (
@@ -3659,6 +3669,7 @@ def build_test_count_consistency_profile(
         "expectedMissingReason": expected_missing_reason,
         "expectedFailureMismatch": expected_failure_mismatch,
         "expectedFailureMismatchReason": expected_failure_mismatch_reason,
+        "passcountMatchOnly": passcount_match_only,
         "phases": comparisons,
     }
 
@@ -3920,8 +3931,8 @@ def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, A
         return {
             "text": text,
             "className": "matrix-tooltip-count partial",
-            "title": f"Total matches but pass/fail counts differ (expected failure mismatch).\n\n{count_legend}",
-            "ariaLabel": f"Total matches but pass/fail counts differ. {count_legend}",
+            "title": f"This count block differs from the reference but is allowed under partial-match rules.\n\n{count_legend}",
+            "ariaLabel": f"This count block differs from the reference but is allowed under partial-match rules. {count_legend}",
         }
     return {
         "text": text,
