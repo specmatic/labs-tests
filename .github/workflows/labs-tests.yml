@@ -42,12 +42,12 @@ jobs:
         id: run_labs
         shell: bash
         env:
-          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --branch dynamic-labs
+          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --labs api-coverage --branch dynamic-labs 
         timeout-minutes: 40
         run: |
           set +e
           start_time=$(date +%s)
-          python3 -u run_all.py --refresh-labs --force --branch dynamic-labs &
+          python3 -u run_all.py --refresh-labs --force --labs api-coverage --branch dynamic-labs &
           run_pid=$!
 
           while kill -0 "$run_pid" 2>/dev/null; do
