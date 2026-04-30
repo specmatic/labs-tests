@@ -1515,6 +1515,17 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
+def is_ignored_teardown_command(command: str) -> bool:
+    normalized = " ".join(command.strip().lower().split())
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " down" in f" {normalized}"
+    ):
+        return True
+    teardown_prefixes = ("docker stop", "docker rm")
+    return normalized.startswith(teardown_prefixes)
+
+
 def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
     command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
@@ -1531,6 +1542,8 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
         os_targets = set(block["osTargets"])
         if block["is_console"]:
             has_commands = True
+            if is_ignored_teardown_command(block["preview"] or ""):
+                continue
             for os_name in os_targets:
                 command_coverage[os_name].append(
                     {

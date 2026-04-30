@@ -47,6 +47,8 @@ OTHER_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.json
 OTHER_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.html"
 TEST_COUNT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.json"
 TEST_COUNT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.html"
+FENCING_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.json"
+FENCING_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -66,8 +68,7 @@ REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 CORE_VALIDATION_LABELS = {
     "README starts with a top-level H1 title",
     "README H2 order matches the lab's source-of-truth structure",
-    "README includes a console output snippet after each documented command",
-    "README console output snippets use ```terminaloutput``` fenced blocks",
+    "Command and Output fencing validation",
     "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
     "Generated artifacts include ctrf-report.json",
     "Generated artifacts include the sibling Specmatic HTML report",
@@ -155,6 +156,7 @@ def generate_labs_comparison(
         "validationMatrix": build_validation_matrix(labs, validation_rows, mode="other"),
     }
     test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
+    fencing_payload = build_fencing_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
         if legacy_path.exists():
@@ -165,6 +167,8 @@ def generate_labs_comparison(
     OTHER_COMPARISON_HTML_PATH.write_text(render_comparison_html(other_payload), encoding="utf-8")
     TEST_COUNT_COMPARISON_JSON_PATH.write_text(json.dumps(test_count_payload, indent=2) + "\n", encoding="utf-8")
     TEST_COUNT_COMPARISON_HTML_PATH.write_text(render_test_count_comparison_html(test_count_payload), encoding="utf-8")
+    FENCING_COMPARISON_JSON_PATH.write_text(json.dumps(fencing_payload, indent=2) + "\n", encoding="utf-8")
+    FENCING_COMPARISON_HTML_PATH.write_text(render_fencing_comparison_html(fencing_payload), encoding="utf-8")
     return payload
 
 
@@ -595,12 +599,27 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
+def is_ignored_teardown_command(command: str) -> bool:
+    normalized = " ".join(command.strip().lower().split())
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " down" in f" {normalized}"
+    ):
+        return True
+    teardown_prefixes = ("docker stop", "docker rm")
+    return normalized.startswith(teardown_prefixes)
+
+
 def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, Any]], code_blocks: list[dict[str, Any]]) -> dict[str, Any]:
     command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     command_language_issues: list[dict[str, str]] = []
     output_language_issues: list[str] = []
     commands_missing_output: list[str] = []
+    command_fence_violations: list[dict[str, str]] = []
+    output_fence_violations: list[dict[str, str]] = []
+    missing_output_pairs: list[dict[str, str]] = []
+    command_output_checks: list[dict[str, str]] = []
     has_commands = False
     has_path_outputs = False
 
@@ -618,22 +637,33 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
         os_targets = os_targets_from_text(context_text)
         if looks_like_console_block(block):
             has_commands = True
+            heading_text = heading["text"] if heading else "(no heading)"
             for os_name in os_targets:
                 command_coverage[os_name].append(
                     {
-                        "heading": heading["text"] if heading else "(no heading)",
+                        "heading": heading_text,
                         "language": block["language"] or "(none)",
                         "preview": block["normalizedPreview"] or "(blank)",
                     }
                 )
                 if not is_command_language_appropriate(os_name, block["rawLanguage"] or ""):
-                    command_language_issues.append(
-                        {
-                            "os": os_name,
-                            "heading": heading["text"] if heading else "(no heading)",
-                            "language": block["rawLanguage"] or "(none)",
-                        }
-                    )
+                    issue = {
+                        "os": os_name,
+                        "heading": heading_text,
+                        "language": block["rawLanguage"] or "(none)",
+                    }
+                    command_language_issues.append(issue)
+            if block["rawLanguage"] != "shell":
+                command_fence_violations.append(
+                    {
+                        "heading": heading_text,
+                        "line": str(block["line"]),
+                        "command": block["preview"] or "(blank)",
+                        "commandFence": block["rawLanguage"] or "(none)",
+                    }
+                )
+            if is_ignored_teardown_command(block["preview"] or ""):
+                continue
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
             next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
             if (
@@ -641,8 +671,33 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                 or looks_like_console_block(next_block)
                 or (next_heading["text"] if next_heading else "") != (heading["text"] if heading else "")
             ):
-                commands_missing_output.append(
-                    f"{heading['text'] if heading else '(no heading)'} -> {block['normalizedPreview'] or '(blank)'}"
+                issue_text = f"{heading_text} -> {block['normalizedPreview'] or '(blank)'}"
+                commands_missing_output.append(issue_text)
+                missing_output_pairs.append(
+                    {
+                        "heading": heading_text,
+                        "line": str(block["line"]),
+                        "command": block["preview"] or "(blank)",
+                        "commandFence": block["rawLanguage"] or "(none)",
+                        "outputFence": "(missing)",
+                        "output": "(missing)",
+                    }
+                )
+                failure_notes: list[str] = []
+                if block["rawLanguage"] != "shell":
+                    failure_notes.append("Command fence must be ```shell```.")
+                failure_notes.append("Missing following terminaloutput block in the same section.")
+                command_output_checks.append(
+                    {
+                        "line": str(block["line"]),
+                        "heading": heading_text,
+                        "commandFence": block["rawLanguage"] or "(none)",
+                        "command": block["preview"] or "(blank)",
+                        "outputFence": "(missing)",
+                        "output": "(missing)",
+                        "status": "fail",
+                        "notes": " ".join(failure_notes),
+                    }
                 )
                 continue
             output_targets = set(os_targets) or set(next_block.get("osTargets", []))
@@ -657,21 +712,74 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                 )
             if next_block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading['text'] if heading else '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['rawLanguage'] or '(none)'}``` for output"
+                    f"{heading_text} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['rawLanguage'] or '(none)'}``` for output"
                 )
+                output_fence_violations.append(
+                    {
+                        "heading": heading_text,
+                        "line": str(block["line"]),
+                        "command": block["preview"] or "(blank)",
+                        "commandFence": block["rawLanguage"] or "(none)",
+                        "outputFence": next_block["rawLanguage"] or "(none)",
+                        "output": next_block["preview"] or "(blank)",
+                    }
+                )
+            status = "pass"
+            failure_notes: list[str] = []
+            if block["rawLanguage"] != "shell":
+                status = "fail"
+                failure_notes.append("Command fence must be ```shell```.")
+            if next_block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+                status = "fail"
+                failure_notes.append("Output fence must be ```terminaloutput```.")
+            command_output_checks.append(
+                {
+                    "line": str(block["line"]),
+                    "heading": heading_text,
+                    "commandFence": block["rawLanguage"] or "(none)",
+                    "command": block["preview"] or "(blank)",
+                    "outputFence": next_block["rawLanguage"] or "(none)",
+                    "output": next_block["preview"] or "(blank)",
+                    "status": status,
+                    "notes": " ".join(failure_notes) if failure_notes else "Command/output fencing is valid.",
+                }
+            )
         elif is_output_block_with_paths(block):
             has_path_outputs = True
+            heading_text = heading["text"] if heading else "(no heading)"
             for os_name in os_targets:
                 output_coverage[os_name].append(
                     {
-                        "heading": heading["text"] if heading else "(no heading)",
+                        "heading": heading_text,
                         "language": block["language"] or "(none)",
                         "preview": block["normalizedPreview"] or "(blank)",
                     }
                 )
             if block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading['text'] if heading else '(no heading)'} uses ```{block['rawLanguage'] or '(none)'}``` for output"
+                    f"{heading_text} uses ```{block['rawLanguage'] or '(none)'}``` for output"
+                )
+                output_fence_violations.append(
+                    {
+                        "heading": heading_text,
+                        "line": str(block["line"]),
+                        "command": "(no associated command)",
+                        "commandFence": "(n/a)",
+                        "outputFence": block["rawLanguage"] or "(none)",
+                        "output": block["preview"] or "(blank)",
+                    }
+                )
+                command_output_checks.append(
+                    {
+                        "line": str(block["line"]),
+                        "heading": heading_text,
+                        "commandFence": "(n/a)",
+                        "command": "(no associated command)",
+                        "outputFence": block["rawLanguage"] or "(none)",
+                        "output": block["preview"] or "(blank)",
+                        "status": "fail",
+                        "notes": "Standalone output-like snippet must use ```terminaloutput```.",
+                    }
                 )
 
     return {
@@ -679,11 +787,15 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
         "missingCommandOs": [os_name for os_name, entries in command_coverage.items() if has_commands and not entries],
         "commandCoverage": command_coverage,
         "commandLanguageIssues": command_language_issues,
+        "commandFenceViolations": command_fence_violations,
         "hasPathOutputs": has_path_outputs,
         "missingOutputOs": [os_name for os_name, entries in output_coverage.items() if has_path_outputs and not entries],
         "outputCoverage": output_coverage,
         "commandsMissingOutput": commands_missing_output,
         "outputLanguageIssues": output_language_issues,
+        "outputFenceViolations": output_fence_violations,
+        "missingOutputPairs": missing_output_pairs,
+        "commandOutputChecks": command_output_checks,
         "missingOutputForCommandOs": [os_name for os_name, entries in command_coverage.items() if entries and not output_coverage[os_name]],
     }
 
@@ -1015,28 +1127,22 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ],
         },
         {
-            "label": "README command sections all use ```shell``` fenced blocks",
+            "label": "Command and Output fencing validation",
             "tooltip": {
-                "summary": ["All documented command sections should use ```shell``` fenced blocks."],
-                "details": build_shell_console_details(labs),
+                "summary": [
+                    "Documented commands must use ```shell``` fences.",
+                    "Each command must be followed by a ```terminaloutput``` block in the same section.",
+                ],
+                "details": build_command_output_fencing_details(labs),
+                "fullReportHref": "labs-command-output-fencing-comparison.html",
+                "fullReportLabel": "Open full command/output fencing report",
             },
-            "cells": [lab["readme"]["allCommandBlocksUseExecutableSyntax"] for lab in labs],
-        },
-        {
-            "label": "README includes a console output snippet after each documented command",
-            "tooltip": {
-                "summary": ["Every command section should be followed by a console output snippet so the reader can see what to expect."],
-                "details": build_command_output_presence_details(labs),
-            },
-            "cells": [lab["readme"]["everyCommandHasOutputSnippet"] for lab in labs],
-        },
-        {
-            "label": "README console output snippets use ```terminaloutput``` fenced blocks",
-            "tooltip": {
-                "summary": ["All README console output snippets should use ```terminaloutput``` fences so commands and output stay clearly separated."],
-                "details": build_terminal_output_details(labs),
-            },
-            "cells": [lab["readme"]["allOutputBlocksUseTerminalOutput"] for lab in labs],
+            "cells": [
+                lab["readme"]["allCommandBlocksUseExecutableSyntax"]
+                and lab["readme"]["everyCommandHasOutputSnippet"]
+                and lab["readme"]["allOutputBlocksUseTerminalOutput"]
+                for lab in labs
+            ],
         },
         {
             "label": "README includes troubleshooting or common-confusion guidance",
@@ -1089,6 +1195,8 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "When a source is absent for a phase, it is shown as not-available rather than treated as a mismatch.",
                 ],
                 "details": build_test_count_consistency_details(labs),
+                "fullReportHref": "labs-test-counts-comparison.html",
+                "fullReportLabel": "Open full test-counts report",
             },
             "cells": [lab["testCountConsistency"]["consistent"] for lab in labs],
         },
@@ -1200,6 +1308,47 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
         )
     return {
         "title": "Labs Test Counts Comparison",
+        "generatedAt": generated_at,
+        "provenance": detect_report_provenance(),
+        "summary": summary_items,
+        "labs": sections,
+    }
+
+
+def build_fencing_comparison_payload(labs: list[dict[str, Any]], generated_at: str) -> dict[str, Any]:
+    sections = []
+    summary_items = []
+    for lab in labs:
+        os_doc = lab["readme"]["osDocumentation"]
+        command_fence_violations = os_doc.get("commandFenceViolations", [])
+        output_fence_violations = os_doc.get("outputFenceViolations", [])
+        missing_output_pairs = os_doc.get("missingOutputPairs", [])
+        total_issues = len(command_fence_violations) + len(output_fence_violations) + len(missing_output_pairs)
+        if total_issues:
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+                    "status": "issues",
+                    "message": f"{total_issues} fencing issue(s): {len(command_fence_violations)} non-shell command fence, {len(output_fence_violations)} non-terminaloutput output fence, {len(missing_output_pairs)} missing same-section pairing.",
+                }
+            )
+        else:
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+        "status": "ok",
+        "message": "No command/output fencing issues detected.",
+                }
+            )
+        sections.append(
+            {
+                "lab": lab["name"],
+                "href": lab["href"],
+                "checks": os_doc.get("commandOutputChecks", []),
+            }
+        )
+    return {
+        "title": "Labs Command And Output Fencing Comparison",
         "generatedAt": generated_at,
         "provenance": detect_report_provenance(),
         "summary": summary_items,
@@ -1452,6 +1601,15 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px solid #e2d7c6;
+    }}
+    .tooltip-report-link {{
+      margin-top: 10px;
+    }}
+    .tooltip-report-link a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+      font-weight: 600;
     }}
     .matrix-tooltip-section {{
       padding: 12px 14px;
@@ -1763,6 +1921,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         <button type="button" class="tooltip-close" data-modal-close="true" aria-label="Close tooltip">Close</button>
       </div>
       <ul id="matrix-tooltip-summary"></ul>
+      <p id="matrix-tooltip-report-link" class="tooltip-report-link" hidden><a id="matrix-tooltip-report-link-anchor" href="#" target="_blank" rel="noopener noreferrer">Open full report</a></p>
       <button id="matrix-tooltip-details-toggle" type="button" class="tooltip-details-toggle" hidden>View details</button>
       <div id="matrix-tooltip-details" class="matrix-tooltip-details" hidden></div>
     </div>
@@ -1772,6 +1931,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       const modal = document.getElementById('matrix-tooltip-modal');
       const title = document.getElementById('matrix-tooltip-title');
       const summary = document.getElementById('matrix-tooltip-summary');
+      const reportLink = document.getElementById('matrix-tooltip-report-link');
+      const reportLinkAnchor = document.getElementById('matrix-tooltip-report-link-anchor');
       const details = document.getElementById('matrix-tooltip-details');
       const detailsToggle = document.getElementById('matrix-tooltip-details-toggle');
       let activeTooltip = null;
@@ -1786,6 +1947,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         }}
         if (summary) {{
           summary.innerHTML = '';
+        }}
+        if (reportLink) {{
+          reportLink.hidden = true;
+        }}
+        if (reportLinkAnchor) {{
+          reportLinkAnchor.href = '#';
+          reportLinkAnchor.textContent = 'Open full report';
         }}
         if (details) {{
           details.hidden = true;
@@ -1806,7 +1974,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         const closeButton = target.closest ? target.closest('[data-modal-close="true"]') : null;
         if (trigger) {{
           closeAll();
-          if (!modal || !title || !summary || !details || !detailsToggle) return;
+          if (!modal || !title || !summary || !reportLink || !reportLinkAnchor || !details || !detailsToggle) return;
           const tooltipJson = trigger.getAttribute('data-tooltip-json') || '';
           if (!tooltipJson) return;
           const tooltip = JSON.parse(tooltipJson);
@@ -1814,6 +1982,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           activeTrigger = trigger;
           title.textContent = tooltip.title || 'What this means';
           renderBulletList(summary, tooltip.summary || ['(no summary available)']);
+          if (tooltip.fullReportHref) {{
+            reportLink.hidden = false;
+            reportLinkAnchor.href = tooltip.fullReportHref;
+            reportLinkAnchor.textContent = tooltip.fullReportLabel || 'Open full report';
+          }} else {{
+            reportLink.hidden = true;
+          }}
           renderDetails(details, tooltip.details || null);
           details.hidden = true;
           detailsToggle.hidden = !tooltip.details;
@@ -2141,6 +2316,209 @@ def render_test_count_comparison_html(payload: dict[str, Any]) -> str:
 """
 
 
+def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
+    summary_items = "".join(
+        f"<li><strong>{escape(item['lab'])}:</strong> {escape(item['message'])}</li>"
+        for item in payload.get("summary", [])
+    ) or "<li>No lab report snapshots were available.</li>"
+    sections_html = "".join(render_fencing_lab_section(section) for section in payload.get("labs", []))
+    provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p class='muted'>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(payload.get("title", "Labs Command And Output Fencing Comparison"))}</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f5f1e8;
+      color: #182126;
+    }}
+    main {{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }}
+    .panel {{
+      background: #fffdf8;
+      border: 1px solid #d7ccb8;
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 18px;
+      box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .muted {{ color: #5b6570; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      margin-bottom: 18px;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+    }}
+    code, pre {{
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.92rem;
+    }}
+    a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+    .ok {{
+      color: #1f7a4d;
+      font-weight: 600;
+    }}
+    .warn {{
+      color: #ab2e2e;
+      font-weight: 600;
+    }}
+    .status-chip {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }}
+    .status-pass {{
+      color: #1f7a4d;
+      background: #e5f5eb;
+    }}
+    .status-fail {{
+      color: #ab2e2e;
+      background: #fae8e5;
+    }}
+    .fence-chip {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .fence-ok {{
+      color: #1f7a4d;
+      background: #e5f5eb;
+    }}
+    .fence-fail {{
+      color: #ab2e2e;
+      background: #fae8e5;
+    }}
+    .snippet-box {{
+      margin: 0;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #eadfcd;
+      background: #fbf7ef;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.92rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      max-width: 100%;
+    }}
+    .note-text {{
+      white-space: normal;
+      line-height: 1.35;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>{escape(payload.get("title", "Labs Command And Output Fencing Comparison"))}</h1>
+      {generated_at_html}
+      {provenance_html}
+      <p class="muted">Commands must use <code>```shell</code>, outputs must use <code>```terminaloutput</code>, and every command must be followed by its output in the same section.</p>
+      <ul>{summary_items}</ul>
+    </section>
+    {sections_html}
+  </main>
+</body>
+</html>
+"""
+
+
+def render_fencing_lab_section(section: dict[str, Any]) -> str:
+    checks = section.get("checks", [])
+    status_html = "<p class='ok'>No command/output fencing issues detected.</p>" if not checks else ""
+    tables = render_fencing_issue_table(
+        "Command and Output fencing validation",
+        ["Status", "Line", "Section", "Command fence", "Command snippet", "Output fence", "Output snippet", "Notes"],
+        [
+            [
+                render_fencing_status_chip(item["status"]),
+                item["line"],
+                item["heading"],
+                render_fencing_fence_chip(item["commandFence"], expected="shell", allow_missing=False),
+                render_fencing_snippet(item["command"]),
+                render_fencing_fence_chip(item["outputFence"], expected=TERMINAL_OUTPUT_FENCE_LANGUAGE, allow_missing=True),
+                render_fencing_snippet(item["output"]),
+                render_fencing_notes(item["notes"], item["status"]),
+            ]
+            for item in checks
+        ],
+        raw_html_columns={0, 3, 4, 5, 6, 7},
+    )
+    return (
+        "<section class='panel'>"
+        f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
+        f"{status_html}{tables}"
+        "</section>"
+    )
+
+
+def render_fencing_issue_table(title: str, headers: list[str], rows: list[list[str]], raw_html_columns: set[int] | None = None) -> str:
+    if not rows:
+        return ""
+    raw_html_columns = raw_html_columns or set()
+    header_html = "".join(f"<th>{escape(header)}</th>" for header in headers)
+    rows_html = "".join(
+        "<tr>" + "".join(
+            f"<td>{cell if index in raw_html_columns else render_fencing_cell(cell)}</td>"
+            for index, cell in enumerate(row)
+        ) + "</tr>"
+        for row in rows
+    )
+    return f"<h3>{escape(title)}</h3><table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>"
+
+
+def render_fencing_cell(value: str) -> str:
+    return escape(value)
+
+
+def render_fencing_status_chip(status: str) -> str:
+    normalized = status.strip().lower()
+    css_class = "status-pass" if normalized == "pass" else "status-fail"
+    return f"<span class='status-chip {css_class}'>{escape(status.title())}</span>"
+
+
+def render_fencing_fence_chip(fence: str, *, expected: str, allow_missing: bool) -> str:
+    normalized = fence.strip()
+    is_match = normalized == expected
+    if allow_missing and normalized == "(missing)":
+        is_match = False
+    css_class = "fence-ok" if is_match else "fence-fail"
+    return f"<span class='fence-chip {css_class}'>{escape(normalized)}</span>"
+
+
+def render_fencing_snippet(snippet: str) -> str:
+    return f"<div class='snippet-box'>{escape(snippet)}</div>"
+
+
+def render_fencing_notes(notes: str, status: str) -> str:
+    css_class = "ok" if status.strip().lower() == "pass" else "warn"
+    return f"<div class='note-text {css_class}'>{escape(notes)}</div>"
+
+
 def render_test_count_lab_section(section: dict[str, Any]) -> str:
     rows_html = "".join(
         "<tr>"
@@ -2260,6 +2638,8 @@ def render_matrix_trigger_attrs(tooltip: dict[str, Any], label: str) -> str:
         "title": label,
         "summary": tooltip.get("summary", []),
         "details": tooltip.get("details"),
+        "fullReportHref": tooltip.get("fullReportHref"),
+        "fullReportLabel": tooltip.get("fullReportLabel"),
     }
     return f" data-tooltip-json='{escape(json.dumps(payload, ensure_ascii=False))}'"
 
@@ -2694,6 +3074,52 @@ def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def build_command_output_fencing_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        os_doc = lab["readme"]["osDocumentation"]
+        command_fence_violations = os_doc.get("commandFenceViolations", [])
+        output_fence_violations = os_doc.get("outputFenceViolations", [])
+        missing_output_pairs = os_doc.get("missingOutputPairs", [])
+
+        lab_sections: list[dict[str, Any] | None] = [
+            build_snippet_table_section(
+                "Non-shell command fences",
+                command_fence_violations,
+                ["Line", "Section", "Command fence", "Command snippet"],
+                lambda item: [item["line"], item["heading"], f"```{item['commandFence']}```", item["command"]],
+            ),
+            build_snippet_table_section(
+                "Non-terminaloutput output fences",
+                output_fence_violations,
+                ["Line", "Section", "Command snippet", "Output fence", "Output snippet"],
+                lambda item: [item["line"], item["heading"], item["command"], f"```{item['outputFence']}```", item["output"]],
+            ),
+            build_snippet_table_section(
+                "Missing same-section command/output pairing",
+                missing_output_pairs,
+                ["Line", "Section", "Command fence", "Command snippet", "Expected output"],
+                lambda item: [item["line"], item["heading"], f"```{item['commandFence']}```", item["command"], item["output"]],
+            ),
+        ]
+        issues_present = bool(command_fence_violations or output_fence_violations or missing_output_pairs)
+        add_action_section(
+            lab_sections,  # type: ignore[arg-type]
+            issues_present,
+            [
+                "Use ```shell``` for every documented command block.",
+                "Place a ```terminaloutput``` block immediately after each command in the same section.",
+            ],
+        )
+        add_lab_section(sections, lab, lab_sections)
+    return {
+        "type": "sections",
+        "title": "Command and Output fencing validation",
+        "note": "Commands must use ```shell```, outputs must use ```terminaloutput```, and each command must be followed by its output in the same section.",
+        "sections": sections,
+    }
+
+
 def build_command_output_presence_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
     sections = []
     for lab in labs:
@@ -2735,6 +3161,22 @@ def build_terminal_output_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
         "title": "terminaloutput fence coverage",
         "note": "Use ```terminaloutput``` for console output so commands and output stay visually distinct.",
         "sections": sections,
+    }
+
+
+def build_snippet_table_section(
+    title: str,
+    items: list[dict[str, str]],
+    headers: list[str],
+    row_builder: Any,
+) -> dict[str, Any] | None:
+    if not items:
+        return None
+    return {
+        "type": "table",
+        "title": title,
+        "headers": headers,
+        "rows": [row_builder(item) for item in items],
     }
 
 
