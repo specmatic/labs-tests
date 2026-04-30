@@ -238,12 +238,10 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     report_snapshot = load_lab_report_snapshot(spec.name)
     readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
     readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
-    readme_pcmo = readme_doc.metadata.get("passcount_match_only", False)
     readme_emtc = readme_doc.metadata.get("expected_missing_test_counts", False)
     readme_emtc_reason = readme_doc.metadata.get("expected_missing_test_counts_reason", "")
     effective_efm = spec.expected_failure_mismatch or bool(readme_efm)
     effective_efm_reason = spec.expected_failure_mismatch_reason or readme_efm_reason
-    effective_passcount_match_only = spec.passcount_match_only or bool(readme_pcmo)
     effective_emtc = spec.expected_missing_test_counts or bool(readme_emtc)
     effective_emtc_reason = spec.expected_missing_test_counts_reason or readme_emtc_reason
     test_count_consistency = build_test_count_consistency_profile(
@@ -254,7 +252,6 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         expected_missing_reason=effective_emtc_reason,
         expected_failure_mismatch=effective_efm,
         expected_failure_mismatch_reason=effective_efm_reason,
-        passcount_match_only=effective_passcount_match_only,
     )
     override = get_lab_readme_override(spec.name)
     required_h2 = list(expected_h2_titles_for_document(readme_doc) or shared_h2_titles())
@@ -1815,17 +1812,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-count.na {{
       color: #5f6b74;
       font-style: italic;
-    }}
-    .matrix-tooltip-count.partial {{
-      color: #92400e;
-      font-weight: 600;
-      background: #fef9c3;
-      border-radius: 0.35rem;
-      padding: 0.2rem 0.35rem;
-    }}
-    .partial-match-status {{
-      color: #92400e;
-      font-weight: 600;
     }}
     .matrix .matrix-lab {{
       min-width: 120px;
@@ -3612,7 +3598,6 @@ def build_test_count_consistency_profile(
     expected_missing_reason: str = "",
     expected_failure_mismatch: bool = False,
     expected_failure_mismatch_reason: str = "",
-    passcount_match_only: bool = False,
 ) -> dict[str, Any]:
     if not snapshot:
         return {
@@ -3622,7 +3607,6 @@ def build_test_count_consistency_profile(
             "expectedMissingReason": expected_missing_reason,
             "expectedFailureMismatch": expected_failure_mismatch,
             "expectedFailureMismatchReason": expected_failure_mismatch_reason,
-            "passcountMatchOnly": passcount_match_only,
             "phases": [],
         }
 
@@ -3663,9 +3647,7 @@ def build_test_count_consistency_profile(
         console_counts = parse_tests_run_counts(console_summary) if expected_sources["console_summary"] else None
         ctrf_counts = ctrf_summary if expected_sources["ctrf"] else None
         html_counts = html_summary if expected_sources["html"] else None
-        if passcount_match_only:
-            consistency_counts = [readme_counts, console_counts, ctrf_counts, html_counts]
-        elif expected_failure_mismatch:
+        if expected_failure_mismatch:
             consistency_counts = [readme_counts, console_counts]
         else:
             consistency_counts = [readme_counts, console_counts, ctrf_counts, html_counts]
@@ -3674,25 +3656,17 @@ def build_test_count_consistency_profile(
         comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
-        totals_match = comparable and len({c["tests"] for c in present_counts}) == 1
-        passed_match = comparable and len({c["passed"] for c in present_counts}) == 1
+        status = (
+            "match"
+            if consistent
+            else "mismatch"
+            if comparable
+            else "expected-not-available"
+            if expected_missing or not validates_counts or expected_source_count < 2
+            else "not-available"
+        )
 
-        if passcount_match_only and comparable and not consistent and passed_match:
-            status = "partial-match"
-        elif expected_failure_mismatch and comparable and not consistent and totals_match:
-            status = "partial-match"
-        else:
-            status = (
-                "match"
-                if consistent
-                else "mismatch"
-                if comparable
-                else "expected-not-available"
-                if expected_missing or not validates_counts or expected_source_count < 2
-                else "not-available"
-            )
-
-        if comparable and status not in ("partial-match",):
+        if comparable:
             all_consistent = all_consistent and consistent
         comparisons.append(
             {
@@ -3714,7 +3688,6 @@ def build_test_count_consistency_profile(
         "expectedMissingReason": expected_missing_reason,
         "expectedFailureMismatch": expected_failure_mismatch,
         "expectedFailureMismatchReason": expected_failure_mismatch_reason,
-        "passcountMatchOnly": passcount_match_only,
         "phases": comparisons,
     }
 
@@ -3950,15 +3923,7 @@ def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, A
     reference = choose_reference_counts(comparison_item)
     text = count_cell_text(counts)
     count_legend = "T = Total\nP = Passed\nF = Failed\nS = Skipped\nO = Other"
-    phase_status = comparison_item.get("status", "")
     if counts is None:
-        if phase_status == "partial-match" and not comparison_item.get("expectedSources", {}).get("ctrf", True):
-            return {
-                "text": "skipped",
-                "className": "matrix-tooltip-count ok",
-                "title": "Count data for this source was skipped (expected_failure_mismatch is enabled).",
-                "ariaLabel": "Count data for this source was skipped.",
-            }
         return {
             "text": text,
             "className": "matrix-tooltip-count na",
@@ -3971,13 +3936,6 @@ def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, A
             "className": "matrix-tooltip-count ok",
             "title": count_legend,
             "ariaLabel": count_legend,
-        }
-    if phase_status == "partial-match":
-        return {
-            "text": text,
-            "className": "matrix-tooltip-count partial",
-            "title": f"This count block differs from the reference but is allowed under partial-match rules.\n\n{count_legend}",
-            "ariaLabel": f"This count block differs from the reference but is allowed under partial-match rules. {count_legend}",
         }
     return {
         "text": text,
@@ -4067,14 +4025,10 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
         expected_missing_reason = lab["testCountConsistency"].get("expectedMissingReason", "")
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
-        partial_match_phases = [item["phase"] for item in comparisons if item.get("status") == "partial-match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
         expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-available"]
         if mismatch_phases:
             verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
-        elif partial_match_phases:
-            reason = lab["testCountConsistency"].get("expectedFailureMismatchReason") or "Pass/fail counts differ due to known limitations."
-            verdict_items.append(f"{lab['name']}: total test count matches, pass/fail counts differ in {', '.join(partial_match_phases)}. {reason}")
         elif matched_phases:
             verdict_items.append(f"{lab['name']}: matching counts where data is available.")
         elif expected_unavailable_phases:
@@ -4179,8 +4133,6 @@ def format_count_status(status: str) -> str:
         return "Mismatch"
     if status == "expected-not-available":
         return "Expected"
-    if status == "partial-match":
-        return "Partial Mismatch"
     return "Not available"
 
 

@@ -127,7 +127,6 @@ class LabSpec:
     expected_missing_test_counts_reason: str = ""
     expected_failure_mismatch: bool = False
     expected_failure_mismatch_reason: str = ""
-    passcount_match_only: bool = False
 
 
 @dataclass
