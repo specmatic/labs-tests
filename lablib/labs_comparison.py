@@ -43,6 +43,8 @@ OUTPUT_DIR = ROOT / "output"
 COMPARISON_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.json"
 COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.html"
+OTHER_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.json"
+OTHER_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -59,6 +61,15 @@ MCP_SUMMARY_RE = re.compile(
 TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
+CORE_VALIDATION_LABELS = {
+    "README starts with a top-level H1 title",
+    "README H2 order matches the lab's source-of-truth structure",
+    "README includes a console output snippet after each documented command",
+    "README console output snippets use ```terminaloutput``` fenced blocks",
+    "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
+    "Generated artifacts include ctrf-report.json",
+    "Generated artifacts include the sibling Specmatic HTML report",
+}
 IGNORABLE_MESSAGES = ("(none)",)
 
 
@@ -122,17 +133,24 @@ def generate_labs_comparison(
     if selected:
         run_files = [path for path in run_files if path.parent.name in selected]
     labs = [build_lab_profile(path.parent) for path in run_files]
+    validation_rows = build_validation_rows(labs)
     payload = {
+        "title": "Labs Comparison",
         "generatedAt": generated_at or datetime.now().astimezone().isoformat(),
         "provenance": detect_report_provenance(),
         "summary": build_summary(labs),
         "commonalities": build_commonalities(labs),
         "differences": build_differences(labs),
-        "validationMatrix": build_validation_matrix(labs),
+        "validationMatrix": build_validation_matrix(labs, validation_rows, mode="core"),
         "labs": labs,
         "navigation": {
             "consolidatedReportHref": "consolidated-report.html",
         },
+    }
+    other_payload = {
+        **payload,
+        "title": "Labs Other Comparison",
+        "validationMatrix": build_validation_matrix(labs, validation_rows, mode="other"),
     }
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
@@ -140,12 +158,14 @@ def generate_labs_comparison(
             legacy_path.unlink()
     COMPARISON_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
+    OTHER_COMPARISON_JSON_PATH.write_text(json.dumps(other_payload, indent=2) + "\n", encoding="utf-8")
+    OTHER_COMPARISON_HTML_PATH.write_text(render_comparison_html(other_payload), encoding="utf-8")
     return payload
 
 
 def discover_report_lab_names(root: Path | None = None) -> list[str]:
     repo_root = root or ROOT
-    snapshot_dir = repo_root / "output" / "labs"
+    snapshot_dir = repo_root / "output" / "labs-output"
     discovered = (
         sorted(
             path.name.removesuffix("-output")
@@ -832,7 +852,7 @@ def check_expected_failure(lab: dict[str, Any], artifact_label: str, report_key:
         return (not any_expected) or artifact_exists
 
 
-def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
+def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     shared_h2 = tuple(labs[0]["readme"]["requiredH2"]) if labs else ()
     common_required_h2 = list(shared_h2)
@@ -1100,7 +1120,22 @@ def build_validation_matrix(labs: list[dict[str, Any]]) -> dict[str, Any]:
             "cells": [not lab["warnings"]["additionalArtifacts"] for lab in labs],
         }
     ]
-    rows = [add_row_status_prefix(index, row) for index, row in enumerate(row_definitions, start=1)]
+    return row_definitions
+
+
+def build_validation_matrix(
+    labs: list[dict[str, Any]],
+    row_definitions: list[dict[str, Any]] | None = None,
+    *,
+    mode: str = "core",
+) -> dict[str, Any]:
+    columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
+    definitions = list(row_definitions or build_validation_rows(labs))
+    if mode == "core":
+        definitions = [row for row in definitions if row["label"] in CORE_VALIDATION_LABELS]
+    elif mode == "other":
+        definitions = [row for row in definitions if row["label"] not in CORE_VALIDATION_LABELS]
+    rows = [add_row_status_prefix(index, row) for index, row in enumerate(definitions, start=1)]
     return {"columns": columns, "rows": rows}
 
 
@@ -1113,6 +1148,7 @@ def add_row_status_prefix(index: int, row: dict[str, Any]) -> dict[str, Any]:
 
 
 def render_comparison_html(payload: dict[str, Any]) -> str:
+    page_title = escape(payload.get("title", "Labs Comparison"))
     summary_rows = "".join(
         f"<tr><th>{escape(item['label'])}</th><td>{escape(format_value(item['value']))}</td></tr>"
         for item in payload.get("summary", [])
@@ -1610,7 +1646,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
 <body>
   <main>
     <section class="panel">
-      <h1>Labs Similarities And Differences</h1>
+      <h1>{page_title}</h1>
       <p class="muted">{escape(format_report_datetime(payload['generatedAt']))}</p>
       {provenance_html}
       <p class="nav-link"><a href="{consolidated_href}">Back to consolidated report</a></p>

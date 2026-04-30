@@ -28,7 +28,8 @@ from lablib.workspace_setup import (
 
 
 OUTPUT_DIR = ROOT / "output"
-LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
+LABS_OUTPUT_DIR = OUTPUT_DIR / "labs-output"
+LEGACY_LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
 CONSOLIDATED_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 RUN_METADATA_PATH = OUTPUT_DIR / "workflow-run-details.txt"
 LATEST_OUTPUT_LINK = OUTPUT_DIR / "latest"
@@ -256,6 +257,7 @@ def running_in_github_actions() -> bool:
 def generated_output_paths() -> list[Path]:
     paths = [
         LABS_OUTPUT_DIR,
+        LEGACY_LABS_OUTPUT_DIR,
         CONSOLIDATED_OUTPUT_DIR,
         RUN_METADATA_PATH,
         LEGACY_CONSOLIDATED_JSON_PATH,
@@ -270,7 +272,15 @@ def generated_output_paths() -> list[Path]:
         for path in OUTPUT_DIR.iterdir()
         if path.is_dir() and path.name.endswith("-output")
     )
-    return paths
+
+    deduplicated_paths: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduplicated_paths.append(path)
+    return deduplicated_paths
 
 
 def has_generated_output() -> bool:
@@ -380,6 +390,7 @@ def clean_output_tree() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for path in (
         LABS_OUTPUT_DIR,
+        LEGACY_LABS_OUTPUT_DIR,
         CONSOLIDATED_OUTPUT_DIR,
         LEGACY_CONSOLIDATED_JSON_PATH,
         LEGACY_CONSOLIDATED_HTML_PATH,

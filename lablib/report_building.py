@@ -11,7 +11,7 @@ from lablib.provenance import detect_report_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
-LABS_OUTPUT_DIR = OUTPUT_DIR / "labs"
+LABS_OUTPUT_DIR = OUTPUT_DIR / "labs-output"
 CONSOLIDATED_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 
 
