@@ -15,9 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
+    env:
+      SPECMATIC_LICENSE_KEY: ${{ secrets.SPECMATIC_LICENSE_KEY }}
+      
     steps:
       - name: Check out labs-tests
         uses: actions/checkout@v6
+
+      - name: Set up Specmatic License key
+        run: |
+          echo "Write specmatic license key to file"
+          mkdir -p ~/.specmatic
+          echo "${{ secrets.SPECMATIC_LICENSE_KEY }}" > ~/.specmatic/specmatic-license.txt
 
       - name: Set up Python
         uses: actions/setup-python@v6
