@@ -38,7 +38,7 @@ jobs:
         run: |
           set +e
           start_time=$(date +%s)
-          python3 -u run_all.py --refresh-labs --force &
+          python3 -u run_all.py --refresh-labs --force --branch dynamic-labs &
           run_pid=$!
 
           while kill -0 "$run_pid" 2>/dev/null; do
