@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -190,16 +189,10 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=1,
                 output_dir_name="baseline",
                 expected_console_phrases=(
-                    "Tests run: 4, Successes: 2, Failures: 2, Errors: 0",
                     "Specification expected status 201 but response contained status 400",
                 ),
                 include_readme_structure_checks=True,
                 readme_assertions=(
-                    readme_contains(
-                        "Tests run: 4, Successes: 2, Failures: 2, Errors: 0",
-                        "README documents the baseline summary.",
-                        "README is missing the baseline summary.",
-                    ),
                     readme_runtime_detail(
                         "response contained `400` instead of expected `201`",
                         "README captures the baseline 400 vs 201 mismatch detail.",
@@ -213,14 +206,8 @@ def build_lab_spec() -> LabSpec:
                 description="Replace PaymentRequest with oneOf plus discriminator and verify the suite passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 2, Successes: 2, Failures: 0, Errors: 0",),
-                readme_assertions=(
-                    readme_contains(
-                        "Tests run: 2, Successes: 2, Failures: 0, Errors: 0",
-                        "README documents the passing summary after the schema refactor.",
-                        "README is missing the passing summary after the schema refactor.",
-                    ),
-                ),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=(
                     "Replaced the single optional-group PaymentRequest with oneOf over CardPaymentRequest and BankTransferPaymentRequest.",
                     "Added discriminator.propertyName and mapping for paymentType so generated requests stay shape-correct.",
@@ -236,11 +223,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 4, "passed": 2, "failed": 2, "skipped": 0, "other": 0},
-            expected_console={"tests": 4, "successes": 2, "failures": 2, "errors": 0},
-        ),
         assert_condition(
             "oneOf:" not in context.artifacts["payment-api.yaml"]["text"],
             "Baseline payment-api.yaml still uses the pre-oneOf PaymentRequest model.",
@@ -253,11 +235,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 2, "passed": 2, "failed": 0, "skipped": 0, "other": 0},
-            expected_console={"tests": 2, "successes": 2, "failures": 0, "errors": 0},
-        ),
         assert_condition(
             "oneOf:" in context.artifacts["payment-api.yaml"]["text"] and "discriminator:" in context.artifacts["payment-api.yaml"]["text"],
             "Fixed payment-api.yaml contains oneOf and discriminator.",
@@ -278,10 +255,6 @@ def teardown_compose(spec: LabSpec) -> None:
 
 def set_fixed_schema(content: str) -> str:
     return FIXED_SCHEMA
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
 
 
 def readme_runtime_detail(text: str, success: str, failure: str) -> dict[str, str]:

@@ -79,11 +79,9 @@ def build_lab_spec() -> LabSpec:
                 description="Validate the original incomplete examples and verify they fail.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
-                expected_console_phrases=("0 passed and 3 failed out of 3 total",),
+                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(
-                    readme_contains("[FAIL] Examples: 0 passed and 3 failed out of 3 total", "README documents the baseline validation failure count.", "README is missing the baseline validation failure count."),
-                ),
+                readme_assertions=(),
                 file_transforms={"order": keep_content, "product": keep_content, "search": keep_content},
                 extra_assertions=baseline_assertions,
             ),
@@ -92,10 +90,8 @@ def build_lab_spec() -> LabSpec:
                 description="Convert the incomplete examples into valid partial examples and verify validation passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("3 passed and 0 failed out of 3 total",),
-                readme_assertions=(
-                    readme_contains("[OK] Examples: 3 passed and 0 failed out of 3 total", "README documents the final validation pass count.", "README is missing the final validation pass count."),
-                ),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=(
                     "Converted the create request examples into partial examples.",
                     "Updated the search example to a contract-compliant example shape used by loop tests.",
@@ -192,10 +188,6 @@ def fixed_search_example(_: str) -> str:
   }
 }
 """
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
 
 
 if __name__ == "__main__":

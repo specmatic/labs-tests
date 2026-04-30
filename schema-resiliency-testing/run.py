@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_coverage_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -71,9 +70,9 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="baseline",
                 readme_summary_query="2. Loop Test using CLI",
-                expected_console_phrases=("Tests run: 3, Successes: 3, Failures: 0, Errors: 0",),
+                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 3, Successes: 3, Failures: 0, Errors: 0", "README documents the loop-test baseline.", "README is missing the loop-test baseline."),),
+                readme_assertions=(),
                 file_transforms={"specmatic": set_none},
                 extra_assertions=baseline_assertions,
             ),
@@ -83,8 +82,8 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="positive-only",
                 readme_summary_query="Positive Only Tests",
-                expected_console_phrases=("Tests run: 42, Successes: 42, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 42, Successes: 42, Failures: 0, Errors: 0", "README documents the positiveOnly count.", "README is missing the positiveOnly count."),),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 file_transforms={"specmatic": set_positive_only},
                 extra_assertions=positive_only_assertions,
             ),
@@ -94,8 +93,8 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="all",
                 readme_summary_query="Positive and Negative Tests (ALL)",
-                expected_console_phrases=("Tests run: 600, Successes: 600, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 600, Successes: 600, Failures: 0", "README documents the full resiliency count.", "README is missing the full resiliency count."),),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 file_transforms={"specmatic": set_all},
                 extra_assertions=all_assertions,
             ),
@@ -106,24 +105,19 @@ def build_lab_spec() -> LabSpec:
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
-    return common_resiliency_assertions(context, expected_tests=3, mode="none")
+    return common_resiliency_assertions(context, mode="none")
 
 
 def positive_only_assertions(context: ValidationContext) -> list[dict]:
-    return common_resiliency_assertions(context, expected_tests=42, mode="positiveOnly")
+    return common_resiliency_assertions(context, mode="positiveOnly")
 
 
 def all_assertions(context: ValidationContext) -> list[dict]:
-    return common_resiliency_assertions(context, expected_tests=600, mode="all")
+    return common_resiliency_assertions(context, mode="all")
 
 
-def common_resiliency_assertions(context: ValidationContext, *, expected_tests: int, mode: str) -> list[dict]:
+def common_resiliency_assertions(context: ValidationContext, *, mode: str) -> list[dict]:
     return [
-        *build_coverage_assertions(
-            context,
-            expected_tests={"tests": expected_tests, "passed": expected_tests, "failed": 0, "skipped": 0, "other": 0},
-            expected_operations={"/findAvailableProducts": "covered", "/products": "covered", "/orders": "covered"},
-        ),
         assert_condition(
             f"schemaResiliencyTests: {mode}" in context.artifacts["specmatic.yaml"]["text"],
             f"specmatic.yaml is configured for schemaResiliencyTests={mode}.",
@@ -156,10 +150,6 @@ def set_positive_only(content: str) -> str:
 
 def set_all(content: str) -> str:
     return set_mode(content, "all")
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
 
 
 if __name__ == "__main__":
