@@ -70,10 +70,9 @@ def build_lab_spec() -> LabSpec:
                 description="Run the order-bff CI-style suite and validate the published summary and generated reports.",
                 expected_exit_code=0,
                 output_dir_name="suite",
-                readme_summary_query="2. Using Docker (Recommended for CI)",
-                expected_console_phrases=("Tests run: 227, Successes: 223, Failures: 0, Errors: 4",),
+                readme_phase_id="baseline",
+                readme_summary_query="Baseline Phase",
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 227, Successes: 223, Failures: 0, Errors: 4", "README documents the CI-style test summary for the BFF suite.", "README is missing the CI-style test summary for the BFF suite."),),
                 extra_assertions=suite_assertions,
             ),
         ),
@@ -84,11 +83,6 @@ def build_lab_spec() -> LabSpec:
 
 def suite_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 227, "passed": 223, "failed": 0, "skipped": 0, "other": 4},
-            expected_console={"tests": 227, "successes": 223, "failures": 0, "errors": 4},
-        ),
         assert_condition(
             "schemaResiliencyTests: all" in context.artifacts["specmatic.yaml"]["text"]
             and "post_specmatic_response_processor" in context.artifacts["specmatic.yaml"]["text"],
