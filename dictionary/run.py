@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_coverage_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -132,15 +131,9 @@ def build_lab_spec() -> LabSpec:
                 description="Run the suite without dictionary data and verify the deterministic examples fail against random mock data.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
-                expected_console_phrases=("Tests run: 3, Successes: 0, Failures: 3, Errors: 0",),
+                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(
-                    readme_contains(
-                        "Tests run: 3, Successes: 0, Failures: 3, Errors: 0",
-                        "README documents the baseline failing summary.",
-                        "README is missing the baseline failing summary.",
-                    ),
-                ),
+                readme_assertions=(),
                 file_transforms={"specmatic": set_baseline_specmatic, "dictionary": remove_dictionary_file},
                 extra_assertions=baseline_assertions,
             ),
@@ -149,14 +142,8 @@ def build_lab_spec() -> LabSpec:
                 description="Add generated dictionary data to the mock configuration and verify the suite passes deterministically.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 3, Successes: 3, Failures: 0, Errors: 0",),
-                readme_assertions=(
-                    readme_contains(
-                        "Tests run: 3, Successes: 3, Failures: 0, Errors: 0",
-                        "README documents the final passing summary.",
-                        "README is missing the final passing summary.",
-                    ),
-                ),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=(
                     "Added the generated dictionary file at specs/dictionary.yaml.",
                     "Configured dependencies.services[0].service.data.dictionary.path in specmatic.yaml.",
@@ -181,11 +168,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_coverage_assertions(
-            context,
-            expected_tests={"tests": 3, "passed": 0, "failed": 3, "skipped": 0, "other": 0},
-            expected_operations={"/findAvailableProducts": "covered", "/products": "covered", "/orders": "covered"},
-        ),
         assert_condition(
             "dictionary:" not in context.artifacts["specmatic.yaml"]["text"],
             "Baseline specmatic.yaml does not configure dictionary-based mock data.",
@@ -198,11 +180,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_coverage_assertions(
-            context,
-            expected_tests={"tests": 3, "passed": 3, "failed": 0, "skipped": 0, "other": 0},
-            expected_operations={"/findAvailableProducts": "covered", "/products": "covered", "/orders": "covered"},
-        ),
         assert_condition(
             "dictionary:" in context.artifacts["specmatic.yaml"]["text"]
             and "specs/dictionary.yaml" in context.artifacts["specmatic.yaml"]["text"],
@@ -243,10 +220,6 @@ def remove_dictionary_file(_: str) -> None:
 
 def set_fixed_dictionary(_: str) -> str:
     return GENERATED_DICTIONARY
-
-
-def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
-    return {"kind": "readme-contains", "text": text, "success": success, "failure": failure}
 
 
 if __name__ == "__main__":

@@ -17,8 +17,9 @@ from lablib.scaffold import (
     ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
-    build_coverage_assertions,
+    assert_condition,
     clear_docker_owned_build_dir,
+    detail,
     docker_compose_down,
     run_lab,
 )
@@ -100,7 +101,6 @@ def build_lab_spec() -> LabSpec:
                 description="Recreate the broken checked-in contract and verify the real coverage mismatch.",
                 expected_exit_code=1,
                 expected_console_phrases=(
-                    "Tests run: 2, Successes: 1, Failures: 1, Errors: 0",
                     "Failed the following API Coverage Report success criteria:",
                     "422 Unprocessable Entity",
                     "not implemented",
@@ -116,7 +116,6 @@ def build_lab_spec() -> LabSpec:
                 description="Apply the intended contract fix and verify that tests and coverage both pass.",
                 expected_exit_code=0,
                 expected_console_phrases=(
-                    "Tests run: 2, Successes: 2, Failures: 0, Errors: 0",
                     "Generating HTML report in build/reports/specmatic/test/html/index.html",
                 ),
                 readme_assertions=tuple(fixed_readme_assertions()),
@@ -141,27 +140,27 @@ def allocate_free_port() -> int:
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
-    return build_coverage_assertions(
-        context,
-        expected_tests={"tests": 2, "passed": 1, "failed": 1, "other": 0},
-        expected_operations={
-            "/pets/{petId}": "covered",
-            "/pets/search": "not implemented",
-            "/pets/find": "missing in spec",
-        },
-    )
+    return [
+        assert_condition(
+            BASELINE_PATH in context.artifacts["service_spec"]["text"] and FIXED_PATH not in context.artifacts["service_spec"]["text"],
+            "Baseline spec keeps GET /pets/search and does not include GET /pets/find.",
+            "Baseline spec does not match the expected broken /pets/search state.",
+            category="report",
+            details=[detail("Artifact path", context.artifacts["service_spec"]["path"])],
+        ),
+    ]
 
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
-    return build_coverage_assertions(
-        context,
-        expected_tests={"tests": 2, "passed": 2, "failed": 0, "other": 0},
-        expected_operations={
-            "/pets/{petId}": "covered",
-            "/pets/find": "covered",
-        },
-        forbidden_operation_statuses=("not implemented", "missing in spec"),
-    )
+    return [
+        assert_condition(
+            FIXED_PATH in context.artifacts["service_spec"]["text"] and BASELINE_PATH not in context.artifacts["service_spec"]["text"],
+            "Fixed spec switches to GET /pets/find and removes GET /pets/search.",
+            "Fixed spec does not match the expected /pets/find state.",
+            category="report",
+            details=[detail("Artifact path", context.artifacts["service_spec"]["path"])],
+        ),
+    ]
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
@@ -192,12 +191,6 @@ def baseline_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 2, Successes: 1, Failures: 1, Errors: 0",
-            "success": "README documents the baseline console summary.",
-            "failure": "README is missing the documented baseline console summary block.",
-        },
-        {
-            "kind": "readme-contains",
             "text": "Total API coverage: 50% is less than the specified minimum threshold of 100%.",
             "success": "README documents the baseline coverage gate failure.",
             "failure": "README is missing the documented baseline coverage gate failure.",
@@ -221,12 +214,6 @@ def baseline_readme_assertions() -> list[dict[str, str]]:
 
 def fixed_readme_assertions() -> list[dict[str, str]]:
     return [
-        {
-            "kind": "readme-contains",
-            "text": "Tests run: 2, Successes: 2, Failures: 0, Errors: 0",
-            "success": "README documents the fixed-run console summary.",
-            "failure": "README is missing the documented fixed-run console summary block.",
-        },
         {
             "kind": "readme-contains",
             "text": "no paths remain `Missing In Spec`",

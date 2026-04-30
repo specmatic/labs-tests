@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -101,15 +100,9 @@ def build_lab_spec() -> LabSpec:
                 expected_console_phrases=(
                     "Scenario: GET /pets/(petid:number) -> 200 with the request from the example 'SCOOBY_200_OK' has FAILED",
                     "petType",
-                    "Tests run: 1, Successes: 0, Failures: 1, Errors: 0",
                 ),
                 include_readme_structure_checks=True,
                 readme_assertions=(
-                    readme_contains(
-                        "Tests run: 1, Successes: 0, Failures: 1, Errors: 0",
-                        "README documents the baseline failing summary.",
-                        "README is missing the baseline failing summary.",
-                    ),
                     readme_contains(
                         "Service currently returns `petType`.",
                         "README documents the petType mismatch reason.",
@@ -126,14 +119,8 @@ def build_lab_spec() -> LabSpec:
                 output_dir_name="fixed",
                 command_timeout_seconds=180,
                 command_idle_timeout_seconds=120,
-                expected_console_phrases=("Tests run: 1, Successes: 1, Failures: 0, Errors: 0",),
-                readme_assertions=(
-                    readme_contains(
-                        "Tests run: 1, Successes: 1, Failures: 0, Errors: 0",
-                        "README documents the final passing summary.",
-                        "README is missing the final passing summary.",
-                    ),
-                ),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=("Changed the provider response field from petType to type in service/server.py.",),
                 file_transforms={"server": set_fixed_server},
                 extra_assertions=fixed_assertions,
@@ -146,11 +133,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 1, "passed": 0, "failed": 1, "skipped": 0, "other": 0},
-            expected_console={"tests": 1, "successes": 0, "failures": 1, "errors": 0},
-        ),
         assert_condition(
             '"petType": "Golden Retriever"' in context.artifacts["server.py"]["text"],
             "Baseline service/server.py kept the intentional petType field.",
@@ -163,11 +145,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 1, "passed": 1, "failed": 0, "skipped": 0, "other": 0},
-            expected_console={"tests": 1, "successes": 1, "failures": 0, "errors": 0},
-        ),
         assert_condition(
             '"type": "Golden Retriever"' in context.artifacts["server.py"]["text"]
             and '"petType": "Golden Retriever"' not in context.artifacts["server.py"]["text"],

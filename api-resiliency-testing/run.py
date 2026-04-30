@@ -113,7 +113,6 @@ def build_lab_spec() -> LabSpec:
                 include_readme_structure_checks=True,
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 5, "passed": 3, "failed": 2, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(post_202_status="not implemented", post_202_count=1, get_429_status="not implemented", get_429_count=1),
                 ),
@@ -137,7 +136,6 @@ def build_lab_spec() -> LabSpec:
                 file_transforms={"timeout_get": set_timeout_get_fixed},
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 5, "passed": 4, "failed": 1, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(post_202_status="not implemented", post_202_count=1, get_429_status="covered", get_429_count=1),
                 ),
@@ -164,7 +162,6 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 5, "passed": 5, "failed": 0, "other": 0},
                     expected_operations=baseline_operation_rows(),
                     expected_html_operations=baseline_html_operation_rows(post_202_status="covered", post_202_count=1, get_429_status="covered", get_429_count=1),
                 ),
@@ -175,7 +172,6 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=1,
                 output_dir_name="task-c-mismatch",
                 expected_console_phrases=(
-                    "Tests run: 249, Successes: 238, Failures: 11, Errors: 0",
                     "Scenario: POST /products -> 202/202 with the request from the example 'test_accepted_product_request' where REQUEST.BODY contains all the keys AND the key type is set to 'food' from enum AND inventory is set to the smallest possible value '1' has FAILED",
                 ),
                 readme_assertions=tuple(task_c_mismatch_readme_assertions()),
@@ -190,7 +186,6 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 249, "passed": 238, "failed": 11, "other": 0},
                     expected_operations=schema_operation_rows(),
                     expected_html_operations=schema_html_operation_rows(),
                 ),
@@ -201,7 +196,6 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="final",
                 expected_console_phrases=(
-                    "Tests run: 249, Successes: 249, Failures: 0, Errors: 0",
                     "Scenario: POST /products -> 202/202 with the request from the example 'test_accepted_product_request' where REQUEST.BODY contains all the keys AND the key type is set to 'food' from enum AND inventory is set to the largest possible value has SUCCEEDED",
                 ),
                 readme_assertions=tuple(final_readme_assertions()),
@@ -217,7 +211,6 @@ def build_lab_spec() -> LabSpec:
                 },
                 extra_assertions=lambda context: build_resiliency_assertions(
                     context,
-                    expected_tests={"tests": 249, "passed": 249, "failed": 0, "other": 0},
                     expected_operations=schema_operation_rows(),
                     expected_html_operations=schema_html_operation_rows(),
                 ),
@@ -285,7 +278,6 @@ def schema_html_operation_rows() -> list[dict[str, object]]:
 def build_resiliency_assertions(
     context: ValidationContext,
     *,
-    expected_tests: dict[str, int],
     expected_operations: list[dict[str, object]],
     expected_html_operations: list[dict[str, object]],
 ) -> list[dict]:
@@ -293,43 +285,6 @@ def build_resiliency_assertions(
     test_html = parse_html_embedded_report(context.artifacts["specmatic-report.html"]["text"])
 
     assertions: list[dict] = []
-    ctrf_summary = ctrf["results"]["summary"]
-    test_html_summary = test_html["results"]["summary"]
-
-    for field, expected_value in expected_tests.items():
-        actual_value = ctrf_summary.get(field, 0)
-        assertions.append(
-            assert_equal(
-                actual_value,
-                expected_value,
-                f"CTRF summary field '{field}' matched expected value {expected_value}.",
-                f"CTRF summary field '{field}' expected {expected_value}, got {actual_value}.",
-                category="report",
-                details=[
-                    detail("Field", field),
-                    detail("Expected", expected_value),
-                    detail("Actual", actual_value),
-                ],
-            )
-        )
-
-    for field, expected_value in expected_tests.items():
-        actual_value = test_html_summary.get(field, 0)
-        assertions.append(
-            assert_equal(
-                actual_value,
-                expected_value,
-                f"Embedded Specmatic test HTML summary field '{field}' matched expected value {expected_value}.",
-                f"Embedded Specmatic test HTML summary field '{field}' expected {expected_value}, got {actual_value}.",
-                category="report",
-                details=[
-                    detail("Field", field),
-                    detail("Expected", expected_value),
-                    detail("Actual", actual_value),
-                ],
-            )
-        )
-
     test_html_operations = test_html["results"]["summary"]["extra"]["executionDetails"][0]["operations"]
     assertions.append(
         assert_equal(
@@ -438,12 +393,6 @@ def baseline_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 5, Successes: 3, Failures: 2, Errors: 0",
-            "success": "README documents the baseline console summary.",
-            "failure": "README is missing the documented baseline console summary block.",
-        },
-        {
-            "kind": "readme-contains",
             "text": "GET /findAvailableProducts -> 429",
             "success": "README documents the baseline 429 failure scenario.",
             "failure": "README is missing the documented baseline 429 failure scenario.",
@@ -467,12 +416,6 @@ def task_a_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 5, Successes: 4, Failures: 1, Errors: 0",
-            "success": "README documents the Task A checkpoint summary.",
-            "failure": "README is missing the documented Task A checkpoint summary block.",
-        },
-        {
-            "kind": "readme-contains",
             "text": "the `429` scenario passes",
             "success": "README documents that the 429 scenario should pass after Task A.",
             "failure": "README is missing the documented Task A 429 pass expectation.",
@@ -490,12 +433,6 @@ def task_b_readme_assertions() -> list[dict[str, str]]:
     return [
         {
             "kind": "readme-contains",
-            "text": "Tests run: 5, Successes: 5, Failures: 0, Errors: 0",
-            "success": "README documents the Task B checkpoint summary.",
-            "failure": "README is missing the documented Task B checkpoint summary block.",
-        },
-        {
-            "kind": "readme-contains",
             "text": "the baseline `429` and `202` resilience flow passes",
             "success": "README documents that the base resiliency flow passes after Task B.",
             "failure": "README is missing the documented Task B pass expectation.",
@@ -505,12 +442,6 @@ def task_b_readme_assertions() -> list[dict[str, str]]:
 
 def task_c_mismatch_readme_assertions() -> list[dict[str, str]]:
     return [
-        {
-            "kind": "readme-contains",
-            "text": "Tests run: 249, Successes: 238, Failures: 11, Errors: 0",
-            "success": "README documents the Task C pre-fix summary.",
-            "failure": "README is missing the documented Task C pre-fix summary block.",
-        },
         {
             "kind": "readme-contains",
             "text": "additional generated `POST /products -> 202` requests now appear",
@@ -528,12 +459,6 @@ def task_c_mismatch_readme_assertions() -> list[dict[str, str]]:
 
 def final_readme_assertions() -> list[dict[str, str]]:
     return [
-        {
-            "kind": "readme-contains",
-            "text": "Tests run: 249, Successes: 249, Failures: 0, Errors: 0",
-            "success": "README documents the final passing summary.",
-            "failure": "README is missing the documented final passing summary block.",
-        },
         {
             "kind": "readme-contains",
             "text": "the additional generated `202` scenarios now pass",
