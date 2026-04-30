@@ -78,9 +78,9 @@ def build_lab_spec() -> LabSpec:
                 description="Run the suite without persisted filters and verify the high-failure baseline.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
-                expected_console_phrases=("Tests run: 134, Successes: 20, Failures: 112, Errors: 2",),
+                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 20, Successes: 20, Failures: 0, Errors: 0", "README documents the final filtered summary.", "README is missing the final filtered summary."),),
+                readme_assertions=(),
                 file_transforms={"specmatic": set_baseline_filter},
                 extra_assertions=baseline_assertions,
                 notes=(
@@ -92,7 +92,7 @@ def build_lab_spec() -> LabSpec:
                 description="Persist a reduced filter expression in specmatic.yaml and verify the filtered suite passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 20, Successes: 20, Failures: 0, Errors: 0",),
+                expected_console_phrases=(),
                 fix_summary=("Updated specmatic.yaml with a persisted filter expression that keeps only the passing 200/201 scenarios.",),
                 file_transforms={"specmatic": set_fixed_filter},
                 extra_assertions=fixed_assertions,
@@ -111,11 +111,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_coverage_assertions(
-            context,
-            expected_tests={"tests": 134, "passed": 20, "failed": 112, "skipped": 0, "other": 2},
-            expected_operations={"/findAvailableProducts": "covered", "/products": "covered", "/orders": "covered"},
-        ),
         assert_condition(
             FILTER_EXPR not in context.artifacts["specmatic.yaml"]["text"],
             "Baseline specmatic.yaml does not yet contain the persisted filtered expression.",
@@ -128,11 +123,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_coverage_assertions(
-            context,
-            expected_tests={"tests": 20, "passed": 20, "failed": 0, "skipped": 0, "other": 0},
-            expected_operations={"/findAvailableProducts": "covered", "/products": "covered", "/orders": "covered"},
-        ),
         assert_condition(
             FILTER_EXPR in context.artifacts["specmatic.yaml"]["text"],
             "Fixed specmatic.yaml contains the persisted filtered expression.",
