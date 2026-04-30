@@ -32,8 +32,8 @@ class ReadmeSchemaTest(unittest.TestCase):
         self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(README_V2_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "final"])
-        self.assertEqual(document.metadata["reports"]["ctrf"], {"expected_failure": True})
-        self.assertEqual(document.metadata["reports"]["html"], {"expected_failure": True})
+        self.assertFalse(document.metadata["reports"]["ctrf"])
+        self.assertFalse(document.metadata["reports"]["html"])
 
     def test_v2_phase_requires_shell_fences(self) -> None:
         readme_text = """---
@@ -144,6 +144,61 @@ Text
 """
         failures = self._phase_failures(readme_text, "baseline")
         self.assertIn("readme.v2.phase.outputs", failures)
+
+    def test_v2_phase_allows_skipped_teardown_command_without_terminaloutput(self) -> None:
+        readme_text = """---
+lab_schema: v2
+reports:
+  ctrf: false
+  html: false
+  readme_summary: true
+---
+# Sample Lab
+## Objective
+Text
+## Why this lab matters
+Text
+## Time required
+Text
+## Prerequisites
+Text
+## Architecture
+Text
+## Files in this lab
+Text
+## Lab Rules
+Text
+## Specmatic references
+Text
+## Lab Implementation Phases
+### Baseline Phase
+<!--
+phase-meta
+id: baseline
+kind: baseline
+-->
+```shell
+docker compose down -v
+```
+```shell
+docker run demo
+```
+```terminaloutput
+Tests run: 1, Successes: 1, Failures: 0
+```
+## Pass Criteria
+Text
+## Troubleshooting
+Text
+## Cleanup
+Text
+## What you learned
+Text
+## Next step
+Text
+"""
+        failures = self._phase_failures(readme_text, "baseline")
+        self.assertNotIn("readme.v2.phase.outputs", failures)
 
     def test_v2_phase_rejects_terminaloutput_casing_variants(self) -> None:
         readme_text = """---

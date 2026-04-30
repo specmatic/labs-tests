@@ -606,15 +606,24 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
-def is_ignored_teardown_command(command: str) -> bool:
+def skipped_command_output_reason(command: str) -> str | None:
     normalized = " ".join(command.strip().lower().split())
     if (
         ("docker compose" in normalized or "docker-compose" in normalized)
         and " down" in f" {normalized}"
     ):
-        return True
+        return "Skipped: terminaloutput is not required for teardown commands."
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and "--profile studio" in normalized
+        and " up" in f" {normalized}"
+        and "--build" in normalized
+    ):
+        return "Skipped: terminaloutput is not required for Studio startup/build commands."
     teardown_prefixes = ("docker stop", "docker rm")
-    return normalized.startswith(teardown_prefixes)
+    if normalized.startswith(teardown_prefixes):
+        return "Skipped: terminaloutput is not required for teardown commands."
+    return None
 
 
 def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, Any]], code_blocks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -669,10 +678,23 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "commandFence": block["rawLanguage"] or "(none)",
                     }
                 )
-            if is_ignored_teardown_command(block["preview"] or ""):
-                continue
+            skipped_reason = skipped_command_output_reason(block["preview"] or "")
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
             next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
+            if skipped_reason:
+                command_output_checks.append(
+                    {
+                        "line": str(block["line"]),
+                        "heading": heading_text,
+                        "commandFence": block["rawLanguage"] or "(none)",
+                        "command": block["preview"] or "(blank)",
+                        "outputFence": "(not required)",
+                        "output": "(not required)",
+                        "status": "skipped",
+                        "notes": skipped_reason,
+                    }
+                )
+                continue
             if (
                 next_block is None
                 or looks_like_console_block(next_block)
@@ -1331,20 +1353,21 @@ def build_fencing_comparison_payload(labs: list[dict[str, Any]], generated_at: s
         output_fence_violations = os_doc.get("outputFenceViolations", [])
         missing_output_pairs = os_doc.get("missingOutputPairs", [])
         total_issues = len(command_fence_violations) + len(output_fence_violations) + len(missing_output_pairs)
+        skipped_rows = len([check for check in os_doc.get("commandOutputChecks", []) if check.get("status") == "skipped"])
         if total_issues:
             summary_items.append(
                 {
                     "lab": lab["name"],
                     "status": "issues",
-                    "message": f"{total_issues} fencing issue(s): {len(command_fence_violations)} non-shell command fence, {len(output_fence_violations)} non-terminaloutput output fence, {len(missing_output_pairs)} missing same-section pairing.",
+                    "message": f"{total_issues} fencing issue(s): {len(command_fence_violations)} non-shell command fence, {len(output_fence_violations)} non-terminaloutput output fence, {len(missing_output_pairs)} missing same-section pairing. {skipped_rows} skipped row(s).",
                 }
             )
         else:
             summary_items.append(
                 {
                     "lab": lab["name"],
-        "status": "ok",
-        "message": "No command/output fencing issues detected.",
+                    "status": "ok",
+                    "message": f"No command/output fencing issues detected. {skipped_rows} skipped row(s)." if skipped_rows else "No command/output fencing issues detected.",
                 }
             )
         sections.append(
@@ -2418,6 +2441,10 @@ def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
       color: #ab2e2e;
       background: #fae8e5;
     }}
+    .status-skip {{
+      color: #9a6700;
+      background: #fff2cc;
+    }}
     .fence-chip {{
       display: inline-block;
       padding: 4px 8px;
@@ -2434,6 +2461,10 @@ def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
     .fence-fail {{
       color: #ab2e2e;
       background: #fae8e5;
+    }}
+    .fence-skip {{
+      color: #9a6700;
+      background: #fff2cc;
     }}
     .snippet-box {{
       margin: 0;
@@ -2481,9 +2512,9 @@ def render_fencing_lab_section(section: dict[str, Any]) -> str:
                 render_fencing_status_chip(item["status"]),
                 item["line"],
                 item["heading"],
-                render_fencing_fence_chip(item["commandFence"], expected="shell", allow_missing=False),
+                render_fencing_fence_chip(item["commandFence"], expected="shell", allow_missing=False, status=item["status"]),
                 render_fencing_snippet(item["command"]),
-                render_fencing_fence_chip(item["outputFence"], expected=TERMINAL_OUTPUT_FENCE_LANGUAGE, allow_missing=True),
+                render_fencing_fence_chip(item["outputFence"], expected=TERMINAL_OUTPUT_FENCE_LANGUAGE, allow_missing=True, status=item["status"]),
                 render_fencing_snippet(item["output"]),
                 render_fencing_notes(item["notes"], item["status"]),
             ]
@@ -2520,16 +2551,24 @@ def render_fencing_cell(value: str) -> str:
 
 def render_fencing_status_chip(status: str) -> str:
     normalized = status.strip().lower()
-    css_class = "status-pass" if normalized == "pass" else "status-fail"
+    if normalized == "pass":
+        css_class = "status-pass"
+    elif normalized == "skipped":
+        css_class = "status-skip"
+    else:
+        css_class = "status-fail"
     return f"<span class='status-chip {css_class}'>{escape(status.title())}</span>"
 
 
-def render_fencing_fence_chip(fence: str, *, expected: str, allow_missing: bool) -> str:
+def render_fencing_fence_chip(fence: str, *, expected: str, allow_missing: bool, status: str = "pass") -> str:
     normalized = fence.strip()
-    is_match = normalized == expected
-    if allow_missing and normalized == "(missing)":
-        is_match = False
-    css_class = "fence-ok" if is_match else "fence-fail"
+    if status.strip().lower() == "skipped" or normalized == "(not required)":
+        css_class = "fence-skip"
+    else:
+        is_match = normalized == expected
+        if allow_missing and normalized == "(missing)":
+            is_match = False
+        css_class = "fence-ok" if is_match else "fence-fail"
     return f"<span class='fence-chip {css_class}'>{escape(normalized)}</span>"
 
 
@@ -2538,7 +2577,8 @@ def render_fencing_snippet(snippet: str) -> str:
 
 
 def render_fencing_notes(notes: str, status: str) -> str:
-    css_class = "ok" if status.strip().lower() == "pass" else "warn"
+    normalized = status.strip().lower()
+    css_class = "ok" if normalized == "pass" else "muted" if normalized == "skipped" else "warn"
     return f"<div class='note-text {css_class}'>{escape(notes)}</div>"
 
 

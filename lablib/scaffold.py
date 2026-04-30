@@ -1167,9 +1167,14 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     commands = phase_doc.command_blocks
     outputs = phase_doc.output_blocks
     command_blocks_missing_following_output: list[str] = []
+    skipped_command_blocks: list[str] = []
     invalid_output_fence_languages: list[str] = []
     for index, block in enumerate(phase_doc.code_blocks):
         if not block.is_command:
+            continue
+        skipped_reason = skipped_command_output_reason(block.body)
+        if skipped_reason:
+            skipped_command_blocks.append(f"line {block.line} ({skipped_reason})")
             continue
         next_block = phase_doc.code_blocks[index + 1] if index + 1 < len(phase_doc.code_blocks) else None
         if next_block is None or not next_block.is_output:
@@ -1195,6 +1200,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             details=[
                 detail("Phase title", phase_doc.title),
                 detail("Commands missing following output", ", ".join(command_blocks_missing_following_output) or "(none)"),
+                detail("Skipped command blocks", ", ".join(skipped_command_blocks) or "(none)"),
             ],
         ),
         assert_condition(
@@ -1516,15 +1522,24 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
-def is_ignored_teardown_command(command: str) -> bool:
+def skipped_command_output_reason(command: str) -> str | None:
     normalized = " ".join(command.strip().lower().split())
     if (
         ("docker compose" in normalized or "docker-compose" in normalized)
         and " down" in f" {normalized}"
     ):
-        return True
+        return "terminaloutput is not required for teardown commands"
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and "--profile studio" in normalized
+        and " up" in f" {normalized}"
+        and "--build" in normalized
+    ):
+        return "terminaloutput is not required for Studio startup/build commands"
     teardown_prefixes = ("docker stop", "docker rm")
-    return normalized.startswith(teardown_prefixes)
+    if normalized.startswith(teardown_prefixes):
+        return "terminaloutput is not required for teardown commands"
+    return None
 
 
 def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
@@ -1543,7 +1558,7 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
         os_targets = set(block["osTargets"])
         if block["is_console"]:
             has_commands = True
-            if is_ignored_teardown_command(block["preview"] or ""):
+            if skipped_command_output_reason(block["preview"] or ""):
                 continue
             for os_name in os_targets:
                 command_coverage[os_name].append(

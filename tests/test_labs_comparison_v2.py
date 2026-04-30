@@ -23,9 +23,19 @@ class LabsComparisonV2Tests(unittest.TestCase):
         profile = build_lab_profile(ROOT / "external-examples")
         self.assertEqual(len(profile["readme"]["videoLinks"]), 1)
         self.assertIn("youtube.com", profile["readme"]["videoLinks"][0]["target"])
-        phases = profile["testCountConsistency"]["phases"]
-        self.assertIn("Baseline Phase", [item["phase"] for item in phases])
-        self.assertIn("Final Phase", [item["phase"] for item in phases])
+        self.assertEqual(profile["testCountConsistency"]["phases"], [])
+
+    def test_external_examples_surfaces_skipped_command_output_rows(self) -> None:
+        profile = build_lab_profile(ROOT / "external-examples")
+        checks = profile["readme"]["osDocumentation"]["commandOutputChecks"]
+        self.assertTrue(any(item["status"] == "skipped" for item in checks))
+        self.assertTrue(
+            any(
+                item["status"] == "skipped"
+                and "terminaloutput is not required" in item["notes"].lower()
+                for item in checks
+            )
+        )
 
 
 if __name__ == "__main__":
