@@ -64,9 +64,9 @@ def parse_args() -> argparse.Namespace:
         help="Destructively reset ../labs to the latest state on the selected branch before running.",
     )
     parser.add_argument(
-        "--branch",
+        "--labs-branch",
         default="main",
-        help="Branch to use with --refresh-labs. Defaults to main.",
+        help="Branch of ../labs to use with --refresh-labs. Defaults to main.",
     )
     parser.add_argument(
         "--force",
@@ -101,7 +101,7 @@ def main() -> int:
         setup_result = run_setup(
             stream_output=True,
             refresh_labs=args.refresh_labs,
-            target_branch=args.branch,
+            target_branch=args.labs_branch,
             force=args.force,
             lab_names=args.labs,
         )
@@ -109,7 +109,7 @@ def main() -> int:
             "status": setup_result.status,
             "upstreamLabsPath": setup_result.upstream_labs_path,
             "refreshLabs": args.refresh_labs,
-            "branch": args.branch,
+            "labsBranch": args.labs_branch,
             "force": args.force,
             "commands": setup_result.commands,
         }

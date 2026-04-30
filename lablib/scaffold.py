@@ -161,9 +161,9 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         help="Destructively reset ../labs to the latest state on the selected branch before running this lab.",
     )
     parser.add_argument(
-        "--branch",
+        "--labs-branch",
         default="main",
-        help="Branch to use with --refresh-labs. Defaults to main.",
+        help="Branch of ../labs to use with --refresh-labs. Defaults to main.",
     )
     parser.add_argument(
         "--force",
@@ -195,7 +195,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
                 setup_result = run_setup(
                     stream_output=True,
                     refresh_labs=args.refresh_labs,
-                    target_branch=args.branch,
+                    target_branch=args.labs_branch,
                     force=args.force,
                 )
                 if setup_result.status != "passed":
@@ -1536,6 +1536,11 @@ def skipped_command_output_reason(command: str) -> str | None:
         and "--build" in normalized
     ):
         return "terminaloutput is not required for Studio startup/build commands"
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and normalized.endswith(" pull")
+    ):
+        return "terminaloutput is not required for docker image pull commands"
     teardown_prefixes = ("docker stop", "docker rm")
     if normalized.startswith(teardown_prefixes):
         return "terminaloutput is not required for teardown commands"

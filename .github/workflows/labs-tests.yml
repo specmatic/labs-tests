@@ -7,6 +7,11 @@ on:
         description: "Optional space-separated list of labs to run, for example: api-coverage external-examples"
         required: false
         type: string
+      labs_branch:
+        description: "Optional branch of specmatic/labs to refresh before running. Defaults to main."
+        required: false
+        default: "main"
+        type: string
   pull_request:
   push:
     branches:
@@ -48,11 +53,12 @@ jobs:
         shell: bash
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
+          WORKFLOW_LABS_BRANCH_INPUT: ${{ github.event.inputs.labs_branch || 'main' }}
         timeout-minutes: 40
         run: |
           set +e
           start_time=$(date +%s)
-          run_command=(python3 -u run_all.py --refresh-labs --force)
+          run_command=(python3 -u run_all.py --refresh-labs --force --labs-branch "${WORKFLOW_LABS_BRANCH_INPUT}")
           if [[ -n "${WORKFLOW_LABS_INPUT}" ]]; then
             # Space-separated lab names from workflow_dispatch are appended as individual args.
             read -r -a selected_labs <<< "${WORKFLOW_LABS_INPUT}"

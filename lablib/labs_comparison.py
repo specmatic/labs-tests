@@ -620,6 +620,11 @@ def skipped_command_output_reason(command: str) -> str | None:
         and "--build" in normalized
     ):
         return "Skipped: terminaloutput is not required for Studio startup/build commands."
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and normalized.endswith(" pull")
+    ):
+        return "Skipped: terminaloutput is not required for docker image pull commands."
     teardown_prefixes = ("docker stop", "docker rm")
     if normalized.startswith(teardown_prefixes):
         return "Skipped: terminaloutput is not required for teardown commands."
