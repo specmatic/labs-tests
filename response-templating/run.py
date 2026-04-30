@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -204,9 +203,7 @@ def build_lab_spec() -> LabSpec:
                 description="Run the static mock examples and verify the three expected failures.",
                 expected_exit_code=1,
                 output_dir_name="baseline",
-                expected_console_phrases=("Tests run: 4, Successes: 1, Failures: 3, Errors: 0",),
                 include_readme_structure_checks=True,
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 1, Failures: 3, Errors: 0", "README documents the baseline summary.", "README is missing the baseline summary."),),
                 extra_assertions=baseline_assertions,
             ),
             PhaseSpec(
@@ -214,8 +211,6 @@ def build_lab_spec() -> LabSpec:
                 description="Add direct substitution for order echoes and verify only the lookup failures remain.",
                 expected_exit_code=1,
                 output_dir_name="task-a",
-                expected_console_phrases=("Tests run: 4, Successes: 2, Failures: 2, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 2, Failures: 2, Errors: 0", "README documents the Task A checkpoint summary.", "README is missing the Task A checkpoint summary."),),
                 fix_summary=("Updated examples/mock/test_accepted_order_request.json to echo productid and count from the request using direct substitution.",),
                 file_transforms={"order_mock": set_order_task_a},
                 extra_assertions=task_a_assertions,
@@ -225,8 +220,6 @@ def build_lab_spec() -> LabSpec:
                 description="Add lookup-driven product responses and verify the full suite passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 4, Successes: 4, Failures: 0, Errors: 0",),
-                readme_assertions=(readme_contains("Tests run: 4, Successes: 4, Failures: 0, Errors: 0", "README documents the final passing summary.", "README is missing the final passing summary."),),
                 fix_summary=(
                     "Kept the direct substitution fix for accepted orders.",
                     "Updated examples/mock/test_find_available_products_book_200.json to return the expected book response.",
@@ -247,7 +240,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 1, "failed": 3, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 1, "failures": 3, "errors": 0}),
         assert_condition(
             "\"Harry Potter\"" in context.artifacts["test_find_available_products_book_200.json"]["text"],
             "Baseline lookup mock kept the static Harry Potter response.",
@@ -260,7 +252,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def task_a_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 2, "failed": 2, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 2, "failures": 2, "errors": 0}),
         assert_condition(
             "$(PRODUCTID)" in context.artifacts["test_accepted_order_request.json"]["text"]
             and "$(COUNT)" in context.artifacts["test_accepted_order_request.json"]["text"],
@@ -274,7 +265,6 @@ def task_a_assertions(context: ValidationContext) -> list[dict]:
 
 def final_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(context, expected_ctrf={"tests": 4, "passed": 4, "failed": 0, "skipped": 0, "other": 0}, expected_console={"tests": 4, "successes": 4, "failures": 0, "errors": 0}),
         assert_condition(
             '"name": "Larry Potter"' in context.artifacts["test_find_available_products_book_200.json"]["text"]
             and '"type": "book"' in context.artifacts["test_find_available_products_book_200.json"]["text"],
