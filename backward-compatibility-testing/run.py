@@ -112,8 +112,6 @@ def build_lab_spec() -> LabSpec:
                 extra_assertions=fixed_assertions,
             ),
         ),
-        expected_missing_test_counts=True,
-        expected_missing_test_counts_reason="This lab validates compatibility verdicts and mismatch details, but it does not emit README/console/CTRF/HTML test-count summaries.",
     )
 
 

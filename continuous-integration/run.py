@@ -125,8 +125,6 @@ def build_lab_spec() -> LabSpec:
             ),
         ),
         post_phase_cleanup=teardown_compose,
-        expected_missing_test_counts=True,
-        expected_missing_test_counts_reason="This lab validates CI gate pass/fail behavior and compatibility messages, but it does not emit README/console/CTRF/HTML test-count summaries.",
     )
 
 

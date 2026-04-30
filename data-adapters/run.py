@@ -111,8 +111,6 @@ def build_lab_spec() -> LabSpec:
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
         runtime_warnings=(RUNTIME_NOTICE,),
-        expected_missing_test_counts=True,
-        expected_missing_test_counts_reason="This lab validates HTTP response behavior from the UI flow and does not emit README/console/CTRF/HTML test-count summaries.",
     )
 
 
