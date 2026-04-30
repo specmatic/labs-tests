@@ -88,37 +88,14 @@ def build_lab_spec() -> LabSpec:
                 extra_assertions=baseline_assertions,
             ),
             PhaseSpec(
-                name="Studio fix applied",
-                description="Apply the deterministic Studio-equivalent fixes and generated examples inside labs-tests, then validate the changed files.",
-                expected_exit_code=0,
-                readme_phase_id="studio-fix",
-                command=["python3", "-c", "print('Applied deterministic Studio-equivalent fixes in labs-tests.')"],
-                output_dir_name="studio-fix",
-                expected_console_phrases=("Applied deterministic Studio-equivalent fixes in labs-tests.",),
-                fix_summary=(
-                    "Applied the same example fixes the learner would make in Studio.",
-                    "Added the two missing 201 create examples that Studio would generate.",
-                ),
-                file_transforms={
-                    "book_200": fix_book_200,
-                    "accepted_product": fix_accepted_product,
-                    "accepted_order": fix_accepted_order,
-                    "created_product": create_product_201_example,
-                    "created_order": create_order_201_example,
-                },
-                artifact_specs=(
-                    ArtifactSpec("test_created_product_request_201.json", "examples/test_created_product_request_201.json", "examples/test_created_product_request_201.json", "text"),
-                    ArtifactSpec("test_created_order_request_201.json", "examples/test_created_order_request_201.json", "examples/test_created_order_request_201.json", "text"),
-                ),
-                extra_assertions=studio_fix_assertions,
-            ),
-            PhaseSpec(
                 name="Fixed contract",
-                description="Fix the invalid examples and add the two missing 201 create examples.",
+                description="Apply the deterministic Studio-equivalent fixes, add the two missing 201 examples, and re-run validation.",
                 expected_exit_code=0,
                 readme_phase_id="final",
                 output_dir_name="fixed",
                 fix_summary=(
+                    "Applied the same example fixes the learner would make in Studio.",
+                    "Added the two missing 201 create examples that Studio would generate.",
                     "Re-ran validation after the deterministic Studio-equivalent fixes were applied.",
                 ),
                 file_transforms={
@@ -132,7 +109,7 @@ def build_lab_spec() -> LabSpec:
                     ArtifactSpec("test_created_product_request_201.json", "examples/test_created_product_request_201.json", "examples/test_created_product_request_201.json", "text"),
                     ArtifactSpec("test_created_order_request_201.json", "examples/test_created_order_request_201.json", "examples/test_created_order_request_201.json", "text"),
                 ),
-                extra_assertions=final_assertions,
+                extra_assertions=studio_fix_assertions,
             ),
         ),
     )
@@ -169,10 +146,6 @@ def studio_fix_assertions(context: ValidationContext) -> list[dict]:
             category="implementation",
         ),
     ]
-
-
-def final_assertions(_: ValidationContext) -> list[dict]:
-    return []
 
 
 def reset_book_200(content: str) -> str:
