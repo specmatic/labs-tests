@@ -239,9 +239,6 @@ def report_timestamp() -> datetime:
 
 
 def current_run_command() -> str:
-    workflow_command = os.getenv("SPECMATIC_LABS_RUN_COMMAND", "").strip()
-    if workflow_command:
-        return workflow_command
     original_args = getattr(sys, "orig_argv", None)
     if original_args:
         return shlex.join(original_args)
