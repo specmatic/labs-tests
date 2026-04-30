@@ -69,6 +69,8 @@ def main() -> int:
     print(f"Wrote labs comparison HTML report to {labs_comparison_module.COMPARISON_HTML_PATH}")
     print(f"Wrote labs other-comparison JSON report to {labs_comparison_module.OTHER_COMPARISON_JSON_PATH}")
     print(f"Wrote labs other-comparison HTML report to {labs_comparison_module.OTHER_COMPARISON_HTML_PATH}")
+    print(f"Wrote labs test-counts comparison JSON report to {labs_comparison_module.TEST_COUNT_COMPARISON_JSON_PATH}")
+    print(f"Wrote labs test-counts comparison HTML report to {labs_comparison_module.TEST_COUNT_COMPARISON_HTML_PATH}")
     return 0 if consolidated["status"] == "passed" else 1
 
 
@@ -117,6 +119,8 @@ def configure_output_root(output_root: Path) -> None:
     labs_comparison_module.COMPARISON_HTML_PATH = consolidated_output_dir / "labs-comparison.html"
     labs_comparison_module.OTHER_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-other-comparison.json"
     labs_comparison_module.OTHER_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-other-comparison.html"
+    labs_comparison_module.TEST_COUNT_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-test-counts-comparison.json"
+    labs_comparison_module.TEST_COUNT_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-test-counts-comparison.html"
     labs_comparison_module.LEGACY_COMPARISON_JSON_PATH = output_root / "labs-comparison.json"
     labs_comparison_module.LEGACY_COMPARISON_HTML_PATH = output_root / "labs-comparison.html"
 

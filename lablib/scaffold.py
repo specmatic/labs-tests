@@ -13,10 +13,8 @@ from lablib.command_runner import CommandResult, run_command
 from lablib.readme_expectations import (
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     OUTPUT_FENCE_LANGUAGE,
-    command_block_language,
     get_lab_readme_override,
     heading_matches,
-    command_blocks_have_any_language,
     missing_shared_h2_titles,
     normalize_heading_title,
     optional_h2_titles,
@@ -884,16 +882,20 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
     )
     assertions.append(
         assert_condition(
-            bool(command_blocks) and all(block["language"] in CONSOLE_FENCE_LANGUAGES for block in command_blocks),
-            "All executable command sections use shell or OS-appropriate command fenced blocks.",
-            "Some executable command sections do not use shell or OS-appropriate command fenced blocks.",
+            bool(command_blocks) and all(block["rawLanguage"] == "shell" for block in command_blocks),
+            "All executable command sections use ```shell``` fenced blocks.",
+            "Some executable command sections do not use ```shell``` fenced blocks.",
             category="readme",
             code="readme.commands.executable_fences",
             details=[
                 detail("Executable command section count", len(command_blocks)),
                 detail(
-                    "Command sections with unsupported fence languages",
-                    ", ".join(block["preview"] for block in command_blocks if block["language"] not in CONSOLE_FENCE_LANGUAGES) or "(none)",
+                    "Command sections with non-shell fence languages",
+                    ", ".join(
+                        f"{block['preview']} -> ```{block['rawLanguage'] or '(none)'}```"
+                        for block in command_blocks
+                        if block["rawLanguage"] != "shell"
+                    ) or "(none)",
                 ),
             ],
         )
@@ -1163,18 +1165,17 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
 
     commands = phase_doc.command_blocks
     outputs = phase_doc.output_blocks
-    shell_languages = {"shell", "bash", "sh", "zsh"}
-    windows_languages = {"powershell", "ps1", "cmd", "bat"}
-    invalid_common_languages = [
-        block.language or "(none)"
-        for block in commands
-        if command_block_language(block) not in (shell_languages | windows_languages)
-    ]
-    has_os_specific_labels = any(
-        token in phase_doc.content.lower()
-        for token in ("windows", "powershell", "cmd", "macos", "linux")
-    )
-    has_os_specific_variants = command_blocks_have_any_language(commands, shell_languages) and command_blocks_have_any_language(commands, windows_languages)
+    command_blocks_missing_following_output: list[str] = []
+    invalid_output_fence_languages: list[str] = []
+    for index, block in enumerate(phase_doc.code_blocks):
+        if not block.is_command:
+            continue
+        next_block = phase_doc.code_blocks[index + 1] if index + 1 < len(phase_doc.code_blocks) else None
+        if next_block is None or not next_block.is_output:
+            command_blocks_missing_following_output.append(f"line {block.line}")
+            continue
+        if next_block.raw_language != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+            invalid_output_fence_languages.append(f"line {next_block.line}: {next_block.raw_language or '(none)'}")
     assertions = [
         assert_condition(
             bool(commands),
@@ -1185,32 +1186,31 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             details=[detail("Phase title", phase_doc.title)],
         ),
         assert_condition(
-            len(outputs) >= len(commands),
-            "README phase includes relevant command output snippets.",
-            "README phase does not include enough output snippets for its documented commands.",
+            not command_blocks_missing_following_output,
+            "README phase includes a following terminaloutput block for each command block.",
+            "README phase is missing a following terminaloutput block for one or more command blocks.",
             category="readme",
             code="readme.v2.phase.outputs",
             details=[
                 detail("Phase title", phase_doc.title),
-                detail("Command blocks", len(commands)),
-                detail("Output blocks", len(outputs)),
+                detail("Commands missing following output", ", ".join(command_blocks_missing_following_output) or "(none)"),
             ],
         ),
         assert_condition(
-            all(block.language in command_fence_languages() for block in commands),
-            "README phase command blocks use executable fence languages.",
-            "README phase command blocks use unsupported fence languages.",
+            all(block.raw_language == "shell" for block in commands),
+            "README phase command blocks use ```shell``` fences.",
+            "README phase command blocks do not consistently use ```shell``` fences.",
             category="readme",
             code="readme.v2.phase.command_fences",
             details=[
                 detail(
                     "Invalid command fence languages",
-                    ", ".join(sorted({block.language for block in commands if block.language not in command_fence_languages()})) or "(none)",
+                    ", ".join(sorted({block.raw_language or "(none)" for block in commands if block.raw_language != "shell"})) or "(none)",
                 )
             ],
         ),
         assert_condition(
-            all(block.language == TERMINAL_OUTPUT_FENCE_LANGUAGE for block in outputs),
+            not invalid_output_fence_languages and all(block.raw_language == TERMINAL_OUTPUT_FENCE_LANGUAGE for block in outputs),
             "README phase output blocks use terminaloutput fences.",
             "README phase output blocks do not consistently use terminaloutput fences.",
             category="readme",
@@ -1218,7 +1218,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             details=[
                 detail(
                     "Invalid output fence languages",
-                    ", ".join(sorted({block.language for block in outputs if block.language != TERMINAL_OUTPUT_FENCE_LANGUAGE})) or "(none)",
+                    ", ".join(sorted({block.raw_language or "(none)" for block in outputs if block.raw_language != TERMINAL_OUTPUT_FENCE_LANGUAGE} | set(invalid_output_fence_languages))) or "(none)",
                 )
             ],
         ),
@@ -1432,7 +1432,8 @@ def validate_legacy_readme_structure(readme_text: str, lab_name: str) -> list[di
 def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     for match in FENCED_CODE_BLOCK_RE.finditer(readme_text):
-        language = (match.group("lang") or "").strip().lower()
+        raw_language = (match.group("lang") or "").strip()
+        language = raw_language.lower()
         body = match.group("body").strip()
         lines = [line.strip() for line in body.splitlines() if line.strip()]
         preview = lines[0] if lines else ""
@@ -1441,6 +1442,7 @@ def extract_console_blocks(readme_text: str) -> list[dict[str, Any]]:
         context_text = " ".join(filter(None, [heading_text, collect_preceding_context(readme_text, line_number_for_index(readme_text, match.start()))]))
         blocks.append(
             {
+                "rawLanguage": raw_language,
                 "language": language,
                 "body": body,
                 "preview": preview,
@@ -1510,12 +1512,7 @@ def is_output_block_with_paths(block: dict[str, Any], context_text: str) -> bool
 
 
 def is_command_language_appropriate(os_name: str, language: str) -> bool:
-    normalized = language.lower()
-    if os_name in {"macOS", "Linux"}:
-        return normalized in {"shell", "bash", "sh", "zsh"}
-    if os_name == "Windows":
-        return normalized in {"powershell", "ps1", "cmd", "bat", "shell", "bash", "sh"}
-    return False
+    return language == "shell"
 
 
 def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
@@ -1542,10 +1539,14 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                         "preview": block["preview"] or "(blank)",
                     }
                 )
-                if not is_command_language_appropriate(os_name, block["language"] or ""):
-                    command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["language"] or "(none)"})
+                if not is_command_language_appropriate(os_name, block["rawLanguage"] or ""):
+                    command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["rawLanguage"] or "(none)"})
             next_block = blocks[index + 1] if index + 1 < len(blocks) else None
-            if next_block is None or next_block["is_console"]:
+            if (
+                next_block is None
+                or next_block["is_console"]
+                or next_block["heading"] != heading_text
+            ):
                 commands_missing_output.append(f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'}")
                 continue
             output_targets = set(next_block["osTargets"]) or os_targets
@@ -1557,9 +1558,9 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                         "preview": next_block["normalizedPreview"] or "(blank)",
                     }
                 )
-            if next_block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+            if next_block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['language'] or '(none)'}``` for output"
+                    f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['rawLanguage'] or '(none)'}``` for output"
                 )
         elif is_output_block_with_paths(block, context_text):
             has_path_outputs = True
@@ -1571,9 +1572,9 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                         "preview": block["normalizedPreview"] or "(blank)",
                     }
                 )
-            if block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+            if block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading_text or '(no heading)'} uses ```{block['language'] or '(none)'}``` for output"
+                    f"{heading_text or '(no heading)'} uses ```{block['rawLanguage'] or '(none)'}``` for output"
                 )
 
     return {

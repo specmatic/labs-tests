@@ -53,6 +53,7 @@ class Heading:
 
 @dataclass(frozen=True)
 class CodeBlock:
+    raw_language: str
     language: str
     body: str
     line: int
@@ -306,12 +307,14 @@ def extract_video_url_from_section(section_text: str | None) -> str | None:
 def extract_code_blocks(text: str) -> list[CodeBlock]:
     blocks: list[CodeBlock] = []
     for match in FENCED_CODE_BLOCK_RE.finditer(text):
-        language = (match.group("lang") or "").strip().lower()
+        raw_language = (match.group("lang") or "").strip()
+        language = raw_language.lower()
         body = match.group("body").strip()
         lines = [line.strip() for line in body.splitlines() if line.strip()]
         preview = lines[0] if lines else ""
         blocks.append(
             CodeBlock(
+                raw_language=raw_language,
                 language=language,
                 body=body,
                 line=line_number_for_index(text, match.start()),

@@ -45,6 +45,8 @@ COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.json"
 COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.html"
 OTHER_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.json"
 OTHER_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.html"
+TEST_COUNT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.json"
+TEST_COUNT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -152,6 +154,7 @@ def generate_labs_comparison(
         "title": "Labs Other Comparison",
         "validationMatrix": build_validation_matrix(labs, validation_rows, mode="other"),
     }
+    test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
         if legacy_path.exists():
@@ -160,6 +163,8 @@ def generate_labs_comparison(
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
     OTHER_COMPARISON_JSON_PATH.write_text(json.dumps(other_payload, indent=2) + "\n", encoding="utf-8")
     OTHER_COMPARISON_HTML_PATH.write_text(render_comparison_html(other_payload), encoding="utf-8")
+    TEST_COUNT_COMPARISON_JSON_PATH.write_text(json.dumps(test_count_payload, indent=2) + "\n", encoding="utf-8")
+    TEST_COUNT_COMPARISON_HTML_PATH.write_text(render_test_count_comparison_html(test_count_payload), encoding="utf-8")
     return payload
 
 
@@ -333,7 +338,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "shellConsoleBlockCount": len(shell_console_blocks),
             "consoleBlockCount": len(console_blocks),
             "hasAtLeastTwoShellConsoleBlocks": len(shell_console_blocks) >= 2,
-            "allCommandBlocksUseExecutableSyntax": bool(console_blocks) and all(block["language"] in {"shell", "bash", "sh", "zsh", "powershell", "ps1", "cmd", "bat"} for block in console_blocks),
+            "allCommandBlocksUseExecutableSyntax": bool(console_blocks) and all(block["rawLanguage"] == "shell" for block in console_blocks),
             "everyCommandHasOutputSnippet": not os_documentation["commandsMissingOutput"],
             "allOutputBlocksUseTerminalOutput": not os_documentation["outputLanguageIssues"],
             "openingShellConsoleSection": shell_console_sections[0] if shell_console_sections else {},
@@ -478,6 +483,7 @@ def extract_fenced_code_blocks(readme_text: str) -> list[dict[str, Any]]:
         preview = lines[0] if lines else ""
         blocks.append(
             {
+                "rawLanguage": (match.group("lang") or "").strip(),
                 "language": (match.group("lang") or "").strip().lower(),
                 "body": body,
                 "preview": preview,
@@ -586,12 +592,7 @@ def normalize_output_preview(text: str) -> str:
 
 
 def is_command_language_appropriate(os_name: str, language: str) -> bool:
-    normalized = language.lower()
-    if os_name in {"macOS", "Linux"}:
-        return normalized in {"shell", "bash", "sh", "zsh"}
-    if os_name == "Windows":
-        return normalized in {"powershell", "ps1", "cmd", "bat", "shell", "bash", "sh"}
-    return False
+    return language == "shell"
 
 
 def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, Any]], code_blocks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -625,22 +626,26 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "preview": block["normalizedPreview"] or "(blank)",
                     }
                 )
-                if not is_command_language_appropriate(os_name, block["language"] or ""):
+                if not is_command_language_appropriate(os_name, block["rawLanguage"] or ""):
                     command_language_issues.append(
                         {
                             "os": os_name,
                             "heading": heading["text"] if heading else "(no heading)",
-                            "language": block["language"] or "(none)",
+                            "language": block["rawLanguage"] or "(none)",
                         }
                     )
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
-            if next_block is None or looks_like_console_block(next_block):
+            next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
+            if (
+                next_block is None
+                or looks_like_console_block(next_block)
+                or (next_heading["text"] if next_heading else "") != (heading["text"] if heading else "")
+            ):
                 commands_missing_output.append(
                     f"{heading['text'] if heading else '(no heading)'} -> {block['normalizedPreview'] or '(blank)'}"
                 )
                 continue
             output_targets = set(os_targets) or set(next_block.get("osTargets", []))
-            next_heading = heading_before_line(headings, next_block["line"])
             next_heading_text = next_heading["text"] if next_heading else "(no heading)"
             for os_name in output_targets:
                 output_coverage[os_name].append(
@@ -650,9 +655,9 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "preview": next_block["normalizedPreview"] or "(blank)",
                     }
                 )
-            if next_block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+            if next_block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading['text'] if heading else '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['language'] or '(none)'}``` for output"
+                    f"{heading['text'] if heading else '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['rawLanguage'] or '(none)'}``` for output"
                 )
         elif is_output_block_with_paths(block):
             has_path_outputs = True
@@ -664,9 +669,9 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "preview": block["normalizedPreview"] or "(blank)",
                     }
                 )
-            if block["language"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
+            if block["rawLanguage"] != TERMINAL_OUTPUT_FENCE_LANGUAGE:
                 output_language_issues.append(
-                    f"{heading['text'] if heading else '(no heading)'} uses ```{block['language'] or '(none)'}``` for output"
+                    f"{heading['text'] if heading else '(no heading)'} uses ```{block['rawLanguage'] or '(none)'}``` for output"
                 )
 
     return {
@@ -1010,9 +1015,9 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ],
         },
         {
-            "label": "README command sections all use executable fenced blocks",
+            "label": "README command sections all use ```shell``` fenced blocks",
             "tooltip": {
-                "summary": ["All documented command sections should use executable command fences such as shell, bash, powershell, or cmd."],
+                "summary": ["All documented command sections should use ```shell``` fenced blocks."],
                 "details": build_shell_console_details(labs),
             },
             "cells": [lab["readme"]["allCommandBlocksUseExecutableSyntax"] for lab in labs],
@@ -1143,6 +1148,63 @@ def build_validation_matrix(
         definitions = [row for row in definitions if row["label"] not in CORE_VALIDATION_LABELS]
     rows = [add_row_status_prefix(index, row) for index, row in enumerate(definitions, start=1)]
     return {"columns": columns, "rows": rows}
+
+
+def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at: str) -> dict[str, Any]:
+    sections = []
+    summary_items = []
+    for lab in labs:
+        comparisons = lab["testCountConsistency"].get("phases", [])
+        mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
+        matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
+        unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
+        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-available"]
+        if mismatch_phases:
+            summary_items.append({"lab": lab["name"], "status": "mismatch", "message": f"Mismatches in {', '.join(mismatch_phases)}."})
+        elif matched_phases:
+            summary_items.append({"lab": lab["name"], "status": "match", "message": "Matching counts where data is available."})
+        elif expected_unavailable_phases:
+            reason = lab["testCountConsistency"].get("expectedMissingReason") or "This lab does not publish test-count summaries."
+            summary_items.append({"lab": lab["name"], "status": "expected-not-available", "message": f"Count data is expected to be not available. {reason}"})
+        elif unavailable_phases:
+            summary_items.append({"lab": lab["name"], "status": "not-available", "message": "Count data is not available for comparison."})
+        else:
+            summary_items.append({"lab": lab["name"], "status": "not-available", "message": "No phase data was available to validate."})
+
+        sections.append(
+            {
+                "lab": lab["name"],
+                "href": lab["href"],
+                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase.",
+                "rows": [
+                    {
+                        "phase": item["phase"],
+                        "readme": build_count_cell(item.get("readmeCounts"), item),
+                        "console": build_count_cell(item.get("consoleCounts"), item),
+                        "ctrf": build_count_cell(item.get("ctrfCounts"), item),
+                        "html": build_count_cell(item.get("htmlCounts"), item),
+                        "status": format_count_status(item.get("status", "not-available")),
+                    }
+                    for item in comparisons
+                ] or [
+                    {
+                        "phase": "(no phase data found)",
+                        "readme": count_cell_text(None),
+                        "console": count_cell_text(None),
+                        "ctrf": count_cell_text(None),
+                        "html": count_cell_text(None),
+                        "status": "Not available",
+                    }
+                ],
+            }
+        )
+    return {
+        "title": "Labs Test Counts Comparison",
+        "generatedAt": generated_at,
+        "provenance": detect_report_provenance(),
+        "summary": summary_items,
+        "labs": sections,
+    }
 
 
 def add_row_status_prefix(index: int, row: dict[str, Any]) -> dict[str, Any]:
@@ -1979,6 +2041,149 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
 """
 
 
+def render_test_count_comparison_html(payload: dict[str, Any]) -> str:
+    summary_items = "".join(
+        f"<li><strong>{escape(item['lab'])}:</strong> {escape(item['message'])}</li>"
+        for item in payload.get("summary", [])
+    ) or "<li>No lab report snapshots were available.</li>"
+    sections_html = "".join(render_test_count_lab_section(section) for section in payload.get("labs", []))
+    provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p class='muted'>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(payload.get("title", "Labs Test Counts Comparison"))}</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f5f1e8;
+      color: #182126;
+    }}
+    main {{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }}
+    .panel {{
+      background: #fffdf8;
+      border: 1px solid #d7ccb8;
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 18px;
+      box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .muted {{
+      color: #5b6570;
+    }}
+    h1, h2, h3 {{
+      margin-top: 0;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+    }}
+    .counts-cell {{
+      white-space: pre-line;
+    }}
+    .status-chip {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }}
+    .status-match {{
+      color: #1f7a4d;
+      background: #e5f5eb;
+    }}
+    .status-mismatch {{
+      color: #ab2e2e;
+      background: #fae8e5;
+    }}
+    .status-not-available {{
+      color: #6b7280;
+      background: #edf0f3;
+    }}
+    .status-expected {{
+      color: #9a6700;
+      background: #fff2cc;
+    }}
+    a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>{escape(payload.get("title", "Labs Test Counts Comparison"))}</h1>
+      {generated_at_html}
+      {provenance_html}
+      <p class="muted">The README, console, CTRF JSON, and Specmatic HTML should describe the same run wherever those sources are available.</p>
+      <ul>{summary_items}</ul>
+    </section>
+    {sections_html}
+  </main>
+</body>
+</html>
+"""
+
+
+def render_test_count_lab_section(section: dict[str, Any]) -> str:
+    rows_html = "".join(
+        "<tr>"
+        f"<td>{escape(str(row['phase']))}</td>"
+        f"<td class='counts-cell'>{render_count_cell_html(row['readme'])}</td>"
+        f"<td class='counts-cell'>{render_count_cell_html(row['console'])}</td>"
+        f"<td class='counts-cell'>{render_count_cell_html(row['ctrf'])}</td>"
+        f"<td class='counts-cell'>{render_count_cell_html(row['html'])}</td>"
+        f"<td>{render_count_status_chip(str(row['status']))}</td>"
+        "</tr>"
+        for row in section.get("rows", [])
+    )
+    return (
+        "<section class='panel'>"
+        f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
+        f"<p class='muted'>{escape(section.get('note', ''))}</p>"
+        "<table>"
+        "<thead><tr><th>Phase</th><th>README</th><th>Console</th><th>CTRF</th><th>HTML</th><th>Status</th></tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+        "</section>"
+    )
+
+
+def render_count_cell_html(value: Any) -> str:
+    if isinstance(value, dict):
+        return escape(str(value.get("text", ""))).replace("\n", "<br>")
+    return escape(str(value)).replace("\n", "<br>")
+
+
+def render_count_status_chip(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized == "match":
+        css_class = "status-match"
+    elif normalized == "mismatch":
+        css_class = "status-mismatch"
+    elif normalized == "expected":
+        css_class = "status-expected"
+    else:
+        css_class = "status-not-available"
+    return f"<span class='status-chip {css_class}'>{escape(status)}</span>"
+
+
 def render_provenance_html(provenance: dict[str, Any] | None) -> str:
     if not provenance:
         return ""
@@ -2465,17 +2670,17 @@ def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
                 "sections": [
                     {
                         "type": "bullets",
-                        "title": "Executable command sections",
+                        "title": "Documented command sections",
                         "items": [str(lab["readme"]["shellConsoleBlockCount"])],
                     },
                     {
                         "type": "bullets",
-                        "title": "Fence language check",
+                        "title": "shell fence check",
                         "tone": "ok" if ok else "attention",
                         "items": [
-                            "All command sections use executable fenced blocks."
+                            "All command sections use ```shell``` fenced blocks."
                             if ok
-                            else "Some command sections do not use executable fenced blocks."
+                            else "Some command sections do not use ```shell``` fenced blocks."
                         ],
                     },
                 ],
@@ -2483,8 +2688,8 @@ def build_shell_console_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
         )
     return {
         "type": "sections",
-        "title": "Executable command fences",
-        "note": "Executable command fences keep the README commands copy-pasteable and make the expected shell explicit.",
+        "title": "shell fence coverage",
+        "note": "Use ```shell``` for every documented command block.",
         "sections": sections,
     }
 

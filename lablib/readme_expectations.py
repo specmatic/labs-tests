@@ -6,27 +6,14 @@ import re
 
 EXECUTABLE_COMMAND_FENCE_LANGUAGES = (
     "shell",
-    "bash",
-    "sh",
-    "zsh",
-    "powershell",
-    "ps1",
-    "cmd",
-    "bat",
 )
 
 MAC_LINUX_COMMAND_FENCE_LANGUAGES = (
     "shell",
-    "bash",
-    "sh",
-    "zsh",
 )
 
 WINDOWS_COMMAND_FENCE_LANGUAGES = (
-    "powershell",
-    "ps1",
-    "cmd",
-    "bat",
+    "shell",
 )
 
 OUTPUT_FENCE_LANGUAGE = "terminaloutput"
