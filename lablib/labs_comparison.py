@@ -2955,7 +2955,9 @@ def build_test_count_consistency_profile(
         comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
-        if expected_failure_mismatch and comparable and not consistent:
+        totals_match = comparable and len({c["tests"] for c in present_counts}) == 1
+
+        if expected_failure_mismatch and comparable and not consistent and totals_match:
             status = "partial-match"
         else:
             status = (
