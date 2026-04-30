@@ -135,6 +135,7 @@ def build_lab_spec() -> LabSpec:
                 extra_assertions=fixed_assertions,
             ),
         ),
+        expected_missing_test_counts=True,
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
     )

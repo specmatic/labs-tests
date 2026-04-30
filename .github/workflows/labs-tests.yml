@@ -33,7 +33,7 @@ jobs:
         id: run_labs
         shell: bash
         env:
-          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --refresh-labs --force
+          SPECMATIC_LABS_RUN_COMMAND: python3 -u run_all.py --branch dynamic-labs
         timeout-minutes: 40
         run: |
           set +e
