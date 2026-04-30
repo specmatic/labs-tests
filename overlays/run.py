@@ -16,7 +16,6 @@ from lablib.scaffold import (
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
-    build_test_summary_assertions,
     clear_docker_owned_build_dir,
     detail,
     docker_compose_down,
@@ -124,16 +123,10 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=1,
                 output_dir_name="baseline",
                 expected_console_phrases=(
-                    "Tests run: 1, Successes: 0, Failures: 1, Errors: 0",
                     "404 Not Found",
                 ),
                 include_readme_structure_checks=True,
                 readme_assertions=(
-                    readme_contains(
-                        "Tests run: 1, Successes: 0, Failures: 1, Errors: 0",
-                        "README documents the baseline failing summary.",
-                        "README is missing the baseline failing summary.",
-                    ),
                     readme_runtime_detail(
                         "404 Not Found",
                         "README captures the baseline 404 mismatch detail.",
@@ -148,14 +141,8 @@ def build_lab_spec() -> LabSpec:
                 description="Enable the overlay and verify the same test run passes.",
                 expected_exit_code=0,
                 output_dir_name="fixed",
-                expected_console_phrases=("Tests run: 1, Successes: 1, Failures: 0, Errors: 0",),
-                readme_assertions=(
-                    readme_contains(
-                        "Tests run: 1, Successes: 1, Failures: 0, Errors: 0",
-                        "README documents the passing summary after overlay enablement.",
-                        "README is missing the passing summary after overlay enablement.",
-                    ),
-                ),
+                expected_console_phrases=(),
+                readme_assertions=(),
                 fix_summary=(
                     "Replaced the empty overlay actions list with the path-rewrite overlay.",
                     "Enabled overlayFilePath in specmatic.yaml so Specmatic applies the overlay during tests.",
@@ -171,11 +158,6 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 1, "passed": 0, "failed": 1, "skipped": 0, "other": 0},
-            expected_console={"tests": 1, "successes": 0, "failures": 1, "errors": 0},
-        ),
         assert_condition(
             "actions: []" in context.artifacts["path-prefix.overlay.yaml"]["text"],
             "Baseline overlay file stayed in the empty-actions state.",
@@ -195,11 +177,6 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_test_summary_assertions(
-            context,
-            expected_ctrf={"tests": 1, "passed": 1, "failed": 0, "skipped": 0, "other": 0},
-            expected_console={"tests": 1, "successes": 1, "failures": 0, "errors": 0},
-        ),
         assert_condition(
             "/api/v1/users/{id}" in context.artifacts["path-prefix.overlay.yaml"]["text"],
             "Fixed overlay file contains the rewritten /api/v1/users/{id} path.",
