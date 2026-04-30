@@ -4030,7 +4030,7 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
             verdict_items.append(f"{lab['name']}: no phase data was available to validate.")
         table_note = "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When a lab intentionally does not emit count summaries, the row is marked as expected."
         if expected_missing_reason:
-            table_note = f"{table_note}\nReason: **{expected_missing_reason}**"
+            table_note = f"{table_note}\n\nReason: **{expected_missing_reason}**"
         sections.append(
             {
                 "type": "table",
