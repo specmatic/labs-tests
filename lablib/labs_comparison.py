@@ -3694,7 +3694,7 @@ def select_readme_summary_for_phase(
 
 
 def load_lab_report_snapshot(lab_name: str) -> dict[str, Any] | None:
-    snapshot_dir = ROOT / "output" / "labs" / f"{lab_name}-output"
+    snapshot_dir = ROOT / "output" / "labs-output" / f"{lab_name}-output"
     report_path = snapshot_dir / "report.json"
     if not report_path.exists():
         return None

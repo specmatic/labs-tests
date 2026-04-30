@@ -249,7 +249,7 @@ def run_best_effort_runtime_cleanup(spec: LabSpec, when: str) -> None:
 
 
 def snapshot_lab_output(spec: LabSpec) -> Path:
-    target_dir = spec.root / "output" / "labs" / f"{spec.name}-output"
+    target_dir = spec.root / "output" / "labs-output" / f"{spec.name}-output"
     legacy_dir = spec.root / "output" / f"{spec.name}-output"
     if target_dir.exists():
         shutil.rmtree(target_dir)
