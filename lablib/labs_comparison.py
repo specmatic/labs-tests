@@ -238,14 +238,18 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     report_snapshot = load_lab_report_snapshot(spec.name)
     readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
     readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
+    readme_emtc = readme_doc.metadata.get("expected_missing_test_counts", False)
+    readme_emtc_reason = readme_doc.metadata.get("expected_missing_test_counts_reason", "")
     effective_efm = spec.expected_failure_mismatch or bool(readme_efm)
     effective_efm_reason = spec.expected_failure_mismatch_reason or readme_efm_reason
+    effective_emtc = spec.expected_missing_test_counts or bool(readme_emtc)
+    effective_emtc_reason = spec.expected_missing_test_counts_reason or readme_emtc_reason
     test_count_consistency = build_test_count_consistency_profile(
         spec,
         readme_doc,
         report_snapshot,
-        expected_missing=spec.expected_missing_test_counts,
-        expected_missing_reason=spec.expected_missing_test_counts_reason,
+        expected_missing=effective_emtc,
+        expected_missing_reason=effective_emtc_reason,
         expected_failure_mismatch=effective_efm,
         expected_failure_mismatch_reason=effective_efm_reason,
     )
@@ -2054,10 +2058,26 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         const list = document.createElement('ul');
         items.forEach((item) => {{
           const li = document.createElement('li');
-          li.textContent = item;
+          li.innerHTML = renderSimpleMarkdown(item);
           list.appendChild(li);
         }});
         container.appendChild(list);
+      }}
+
+      function escapeHtml(text) {{
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }}
+
+      function renderSimpleMarkdown(text) {{
+        const escaped = escapeHtml(text || '');
+        return escaped
+          .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+          .replace(/\\n/g, '<br>');
       }}
 
       function renderDetails(container, detailsData) {{
@@ -2094,7 +2114,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         if (detailsData.note) {{
           const note = document.createElement('p');
           note.className = isRoot ? 'matrix-tooltip-details-note' : 'matrix-tooltip-section-note';
-          note.textContent = detailsData.note;
+          note.innerHTML = renderSimpleMarkdown(detailsData.note);
           container.appendChild(note);
         }}
         if (detailsData.type === 'sections') {{
@@ -3988,6 +4008,7 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
     verdict_items = []
     for lab in labs:
         comparisons = lab["testCountConsistency"].get("phases", [])
+        expected_missing_reason = lab["testCountConsistency"].get("expectedMissingReason", "")
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         partial_match_phases = [item["phase"] for item in comparisons if item.get("status") == "partial-match"]
@@ -4001,18 +4022,21 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
         elif matched_phases:
             verdict_items.append(f"{lab['name']}: matching counts where data is available.")
         elif expected_unavailable_phases:
-            reason = lab["testCountConsistency"].get("expectedMissingReason") or "This lab does not publish test-count summaries."
-            verdict_items.append(f"{lab['name']}: count data is expected to be not available. {reason}")
+            reason = expected_missing_reason or "This lab does not publish test-count summaries."
+            verdict_items.append(f"{lab['name']}: count data is expected to be not available. **{reason}**")
         elif unavailable_phases:
             verdict_items.append(f"{lab['name']}: count data is not-available for comparison.")
         else:
             verdict_items.append(f"{lab['name']}: no phase data was available to validate.")
+        table_note = "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When a lab intentionally does not emit count summaries, the row is marked as expected."
+        if expected_missing_reason:
+            table_note = f"{table_note}\nReason: **{expected_missing_reason}**"
         sections.append(
             {
                 "type": "table",
                 "title": lab["name"],
                 "href": lab["href"],
-                "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When a lab intentionally does not emit count summaries, the row is marked as expected.",
+                "note": table_note,
                 "headers": ["Phase", "README", "Console", "CTRF", "HTML", "Status"],
                 "rows": [
                     [
