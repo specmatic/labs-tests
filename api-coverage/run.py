@@ -140,25 +140,29 @@ def allocate_free_port() -> int:
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
+    service_spec_path = context.lab.files["service_spec"]
+    service_spec_text = service_spec_path.read_text(encoding="utf-8")
     return [
         assert_condition(
-            BASELINE_PATH in context.artifacts["service_spec"]["text"] and FIXED_PATH not in context.artifacts["service_spec"]["text"],
+            BASELINE_PATH in service_spec_text and FIXED_PATH not in service_spec_text,
             "Baseline spec keeps GET /pets/search and does not include GET /pets/find.",
             "Baseline spec does not match the expected broken /pets/search state.",
             category="report",
-            details=[detail("Artifact path", context.artifacts["service_spec"]["path"])],
+            details=[detail("Spec path", service_spec_path)],
         ),
     ]
 
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
+    service_spec_path = context.lab.files["service_spec"]
+    service_spec_text = service_spec_path.read_text(encoding="utf-8")
     return [
         assert_condition(
-            FIXED_PATH in context.artifacts["service_spec"]["text"] and BASELINE_PATH not in context.artifacts["service_spec"]["text"],
+            FIXED_PATH in service_spec_text and BASELINE_PATH not in service_spec_text,
             "Fixed spec switches to GET /pets/find and removes GET /pets/search.",
             "Fixed spec does not match the expected /pets/find state.",
             category="report",
-            details=[detail("Artifact path", context.artifacts["service_spec"]["path"])],
+            details=[detail("Spec path", service_spec_path)],
         ),
     ]
 
