@@ -54,7 +54,7 @@ def build_lab_spec() -> LabSpec:
         ),
         readme_structure=ReadmeStructureSpec(
             required_h2_prefixes=(
-                "Time required to complete this lab:",
+                "Time required to complete this lab",
                 "Prerequisites",
                 "Files in this lab",
                 "Start Studio using Docker Compose",

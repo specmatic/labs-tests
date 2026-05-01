@@ -57,7 +57,7 @@ def build_lab_spec() -> LabSpec:
             required_h2_prefixes=(
                 "Objective",
                 "Why this lab matters",
-                "Time required to complete this lab:",
+                "Time required to complete this lab",
                 "Prerequisites",
                 "Files in this lab",
                 "Learner task",

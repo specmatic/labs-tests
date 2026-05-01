@@ -21,7 +21,7 @@ OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 README_V2_H2_SEQUENCE = (
     "Objective",
     "Why this lab matters",
-    "Time required",
+    "Time required to complete this lab",
     "Prerequisites",
     "Architecture",
     "Files in this lab",

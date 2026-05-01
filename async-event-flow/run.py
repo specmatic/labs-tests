@@ -83,7 +83,7 @@ def build_lab_spec() -> LabSpec:
         readme_structure=ReadmeStructureSpec(
             required_h2_prefixes=(
                 "Background",
-                "Time required to complete this lab:",
+                "Time required to complete this lab",
                 "Objective",
                 "Prerequisites",
                 "Lab Rules",

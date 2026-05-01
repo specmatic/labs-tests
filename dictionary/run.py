@@ -114,7 +114,7 @@ def build_lab_spec() -> LabSpec:
         readme_structure=ReadmeStructureSpec(
             required_h2_prefixes=(
                 "Objective",
-                "Time required to complete this lab:",
+                "Time required to complete this lab",
                 "Prerequisites",
                 "Files in this lab",
                 "1. Run the suite using Docker (intentional failure)",

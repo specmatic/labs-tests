@@ -48,7 +48,7 @@ reports:
 Text
 ## Why this lab matters
 Text
-## Time required
+## Time required to complete this lab
 Text
 ## Prerequisites
 Text
@@ -100,7 +100,7 @@ reports:
 Text
 ## Why this lab matters
 Text
-## Time required
+## Time required to complete this lab
 Text
 ## Prerequisites
 Text
@@ -158,7 +158,7 @@ reports:
 Text
 ## Why this lab matters
 Text
-## Time required
+## Time required to complete this lab
 Text
 ## Prerequisites
 Text
@@ -213,7 +213,7 @@ reports:
 Text
 ## Why this lab matters
 Text
-## Time required
+## Time required to complete this lab
 Text
 ## Prerequisites
 Text
@@ -269,7 +269,7 @@ reports:
 Text
 ## Why this lab matters
 Text
-## Time required
+## Time required to complete this lab
 Text
 ## Prerequisites
 Text
