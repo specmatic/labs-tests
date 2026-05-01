@@ -776,8 +776,22 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                 }
             )
         elif is_output_block_with_paths(block):
-            has_path_outputs = True
             heading_text = heading["text"] if heading else "(no heading)"
+            if (block["rawLanguage"] or "").lower() in {"yaml", "json"}:
+                command_output_checks.append(
+                    {
+                        "line": str(block["line"]),
+                        "heading": heading_text,
+                        "commandFence": "(n/a)",
+                        "command": "(file display)",
+                        "outputFence": block["rawLanguage"] or "(none)",
+                        "output": "(not shown)",
+                        "status": "skipped",
+                        "notes": f"Skipped: this is a {block['rawLanguage'] or 'structured'} file display block, not command/output validation.",
+                    }
+                )
+                continue
+            has_path_outputs = True
             for os_name in os_targets:
                 output_coverage[os_name].append(
                     {
