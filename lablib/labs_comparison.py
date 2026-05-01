@@ -4911,12 +4911,14 @@ def parse_tests_run_counts(summary_text: str | None) -> dict[str, int] | None:
             "skipped": 0,
             "other": 0,
         }
+    failures = int(match.group("failures"), 0)
+    errors = int(match.group("errors") or 0)
     return {
         "tests": int(match.group("tests")),
         "passed": int(match.group("successes")),
-        "failed": int(match.group("failures")),
+        "failed": failures + errors,
         "skipped": 0,
-        "other": int(match.group("errors") or 0),
+        "other": 0,
     }
 
 
@@ -4992,12 +4994,15 @@ def format_tests_run_summary_from_report_json(report_path: Path) -> dict[str, in
             "other": 0,
         }
     summary = report.get("results", {}).get("summary", {})
+    failed = int(summary.get("failed", 0))
+    errors = int(summary.get("error", 0))
+    other = int(summary.get("other", 0))
     return {
         "tests": int(summary.get("tests", 0)),
         "passed": int(summary.get("passed", 0)),
-        "failed": int(summary.get("failed", 0)),
+        "failed": failed + errors,
         "skipped": int(summary.get("skipped", 0)),
-        "other": int(summary.get("other", 0)),
+        "other": other,
     }
 
 
@@ -5017,12 +5022,15 @@ def format_tests_run_summary_from_html(html_path: Path) -> dict[str, int] | None
             "other": 0,
         }
     summary = report.get("results", {}).get("summary", {})
+    failed = int(summary.get("failed", 0))
+    errors = int(summary.get("error", 0))
+    other = int(summary.get("other", 0))
     return {
         "tests": int(summary.get("tests", 0)),
         "passed": int(summary.get("passed", 0)),
-        "failed": int(summary.get("failed", 0)),
+        "failed": failed + errors,
         "skipped": int(summary.get("skipped", 0)),
-        "other": int(summary.get("other", 0)),
+        "other": other,
     }
 
 
