@@ -200,6 +200,62 @@ Text
         failures = self._phase_failures(readme_text, "baseline")
         self.assertNotIn("readme.v2.phase.outputs", failures)
 
+    def test_v2_phase_requires_shell_for_skipped_teardown_command(self) -> None:
+        readme_text = """---
+lab_schema: v2
+reports:
+  ctrf: false
+  html: false
+  readme_summary: true
+---
+# Sample Lab
+## Objective
+Text
+## Why this lab matters
+Text
+## Time required
+Text
+## Prerequisites
+Text
+## Architecture
+Text
+## Files in this lab
+Text
+## Lab Rules
+Text
+## Specmatic references
+Text
+## Lab Implementation Phases
+### Baseline Phase
+<!--
+phase-meta
+id: baseline
+kind: baseline
+-->
+```powershell
+docker compose down -v
+```
+```shell
+docker run demo
+```
+```terminaloutput
+Tests run: 1, Successes: 1, Failures: 0
+```
+## Pass Criteria
+Text
+## Troubleshooting
+Text
+## Cleanup
+Text
+## What you learned
+Text
+## Next step
+Text
+"""
+        failures = self._phase_failures(readme_text, "baseline")
+        self.assertIn("readme.v2.phase.command_fences", failures)
+        self.assertNotIn("readme.v2.phase.outputs", failures)
+
     def test_v2_phase_rejects_terminaloutput_casing_variants(self) -> None:
         readme_text = """---
 lab_schema: v2

@@ -1562,8 +1562,7 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
         os_targets = set(block["osTargets"])
         if block["is_console"]:
             has_commands = True
-            if skipped_command_output_reason(block["preview"] or ""):
-                continue
+            skipped_reason = skipped_command_output_reason(block["preview"] or "")
             for os_name in os_targets:
                 command_coverage[os_name].append(
                     {
@@ -1574,6 +1573,8 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                 )
                 if not is_command_language_appropriate(os_name, block["rawLanguage"] or ""):
                     command_language_issues.append({"os": os_name, "heading": heading_text or "(no heading)", "language": block["rawLanguage"] or "(none)"})
+            if skipped_reason:
+                continue
             next_block = blocks[index + 1] if index + 1 < len(blocks) else None
             if (
                 next_block is None

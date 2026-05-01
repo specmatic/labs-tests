@@ -688,6 +688,19 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
             next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
             if skipped_reason:
+                status = "skipped"
+                notes = skipped_reason
+                if block["rawLanguage"] != "shell":
+                    status = "fail"
+                    notes = f"Command fence must be ```shell```. {skipped_reason}"
+                    command_fence_violations.append(
+                        {
+                            "heading": heading_text,
+                            "line": str(block["line"]),
+                            "command": block["preview"] or "(blank)",
+                            "commandFence": block["rawLanguage"] or "(none)",
+                        }
+                    )
                 command_output_checks.append(
                     {
                         "line": str(block["line"]),
@@ -696,8 +709,8 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "command": block["preview"] or "(blank)",
                         "outputFence": "(not required)",
                         "output": "(not required)",
-                        "status": "skipped",
-                        "notes": skipped_reason,
+                        "status": status,
+                        "notes": notes,
                     }
                 )
                 continue
@@ -1859,11 +1872,18 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       color: #5f6b74;
       font-size: 0.95rem;
     }}
+    .matrix-tooltip-table-wrap {{
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+    }}
     .matrix-tooltip-details table {{
       width: 100%;
       border-collapse: collapse;
       font-size: 0.95rem;
       table-layout: auto;
+      min-width: 100%;
     }}
     .matrix-tooltip-details th,
     .matrix-tooltip-details td {{
@@ -1919,6 +1939,50 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-details table.matrix-tooltip-counts-table th:last-child,
     .matrix-tooltip-details table.matrix-tooltip-counts-table td:last-child {{
       width: 17%;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table {{
+      table-layout: fixed;
+      min-width: 1180px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th,
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td {{
+      font-size: 0.9rem;
+      padding: 8px 7px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:first-child,
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:first-child {{
+      width: 76px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(2),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(2) {{
+      width: 54px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(3),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(3) {{
+      width: 104px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(4),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(4) {{
+      width: 98px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(5),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(5) {{
+      width: 220px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(6),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(6) {{
+      width: 112px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:nth-child(7),
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:nth-child(7) {{
+      width: 200px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-wide-table th:last-child,
+    .matrix-tooltip-details table.matrix-tooltip-wide-table td:last-child {{
+      width: 260px;
     }}
     .matrix-tooltip-cell-status {{
       font-weight: 700;
@@ -2308,6 +2372,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           return;
         }}
         if (detailsData.type === 'table') {{
+          const tableWrap = document.createElement('div');
+          tableWrap.className = 'matrix-tooltip-table-wrap';
           const table = document.createElement('table');
           const thead = document.createElement('thead');
           const headerRow = document.createElement('tr');
@@ -2322,6 +2388,14 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
             headers[5] === 'Status'
           ) {{
             table.classList.add('matrix-tooltip-counts-table');
+          }} else if (
+            headers.length === 8 &&
+            headers[0] === 'Status' &&
+            headers[1] === 'Line' &&
+            headers[2] === 'Section' &&
+            headers[3] === 'Command fence'
+          ) {{
+            table.classList.add('matrix-tooltip-wide-table');
           }}
           headers.forEach((header) => {{
             const th = document.createElement('th');
@@ -2377,7 +2451,8 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
             tbody.appendChild(tr);
           }});
           table.appendChild(tbody);
-          container.appendChild(table);
+          tableWrap.appendChild(table);
+          container.appendChild(tableWrap);
           return;
         }}
         if (detailsData.type === 'bullets') {{
@@ -3416,37 +3491,34 @@ def build_command_output_fencing_details(labs: list[dict[str, Any]]) -> dict[str
     sections = []
     for lab in labs:
         os_doc = lab["readme"]["osDocumentation"]
-        command_fence_violations = os_doc.get("commandFenceViolations", [])
-        output_fence_violations = os_doc.get("outputFenceViolations", [])
-        missing_output_pairs = os_doc.get("missingOutputPairs", [])
-
+        checks = os_doc.get("commandOutputChecks", [])
+        issues_present = any(item.get("status") == "fail" for item in checks)
         lab_sections: list[dict[str, Any] | None] = [
-            build_snippet_table_section(
-                "Non-shell command fences",
-                command_fence_violations,
-                ["Line", "Section", "Command fence", "Command snippet"],
-                lambda item: [item["line"], item["heading"], f"```{item['commandFence']}```", item["command"]],
-            ),
-            build_snippet_table_section(
-                "Non-terminaloutput output fences",
-                output_fence_violations,
-                ["Line", "Section", "Command snippet", "Output fence", "Output snippet"],
-                lambda item: [item["line"], item["heading"], item["command"], f"```{item['outputFence']}```", item["output"]],
-            ),
-            build_snippet_table_section(
-                "Missing same-section command/output pairing",
-                missing_output_pairs,
-                ["Line", "Section", "Command fence", "Command snippet", "Expected output"],
-                lambda item: [item["line"], item["heading"], f"```{item['commandFence']}```", item["command"], item["output"]],
-            ),
+            {
+                "type": "table",
+                "title": "Command and output rows",
+                "headers": ["Status", "Line", "Section", "Command fence", "Command snippet", "Output fence", "Output snippet", "Notes"],
+                "rows": [
+                    [
+                        status_cell_for_modal(str(item.get("status", ""))),
+                        item["line"],
+                        item["heading"],
+                        item["commandFence"],
+                        item["command"],
+                        item["outputFence"],
+                        item["output"],
+                        item["notes"],
+                    ]
+                    for item in checks
+                ],
+            },
         ]
-        issues_present = bool(command_fence_violations or output_fence_violations or missing_output_pairs)
         add_action_section(
             lab_sections,  # type: ignore[arg-type]
             issues_present,
             [
                 "Use ```shell``` for every documented command block.",
-                "Place a ```terminaloutput``` block immediately after each command in the same section.",
+                "Place a ```terminaloutput``` block immediately after each command in the same section when output is required.",
             ],
         )
         add_lab_section(sections, lab, lab_sections)
@@ -3455,6 +3527,22 @@ def build_command_output_fencing_details(labs: list[dict[str, Any]]) -> dict[str
         "title": "Command and Output fencing validation",
         "note": "Commands must use ```shell```, outputs must use ```terminaloutput```, and each command must be followed by its output in the same section.",
         "sections": sections,
+    }
+
+
+def status_cell_for_modal(status: str) -> dict[str, str]:
+    normalized = status.strip().lower()
+    if normalized == "pass":
+        class_name = "matrix-tooltip-cell-status ok"
+    elif normalized == "skipped":
+        class_name = "matrix-tooltip-cell-status warn"
+    else:
+        class_name = "matrix-tooltip-cell-status fail"
+    return {
+        "text": status.title(),
+        "className": class_name,
+        "ariaLabel": status.title(),
+        "title": status.title(),
     }
 
 

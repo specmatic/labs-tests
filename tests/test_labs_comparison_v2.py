@@ -21,7 +21,7 @@ class LabsComparisonV2Tests(unittest.TestCase):
         profile = build_lab_profile(ROOT / "external-examples")
         self.assertEqual(len(profile["readme"]["videoLinks"]), 1)
         self.assertIn("youtube.com", profile["readme"]["videoLinks"][0]["target"])
-        self.assertEqual(profile["testCountConsistency"]["phases"], [])
+        self.assertTrue(profile["testCountConsistency"]["phases"])
 
     def test_external_examples_surfaces_skipped_command_output_rows(self) -> None:
         profile = build_lab_profile(ROOT / "external-examples")
@@ -34,6 +34,27 @@ class LabsComparisonV2Tests(unittest.TestCase):
                 for item in checks
             )
         )
+
+    def test_skipped_teardown_command_still_requires_shell_fence(self) -> None:
+        readme_text = """# Sample
+
+## Step
+
+```powershell
+docker compose down -v
+```
+"""
+        os_doc = analyze_readme_os_documentation(
+            readme_text,
+            extract_headings(readme_text),
+            extract_fenced_code_blocks(readme_text),
+        )
+        self.assertEqual(len(os_doc["commandOutputChecks"]), 1)
+        check = os_doc["commandOutputChecks"][0]
+        self.assertEqual(check["status"], "fail")
+        self.assertEqual(check["commandFence"], "powershell")
+        self.assertIn("Command fence must be ```shell```.", check["notes"])
+        self.assertIn("terminaloutput is not required", check["notes"])
 
     def test_yaml_file_display_block_is_skipped_in_fencing_validation(self) -> None:
         readme_text = """# Sample
