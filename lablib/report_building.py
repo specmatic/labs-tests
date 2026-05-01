@@ -76,6 +76,7 @@ def build_consolidated_payload(
     labs_git_ref: str,
     lab_results: list[dict[str, Any]],
     generated_at: str,
+    environment_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     passed = sum(1 for item in lab_results if item["status"] == "passed")
     failed = len(lab_results) - passed
@@ -98,6 +99,7 @@ def build_consolidated_payload(
         "environment": {
             "specmaticVersion": detect_shared_specmatic_version(lab_results),
             "labsGitRef": labs_git_ref,
+            **(environment_overrides or {}),
         },
         "labs": lab_results,
     }

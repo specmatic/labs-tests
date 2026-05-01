@@ -227,12 +227,12 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
         ),
         command_to_dict(
             execute(
-                ["git", "checkout", target_branch],
+                ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
                 UPSTREAM_LABS,
                 "setup:git",
                 stream_output=stream_output,
             ),
-            f"Switch upstream labs repository to {target_branch}",
+            f"Switch upstream labs repository to origin/{target_branch}",
         ),
         command_to_dict(
             execute(
@@ -260,6 +260,15 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
                 stream_output=stream_output,
             ),
             f"Pull latest upstream labs changes from {target_branch}",
+        ),
+        command_to_dict(
+            execute(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                UPSTREAM_LABS,
+                "setup:git",
+                stream_output=stream_output,
+            ),
+            "Verify selected upstream labs branch after refresh",
         ),
     ]
 
