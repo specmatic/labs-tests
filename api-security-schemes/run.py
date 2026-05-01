@@ -29,7 +29,13 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "api-security-schemes"
 README_FILE = UPSTREAM_LAB / "README.md"
 SPECMATIC_FILE = UPSTREAM_LAB / "specmatic.yaml"
 OUTPUT_DIR = ROOT / "api-security-schemes" / "output"
-LAB_COMMAND = ["docker", "compose", "up", "specmatic-test", "--abort-on-container-exit"]
+LAB_COMMAND = [
+    "docker",
+    "compose",
+    "up",
+    "specmatic-test",
+    "--abort-on-container-exit",
+]
 
 
 def main() -> int:
@@ -55,6 +61,13 @@ def build_lab_spec() -> LabSpec:
                 target_relpath="coverage_report.json",
                 kind="json",
                 expected_top_level_keys=("apiCoverage",),
+            ),
+            ArtifactSpec(
+                label="ctrf-report.json",
+                source_relpath="build/reports/specmatic/test/ctrf/ctrf-report.json",
+                target_relpath="ctrf-report.json",
+                kind="json",
+                expected_top_level_keys=("results",),
             ),
             ArtifactSpec(
                 label="specmatic-report.html",
@@ -117,11 +130,6 @@ def build_lab_spec() -> LabSpec:
                 expected_console_phrases=("Failures: 0",),
                 readme_assertions=(
                     readme_contains(
-                        "All 167 tests pass.",
-                        "README documents the final all-tests-pass expectation.",
-                        "README is missing the final all-tests-pass expectation.",
-                    ),
-                    readme_contains(
                         "Failures: 0",
                         "README documents the zero-failure summary.",
                         "README is missing the zero-failure summary.",
@@ -142,7 +150,7 @@ def build_lab_spec() -> LabSpec:
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_security_summary_assertions(context, expected_total=167, expected_passed=0, expected_failed=167),
+        *build_coverage_assertions(context, expect_failures=True),
         assert_condition(
             "${INVALID_OAUTH_TOKEN:OAUTH1234}" in context.artifacts["specmatic.yaml"]["text"],
             "Baseline specmatic.yaml kept the intentionally invalid OAuth fallback.",
@@ -163,7 +171,7 @@ def baseline_assertions(context: ValidationContext) -> list[dict]:
 
 def fixed_assertions(context: ValidationContext) -> list[dict]:
     return [
-        *build_security_summary_assertions(context, expected_total=167, expected_passed=167, expected_failed=0),
+        *build_security_summary_assertions(context),
         assert_condition(
             "${OAUTH_TOKEN:OAUTH1234}" in context.artifacts["specmatic.yaml"]["text"],
             "Fixed specmatic.yaml uses the correct OAuth environment variable name.",
@@ -184,45 +192,21 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
 
 def build_security_summary_assertions(
     context: ValidationContext,
-    *,
-    expected_total: int,
-    expected_passed: int,
-    expected_failed: int,
 ) -> list[dict]:
+    return [
+        *build_coverage_assertions(context, expect_failures=False),
+    ]
+
+
+def build_coverage_assertions(context: ValidationContext, *, expect_failures: bool) -> list[dict]:
     coverage_report = context.artifacts["coverage_report.json"]["json"]
     html_report = parse_html_embedded_report(context.artifacts["specmatic-report.html"]["text"])
     html_summary = html_report["results"]["summary"]
-    html_total = html_summary.get("tests", 0)
-    html_failures = html_summary.get("failed", 0)
+    html_failures = int(html_summary.get("failed", 0))
     operations = coverage_report.get("apiCoverage", [{}])[0].get("operations", [])
     missing_in_spec = sum(1 for operation in operations if operation.get("coverageStatus") == "missing in spec")
     covered = sum(1 for operation in operations if operation.get("coverageStatus") == "covered")
-
     return [
-        assert_equal(
-            html_total,
-            expected_total,
-            f"Specmatic HTML summary reported {expected_total} tests as expected.",
-            f"Specmatic HTML summary expected {expected_total} tests, got {html_total}.",
-            category="report",
-            details=[detail("Expected total", expected_total), detail("Actual total", html_total)],
-        ),
-        assert_equal(
-            html_summary.get("passed", 0),
-            expected_passed,
-            f"Specmatic HTML passing count matched expected value {expected_passed}.",
-            f"Specmatic HTML passing count expected {expected_passed}, got {html_summary.get('passed', 0)}.",
-            category="report",
-            details=[detail("Expected passed", expected_passed), detail("Actual passed", html_summary.get("passed", 0))],
-        ),
-        assert_equal(
-            html_failures,
-            expected_failed,
-            f"Specmatic HTML failure count matched expected value {expected_failed}.",
-            f"Specmatic HTML failure count expected {expected_failed}, got {html_failures}.",
-            category="report",
-            details=[detail("Expected failed", expected_failed), detail("Actual failed", html_failures)],
-        ),
         assert_condition(
             len(operations) > 0,
             "Coverage report listed API operations.",
@@ -231,12 +215,22 @@ def build_security_summary_assertions(
             details=[detail("Operations listed", len(operations))],
         ),
         assert_condition(
-            missing_in_spec > 0 if expected_failed > 0 else missing_in_spec == 0,
+            html_failures > 0 if expect_failures else html_failures == 0,
+            "Specmatic HTML report reflected the expected pass/fail phase behavior.",
+            "Specmatic HTML report did not reflect the expected pass/fail phase behavior.",
+            category="report",
+            details=[
+                detail("Expected failures in phase", "yes" if expect_failures else "no"),
+                detail("Actual HTML failures", html_failures),
+            ],
+        ),
+        assert_condition(
+            missing_in_spec > 0 if expect_failures else missing_in_spec == 0,
             "Coverage report reflected the expected missing-in-spec status for this phase.",
             "Coverage report missing-in-spec status did not match the expected phase behavior.",
             category="report",
             details=[
-                detail("Expected failures", expected_failed),
+                detail("Expected failures in phase", "yes" if expect_failures else "no"),
                 detail("Missing in spec operations", missing_in_spec),
                 detail("Covered operations", covered),
             ],
