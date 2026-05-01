@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from lablib.command_runner import CommandResult
-from lablib.readme_expectations import README_V2_H2_SEQUENCE
+from lablib.readme_expectations import CANONICAL_README_H2_SEQUENCE, load_h2_sequence
 from lablib.readme_schema import parse_readme_document
 from lablib.scaffold import (
     LabSpec,
@@ -21,16 +21,19 @@ LABS_ROOT = ROOT.parent / "labs"
 
 
 class ReadmeSchemaTest(unittest.TestCase):
+    def test_h2_yaml_file_is_the_single_source_of_truth(self) -> None:
+        self.assertEqual(CANONICAL_README_H2_SEQUENCE, load_h2_sequence())
+
     def test_quick_start_api_testing_v2_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "quick-start-api-testing" / "README.md").read_text(encoding="utf-8"))
         self.assertTrue(document.is_v2)
-        self.assertEqual(document.h2_titles, list(README_V2_H2_SEQUENCE))
+        self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "final"])
 
     def test_external_examples_v2_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "external-examples" / "README.md").read_text(encoding="utf-8"))
         self.assertTrue(document.is_v2)
-        self.assertEqual(document.h2_titles, list(README_V2_H2_SEQUENCE))
+        self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "final"])
         self.assertFalse(document.metadata["reports"]["ctrf"])
         self.assertFalse(document.metadata["reports"]["html"])
@@ -308,7 +311,7 @@ Text
         failures = self._phase_failures(readme_text, "baseline")
         self.assertIn("readme.v2.phase.output_fences", failures)
 
-    def test_legacy_readme_rejects_bare_command_fences(self) -> None:
+    def test_command_output_validation_rejects_bare_command_fences(self) -> None:
         readme_text = """# Sample Lab
 
 ## Baseline
@@ -320,10 +323,10 @@ docker run demo
 containers are up
 ```
 """
-        failures = self._legacy_failures(readme_text)
+        failures = self._command_output_failures(readme_text)
         self.assertIn("readme.commands.executable_fences", failures)
 
-    def test_legacy_readme_rejects_terminaloutput_casing_variants(self) -> None:
+    def test_command_output_validation_rejects_terminaloutput_casing_variants(self) -> None:
         readme_text = """# Sample Lab
 
 ## Baseline
@@ -335,7 +338,7 @@ docker run demo
 containers are up
 ```
 """
-        failures = self._legacy_failures(readme_text)
+        failures = self._command_output_failures(readme_text)
         self.assertIn("readme.output.terminaloutput_fence", failures)
         self.assertNotIn("readme.command_output.followup", failures)
 
@@ -380,7 +383,7 @@ containers are up
             if assertion["status"] == "failed"
         }
 
-    def _legacy_failures(self, readme_text: str) -> set[str]:
+    def _command_output_failures(self, readme_text: str) -> set[str]:
         document = parse_readme_document(readme_text)
         phase = PhaseSpec(name="baseline", description="phase", expected_exit_code=0, readme_phase_id=None)
         lab = LabSpec(

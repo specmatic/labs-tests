@@ -13,14 +13,7 @@ from lablib.command_runner import CommandResult, run_command
 from lablib.readme_expectations import (
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     OUTPUT_FENCE_LANGUAGE,
-    get_lab_readme_override,
-    heading_matches,
-    missing_shared_h2_titles,
-    normalize_heading_title,
     optional_h2_titles,
-    shared_h2_sequence_matches,
-    shared_h2_titles,
-    title_present,
     unexpected_h2_titles_for_lab,
 )
 from lablib.readme_schema import (
@@ -1299,12 +1292,10 @@ def evaluate_readme_links(context: ValidationContext) -> list[dict[str, Any]]:
 
 
 def validate_readme_structure(context: ValidationContext) -> list[dict[str, Any]]:
-    if getattr(context.readme_doc, "is_v2", False):
-        return validate_v2_readme_structure(context)
-    return validate_legacy_readme_structure(context.readme_text, context.lab.name)
+    return validate_canonical_readme_structure(context)
 
 
-def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, Any]]:
+def validate_canonical_readme_structure(context: ValidationContext) -> list[dict[str, Any]]:
     document = context.readme_doc
     actual_h2 = document.h2_titles
     expected_h2 = list(expected_h2_titles_for_document(document))
@@ -1366,80 +1357,6 @@ def validate_v2_readme_structure(context: ValidationContext) -> list[dict[str, A
             ],
         ),
     ]
-    return assertions
-
-
-def validate_legacy_readme_structure(readme_text: str, lab_name: str) -> list[dict[str, Any]]:
-    headings = [(len(m.group(1)), m.group(2).strip()) for m in HEADING_RE.finditer(readme_text)]
-    assertions: list[dict[str, Any]] = []
-    h1_headings = [text for level, text in headings if level == 1]
-    actual_h2 = [text for level, text in headings if level == 2]
-    override = get_lab_readme_override(lab_name)
-    assertions.append(
-        assert_equal(
-            len(h1_headings),
-            1,
-            "README contained exactly one level-1 heading.",
-            f"README expected exactly one level-1 heading, found {len(h1_headings)}.",
-            category="readme",
-            code="readme.structure.single_h1",
-            details=[detail("H1 headings", ", ".join(h1_headings) or "(none)")],
-        )
-    )
-
-    for expected_title in shared_h2_titles():
-        at_level = [text for level, text in headings if level == 2 and heading_matches(text, expected_title)]
-        wrong_level = [f"h{level} {text}" for level, text in headings if level != 2 and heading_matches(text, expected_title)]
-        assertions.append(
-            assert_condition(
-                bool(at_level),
-                f"README contains the '{expected_title}' section at level 2.",
-                f"README is missing the '{expected_title}' section at level 2.",
-                category="readme",
-                code="readme.structure.required_h2_sections",
-                details=[
-                    detail("Matching h2 headings", ", ".join(at_level) or "(none)"),
-                    detail("Matching headings at wrong levels", ", ".join(wrong_level) or "(none)"),
-                ],
-            )
-        )
-
-    missing_shared = missing_shared_h2_titles(actual_h2)
-    actual_found_shared = [
-        title
-        for title in actual_h2
-        if any(heading_matches(title, expected) for expected in shared_h2_titles())
-    ]
-    assertions.append(
-        assert_condition(
-            shared_h2_sequence_matches(actual_h2),
-            "README required sections appear in the expected order.",
-            "README required sections do not appear in the expected order.",
-            category="readme",
-            code="readme.structure.required_h2_order",
-            details=[
-                detail("Expected order", " -> ".join(shared_h2_titles())),
-                detail("Actual shared H2 order", " -> ".join(actual_found_shared) or "(none)"),
-                detail("Missing shared H2 sections", ", ".join(missing_shared) or "(none)"),
-            ],
-        )
-    )
-
-    unexpected_h2 = unexpected_h2_titles_for_lab(lab_name, actual_h2)
-    assertions.append(
-        assert_condition(
-            not unexpected_h2,
-            "README does not keep unexpected implementation sections at H2 level.",
-            "README contains extra or unwanted H2 sections that should move to H3 or be removed.",
-            category="readme",
-            code="readme.structure.unexpected_h2_sections",
-            details=[
-                detail("Unexpected H2 sections", ", ".join(unexpected_h2) or "(none)"),
-                detail("Allowed optional H2 sections", ", ".join(optional_h2_titles()) or "(none)"),
-                detail("Lab override H2 sections", ", ".join(override.allowed_additional_h2_titles) or "(none)"),
-            ],
-        )
-    )
     return assertions
 
 

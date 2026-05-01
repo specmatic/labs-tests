@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 import re
 
 
@@ -18,22 +19,31 @@ WINDOWS_COMMAND_FENCE_LANGUAGES = (
 
 OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 
-README_V2_H2_SEQUENCE = (
-    "Objective",
-    "Why this lab matters",
-    "Time required to complete this lab",
-    "Prerequisites",
-    "Architecture",
-    "Files in this lab",
-    "Lab Rules",
-    "Specmatic references",
-    "Lab Implementation Phases",
-    "Pass Criteria",
-    "Troubleshooting",
-    "Cleanup",
-    "What you learned",
-    "Next step",
-)
+def load_h2_sequence() -> tuple[str, ...]:
+    sequence_file = Path(__file__).with_name("readme_h2_sequence.yaml")
+    lines = sequence_file.read_text(encoding="utf-8").splitlines()
+    items: list[str] = []
+    inside_sequence = False
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "shared_h2_sequence:":
+            inside_sequence = True
+            continue
+        if inside_sequence:
+            if stripped.startswith("- "):
+                items.append(stripped[2:].strip())
+                continue
+            if not raw_line.startswith(" "):
+                break
+    if not items:
+        raise ValueError(f"No shared_h2_sequence entries found in {sequence_file}")
+    return tuple(items)
+
+
+CANONICAL_README_H2_SEQUENCE = load_h2_sequence()
 
 
 @dataclass(frozen=True)
@@ -117,67 +127,44 @@ README_TEMPLATE = ReadmeTemplate(
     version="1.0",
     h1_mode="lab-specific-title",
     h1_notes="Every lab README should start with one H1. The title text is lab-specific, but the single-H1 structure is shared.",
-    shared_h2=(
+    shared_h2=tuple(
         SectionRule(
-            title="Files in this lab",
+            title=title,
             level=2,
-            heading_type="files",
-            notes="List the important files the learner will touch or inspect.",
-        ),
-        SectionRule(
-            title="Lab Rules",
-            level=2,
-            heading_type="rules",
-            notes="Document constraints that should remain true while working through the lab.",
-        ),
-        SectionRule(
-            title="Next step",
-            level=2,
-            heading_type="next-step",
-            notes="Point the reader to the next lab or follow-up action.",
-        ),
-        SectionRule(
-            title="Objective",
-            level=2,
-            heading_type="objective",
-            notes="State the concrete learning outcome for this lab.",
-        ),
-        SectionRule(
-            title="Prerequisites",
-            level=2,
-            heading_type="prerequisites",
-            notes="Call out what the learner needs before starting the lab.",
-        ),
-        SectionRule(
-            title="Specmatic references",
-            level=2,
-            heading_type="references",
-            notes="Link relevant Specmatic docs or references that help explain the lab.",
-        ),
-        SectionRule(
-            title="Time required to complete this lab",
-            level=2,
-            heading_type="time-required",
-            notes="Give the expected time to complete the lab.",
-        ),
-        SectionRule(
-            title="Lab Time",
-            level=2,
-            heading_type="lab-time",
-            notes="Reserved for any additional time/context section used across labs.",
-        ),
-        SectionRule(
-            title="What you learned",
-            level=2,
-            heading_type="what-you-learned",
-            notes="Summarize the key takeaways from the lab.",
-        ),
-        SectionRule(
-            title="Why this lab matters",
-            level=2,
-            heading_type="why-it-matters",
-            notes="Explain why this workflow or concept matters in practice.",
-        ),
+            heading_type=re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-"),
+            notes=(
+                "List the important files the learner will touch or inspect."
+                if title == "Files in this lab"
+                else "Document constraints that should remain true while working through the lab."
+                if title == "Lab Rules"
+                else "Point the reader to the next lab or follow-up action."
+                if title == "Next step"
+                else "State the concrete learning outcome for this lab."
+                if title == "Objective"
+                else "Call out what the learner needs before starting the lab."
+                if title == "Prerequisites"
+                else "Link relevant Specmatic docs or references that help explain the lab."
+                if title == "Specmatic references"
+                else "Give the expected time to complete the lab."
+                if title == "Time required to complete this lab"
+                else "Explain why this workflow or concept matters in practice."
+                if title == "Why this lab matters"
+                else "Document the main lab implementation phases in order."
+                if title == "Lab Implementation Phases"
+                else "Spell out how the learner knows the lab is complete."
+                if title == "Pass Criteria"
+                else "Help the reader recover from non-obvious issues."
+                if title == "Troubleshooting"
+                else "Explain how to clean up local state after the lab."
+                if title == "Cleanup"
+                else "Summarize the key takeaways from the lab."
+                if title == "What you learned"
+                else "Describe the high-level system or flow before implementation."
+                if title == "Architecture"
+                else ""
+            ),
+        )
+        for title in CANONICAL_README_H2_SEQUENCE
     ),
     implementation_h3_rule=SectionRule(
         title="Implementation step",
@@ -207,22 +194,7 @@ README_TEMPLATE = ReadmeTemplate(
         ),
         notes="Studio-specific steps may be documented as H3 sections. They can be tracked as manual/not-yet-automated without failing labs-tests.",
     ),
-    optional_h2=(
-        SectionRule(
-            title="Troubleshooting",
-            level=2,
-            heading_type="troubleshooting",
-            required=False,
-            notes="Optional, but recommended when the lab has non-obvious failure modes.",
-        ),
-        SectionRule(
-            title="Pass criteria",
-            level=2,
-            heading_type="pass-criteria",
-            required=False,
-            notes="Optional, but recommended when the README needs explicit verify-the-fix guidance.",
-        ),
-    ),
+    optional_h2=(),
 )
 
 
@@ -241,9 +213,6 @@ LAB_README_OVERRIDES: dict[str, LabReadmeOverride] = {
 }
 
 
-EXPECTED_README_H2_SEQUENCE = tuple(section.title for section in README_TEMPLATE.shared_h2)
-
-
 def normalize_heading_title(value: str) -> str:
     normalized = re.sub(r"\s+", " ", value.replace("`", "")).strip().lower()
     return normalized.rstrip(":")
@@ -257,8 +226,8 @@ def get_lab_readme_override(lab_name: str) -> LabReadmeOverride:
     return LAB_README_OVERRIDES.get(lab_name, LabReadmeOverride())
 
 
-def shared_h2_titles() -> tuple[str, ...]:
-    return tuple(section.title for section in README_TEMPLATE.shared_h2)
+def canonical_h2_titles() -> tuple[str, ...]:
+    return CANONICAL_README_H2_SEQUENCE
 
 
 def optional_h2_titles() -> tuple[str, ...]:
@@ -267,7 +236,7 @@ def optional_h2_titles() -> tuple[str, ...]:
 
 def allowed_h2_titles_for_lab(lab_name: str) -> tuple[str, ...]:
     override = get_lab_readme_override(lab_name)
-    return (*shared_h2_titles(), *optional_h2_titles(), *override.allowed_additional_h2_titles, *README_V2_H2_SEQUENCE)
+    return (*CANONICAL_README_H2_SEQUENCE, *optional_h2_titles(), *override.allowed_additional_h2_titles)
 
 
 def unexpected_h2_titles_for_lab(lab_name: str, actual_h2_titles: list[str] | tuple[str, ...]) -> list[str]:
@@ -279,25 +248,25 @@ def unexpected_h2_titles_for_lab(lab_name: str, actual_h2_titles: list[str] | tu
     ]
 
 
-def missing_shared_h2_titles(actual_h2_titles: list[str] | tuple[str, ...]) -> list[str]:
+def missing_canonical_h2_titles(actual_h2_titles: list[str] | tuple[str, ...]) -> list[str]:
     return [
         expected
-        for expected in shared_h2_titles()
+        for expected in canonical_h2_titles()
         if not any(heading_matches(actual, expected) for actual in actual_h2_titles)
     ]
 
 
-def shared_h2_sequence_matches(actual_h2_titles: list[str] | tuple[str, ...]) -> bool:
+def canonical_h2_sequence_matches(actual_h2_titles: list[str] | tuple[str, ...]) -> bool:
     matched_shared = [
         actual
         for actual in actual_h2_titles
-        if any(heading_matches(actual, expected) for expected in shared_h2_titles())
+        if any(heading_matches(actual, expected) for expected in canonical_h2_titles())
     ]
-    if len(matched_shared) != len(shared_h2_titles()):
+    if len(matched_shared) != len(canonical_h2_titles()):
         return False
     return all(
         heading_matches(actual, expected)
-        for actual, expected in zip(matched_shared, shared_h2_titles())
+        for actual, expected in zip(matched_shared, canonical_h2_titles())
     )
 
 

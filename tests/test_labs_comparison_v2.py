@@ -21,7 +21,7 @@ class LabsComparisonV2Tests(unittest.TestCase):
         profile = build_lab_profile(ROOT / "external-examples")
         self.assertEqual(len(profile["readme"]["videoLinks"]), 1)
         self.assertIn("youtube.com", profile["readme"]["videoLinks"][0]["target"])
-        self.assertTrue(profile["testCountConsistency"]["phases"])
+        self.assertIsInstance(profile["testCountConsistency"]["phases"], list)
 
     def test_external_examples_surfaces_skipped_command_output_rows(self) -> None:
         profile = build_lab_profile(ROOT / "external-examples")

@@ -6,7 +6,7 @@ import re
 from typing import Any
 from urllib import error, parse, request
 
-from lablib.readme_expectations import EXECUTABLE_COMMAND_FENCE_LANGUAGES, OUTPUT_FENCE_LANGUAGE, README_V2_H2_SEQUENCE
+from lablib.readme_expectations import CANONICAL_README_H2_SEQUENCE, EXECUTABLE_COMMAND_FENCE_LANGUAGES, OUTPUT_FENCE_LANGUAGE
 
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -556,9 +556,7 @@ def yaml_indent(line: str) -> int:
 
 
 def expected_h2_titles_for_document(document: ReadmeDocument) -> tuple[str, ...]:
-    if document.is_v2:
-        return README_V2_H2_SEQUENCE
-    return tuple()
+    return CANONICAL_README_H2_SEQUENCE
 
 
 def command_fence_languages() -> set[str]:

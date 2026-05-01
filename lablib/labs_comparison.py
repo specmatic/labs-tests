@@ -11,15 +11,12 @@ import re
 from typing import Any
 
 from lablib.readme_expectations import (
-    EXPECTED_README_H2_SEQUENCE,
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     command_block_language,
     README_TEMPLATE,
     get_lab_readme_override,
     heading_matches,
     optional_h2_titles,
-    shared_h2_sequence_matches,
-    shared_h2_titles,
     title_present,
     unexpected_h2_titles_for_lab,
 )
@@ -259,9 +256,9 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         expected_failure_mismatch_reason=effective_efm_reason,
     )
     override = get_lab_readme_override(spec.name)
-    required_h2 = list(expected_h2_titles_for_document(readme_doc) or shared_h2_titles())
+    required_h2 = list(expected_h2_titles_for_document(readme_doc))
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
-    shared_h2_matches = (h2_headings == required_h2) if readme_doc.is_v2 else shared_h2_sequence_matches(h2_headings)
+    shared_h2_matches = h2_headings == required_h2
 
     # Helper function to parse report metadata with backward compatibility
     def parse_report_metadata(report_metadata: Any) -> dict[str, bool]:
@@ -337,7 +334,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
                 for heading in headings
             ],
             "requiredH2": required_h2,
-            "optionalH2": [] if readme_doc.is_v2 else list(optional_h2_titles()),
+            "optionalH2": list(optional_h2_titles()),
             "additionalH2": list(override.allowed_additional_h2_titles),
             "actualH2": h2_headings,
             "actualH3": h3_headings,
