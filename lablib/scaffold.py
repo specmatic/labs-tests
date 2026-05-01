@@ -1699,22 +1699,27 @@ def parse_console_test_summary(summary_text: str | None) -> dict[str, int] | Non
             "skipped": 0,
             "other": 0,
         }
+    failures = int(match.group("failures"))
+    errors = int(match.group("errors") or 0)
     return {
         "tests": int(match.group("tests")),
         "passed": int(match.group("successes")),
-        "failed": int(match.group("failures")),
+        "failed": failures + errors,
         "skipped": 0,
-        "other": int(match.group("errors") or 0),
+        "other": 0,
     }
 
 
 def normalize_report_test_summary(summary: dict[str, Any]) -> dict[str, int]:
+    failed = int(summary.get("failed", 0))
+    errors = int(summary.get("error", 0))
+    other = int(summary.get("other", 0))
     return {
         "tests": int(summary.get("tests", 0)),
         "passed": int(summary.get("passed", 0)),
-        "failed": int(summary.get("failed", 0)),
+        "failed": failed + errors,
         "skipped": int(summary.get("skipped", 0)),
-        "other": int(summary.get("other", 0)),
+        "other": other,
     }
 
 
