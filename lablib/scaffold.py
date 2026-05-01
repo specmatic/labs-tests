@@ -75,6 +75,14 @@ class ArtifactSpec:
 
 @dataclass
 class ReadmeStructureSpec:
+    """
+    Deprecated transitional structure spec.
+
+    The authoritative README structure now comes from the shared parser/schema
+    in `lablib.readme_expectations` + `lablib.readme_schema`.
+    This dataclass is kept only for gradual cleanup of older lab specs and is
+    no longer used by the shared structure validators.
+    """
     required_h2_prefixes: tuple[str, ...]
     additional_h2_prefixes: tuple[str, ...] = ()
     enforce_required_order: bool = True
@@ -114,7 +122,7 @@ class LabSpec:
     phases: tuple[PhaseSpec, ...]
     command_env: dict[str, str] = field(default_factory=dict)
     common_artifact_specs: tuple[ArtifactSpec, ...] = ()
-    readme_structure: ReadmeStructureSpec | None = None
+    readme_structure: ReadmeStructureSpec | None = None  # Deprecated: retained only during legacy spec cleanup.
     setup_failure_message: str = (
         "Workspace setup failed. See output/consolidated-report/setup-output.json from the root setup command for details."
     )
