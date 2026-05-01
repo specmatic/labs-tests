@@ -46,6 +46,11 @@ LEGACY_CONSOLIDATED_REPORT_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "report.json"
 LEGACY_CONSOLIDATED_REPORT_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "report.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
+EXCLUDED_LABS = {"coding-agents", "order-bff", "arazzo-workflow-testing"}
+
+
+def not_in_excluded(var: str) -> bool:
+    return var not in EXCLUDED_LABS
 
 
 def parse_args() -> argparse.Namespace:
@@ -277,7 +282,10 @@ def discover_labs() -> list[str]:
     return sorted(
         path.name
         for path in ROOT.iterdir()
-        if path.is_dir() and not path.name.startswith(".") and (path / "run.py").exists()
+        if path.is_dir()
+        and not path.name.startswith(".")
+        and not_in_excluded(path.name)
+        and (path / "run.py").exists()
     )
 
 
