@@ -70,8 +70,7 @@ CORE_VALIDATION_LABELS = {
     "README H2 order matches the lab's source-of-truth structure",
     "Command and Output fencing validation",
     "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
-    "Generated artifacts include ctrf-report.json",
-    "Generated artifacts include the sibling Specmatic HTML report",
+    "Generated report artifacts align with README expectations",
 }
 IGNORABLE_MESSAGES = ("(none)",)
 
@@ -1020,6 +1019,75 @@ def check_expected_failure(lab: dict[str, Any], artifact_label: str, report_key:
         return (not any_expected) or artifact_exists
 
 
+def evaluate_report_artifact_expectation(lab: dict[str, Any], artifact_label: str, report_key: str) -> dict[str, str | bool]:
+    artifact_exists = artifact_label in lab["artifacts"]["generatedLabels"]
+    has_expected_failure = any(
+        phase["expectedReports"][report_key]["expected_failure"]
+        for phase in lab["phases"]
+    )
+    any_expected = any(
+        phase["expectedReports"][report_key]["expected"]
+        for phase in lab["phases"]
+    )
+
+    if has_expected_failure:
+        ok = not artifact_exists
+        return {
+            "artifact": artifact_label,
+            "reportKey": report_key,
+            "expectedState": "expected_failure",
+            "actualState": "present" if artifact_exists else "missing",
+            "status": "expected" if ok else "fail",
+            "message": (
+                "Missing as expected because README metadata marks this report as expected_failure."
+                if ok
+                else "Present even though README metadata marks this report as expected_failure."
+            ),
+            "ok": ok,
+        }
+
+    if any_expected:
+        ok = artifact_exists
+        return {
+            "artifact": artifact_label,
+            "reportKey": report_key,
+            "expectedState": "required",
+            "actualState": "present" if artifact_exists else "missing",
+            "status": "pass" if ok else "fail",
+            "message": (
+                "Present as required by README metadata."
+                if ok
+                else "Missing even though README metadata requires this report."
+            ),
+            "ok": ok,
+        }
+
+    return {
+        "artifact": artifact_label,
+        "reportKey": report_key,
+        "expectedState": "optional",
+        "actualState": "present" if artifact_exists else "missing",
+        "status": "pass",
+        "message": (
+            "Present, but this report is optional in README metadata."
+            if artifact_exists
+            else "Not required by README metadata."
+        ),
+        "ok": True,
+    }
+
+
+def check_report_artifact_bundle(lab: dict[str, Any]) -> bool | str:
+    ctrf = evaluate_report_artifact_expectation(lab, "ctrf-report.json", "ctrf")
+    html = evaluate_report_artifact_expectation(lab, "specmatic-report.html", "html")
+    checks = [ctrf, html]
+    if not all(bool(item["ok"]) for item in checks):
+        return False
+    if any(item["status"] == "expected" for item in checks):
+        return "expected_failure_pass"
+    return True
+
+
 def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     shared_h2 = tuple(labs[0]["readme"]["requiredH2"]) if labs else ()
@@ -1246,26 +1314,16 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "cells": [lab["testCountConsistency"]["consistent"] for lab in labs],
         },
         {
-            "label": "Generated artifacts include ctrf-report.json",
+            "label": "Generated report artifacts align with README expectations",
             "tooltip": {
-                "summary": ["Each lab writes ctrf-report.json as the machine-readable test result."],
-                "details": build_artifact_details(labs, "ctrf-report.json"),
+                "summary": [
+                    "This combines CTRF JSON and sibling Specmatic HTML availability into one validation.",
+                    "The modal shows each artifact separately so you can spot mixed states like one present and one missing.",
+                    "README metadata still controls whether each artifact is required, optional, or expected to be absent.",
+                ],
+                "details": build_report_artifact_bundle_details(labs),
             },
-            "cells": [
-                check_expected_failure(lab, "ctrf-report.json", "ctrf")
-                for lab in labs
-            ],
-        },
-        {
-            "label": "Generated artifacts include the sibling Specmatic HTML report",
-            "tooltip": {
-                "summary": ["Each lab writes specmatic-report.html alongside the CTRF JSON output."],
-                "details": build_artifact_details(labs, "specmatic-report.html"),
-            },
-            "cells": [
-                check_expected_failure(lab, "specmatic-report.html", "html")
-                for lab in labs
-            ],
+            "cells": [check_report_artifact_bundle(lab) for lab in labs],
         },
         {
             "label": "README does not keep extra, unwanted, or out-of-sequence implementation sections at H2 level",
@@ -3442,6 +3500,54 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
     return {
         "type": "sections",
         "title": f"{label} coverage",
+        "sections": sections,
+    }
+
+
+def build_report_artifact_bundle_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
+    sections = []
+    for lab in labs:
+        ctrf = evaluate_report_artifact_expectation(lab, "ctrf-report.json", "ctrf")
+        html = evaluate_report_artifact_expectation(lab, "specmatic-report.html", "html")
+        overall_ok = bool(ctrf["ok"]) and bool(html["ok"])
+        lab_sections = [
+            {
+                "type": "table",
+                "title": "Artifact availability",
+                "headers": ["Artifact", "Expected", "Actual", "Result", "Notes"],
+                "rows": [
+                    [
+                        ctrf["artifact"],
+                        str(ctrf["expectedState"]).replace("_", " "),
+                        str(ctrf["actualState"]),
+                        str(ctrf["status"]).title(),
+                        str(ctrf["message"]),
+                    ],
+                    [
+                        html["artifact"],
+                        str(html["expectedState"]).replace("_", " "),
+                        str(html["actualState"]),
+                        str(html["status"]).title(),
+                        str(html["message"]),
+                    ],
+                ],
+            },
+            {
+                "type": "bullets",
+                "title": "Overall",
+                "tone": "ok" if overall_ok else "attention",
+                "items": [
+                    "Both artifact expectations are satisfied."
+                    if overall_ok
+                    else "At least one artifact does not match the README-driven expectation."
+                ],
+            },
+        ]
+        add_lab_section(sections, lab, lab_sections)
+    return {
+        "type": "sections",
+        "title": "Generated report artifacts align with README expectations",
+        "note": "CTRF JSON and sibling Specmatic HTML are checked together so mixed states remain visible per lab.",
         "sections": sections,
     }
 
