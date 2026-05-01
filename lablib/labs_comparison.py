@@ -52,6 +52,13 @@ LICENSE_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.
 LICENSE_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
+EXCLUDED_LABS = {"coding-agents", "order-bff", "arazzo-workflow-testing"}
+
+
+def not_in_excluded(var: str) -> bool:
+    return var not in EXCLUDED_LABS
+
+
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*?)```", re.DOTALL | re.MULTILINE)
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
@@ -187,19 +194,21 @@ def discover_report_lab_names(root: Path | None = None) -> list[str]:
         sorted(
             path.name.removesuffix("-output")
             for path in snapshot_dir.iterdir()
-            if path.is_dir() and path.name.endswith("-output")
+            if path.is_dir()
+            and path.name.endswith("-output")
+            and not_in_excluded(path.name.removesuffix("-output"))
         )
         if snapshot_dir.exists()
         else []
     )
     if discovered:
         return discovered
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py"))
+    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
 
 
 def discover_lab_names(root: Path | None = None) -> list[str]:
     repo_root = root or ROOT
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py"))
+    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
 
 
 def build_lab_profile(lab_dir: Path) -> dict[str, Any]:

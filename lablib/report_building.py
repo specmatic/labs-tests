@@ -6,6 +6,7 @@ import re
 import subprocess
 from typing import Any
 
+from lablib.labs_comparison import not_in_excluded
 from lablib.provenance import detect_report_provenance
 
 
@@ -22,7 +23,9 @@ def discover_snapshot_lab_names(labs_output_dir: Path | None = None) -> list[str
     return sorted(
         path.name.removesuffix("-output")
         for path in base_dir.iterdir()
-        if path.is_dir() and path.name.endswith("-output")
+        if path.is_dir()
+        and path.name.endswith("-output")
+        and not_in_excluded(path.name.removesuffix("-output"))
     )
 
 
