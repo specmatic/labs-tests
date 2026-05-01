@@ -323,8 +323,17 @@ GitHub Actions workflow:
 - runs `python3 run_all.py --refresh-labs --force --labs-branch dynamic-labs` by default
 - accepts an optional space-separated `labs` workflow input to run only selected labs
 - accepts an optional `labs_branch` workflow input; until the `dynamic-labs` work is merged, the default branch is `dynamic-labs`
+- accepts an optional `manage_license` workflow input; by default the workflow creates or replaces `../labs/license.txt` before the run and restores or removes it afterward
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
 - uses a 40-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
 - includes the consolidated report path and comparison report path in the GitHub job summary so workflow runs can be checked quickly
 - uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact
+
+License lifecycle:
+
+- `python3 run_all.py` manages `../labs/license.txt` by default
+- local runs read `status.license` from `~/.specmatic/license.json` and write it to `../labs/license.txt`
+- GitHub Actions runs read `SPECMATIC_LICENSE_KEY` and write it to `../labs/license.txt`
+- after the run completes, the original `../labs/license.txt` content is restored, or the file is removed if it did not exist before the run
+- use `python3 run_all.py --no-manage-license ...` to opt out locally

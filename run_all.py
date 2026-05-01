@@ -21,6 +21,10 @@ from lablib.provenance import build_run_metadata
 from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref, upstream_readme_href
 from lablib.time_display import format_report_datetime
 from lablib.workspace_setup import (
+    license_failure_dict,
+    license_setup_dict,
+    prepare_upstream_labs_license,
+    restore_upstream_labs_license,
     run_setup,
     setup_failure_action_lines,
     setup_failure_error_lines,
@@ -78,6 +82,12 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         help="Optional subset of lab folder names to run and include in the consolidated reports.",
     )
+    parser.add_argument(
+        "--manage-license",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Create or replace ../labs/license.txt from the current local/GitHub license source before running and restore it afterward. Defaults to enabled.",
+    )
     return parser.parse_args()
 
 
@@ -94,108 +104,173 @@ def main() -> int:
     write_run_metadata()
 
     setup_payload: dict[str, Any] | None = None
-    if args.refresh_report:
-        print("Refreshing reports from existing captured artifacts...")
-    elif not args.skip_setup:
-        print("Running shared workspace setup...")
-        setup_result = run_setup(
-            stream_output=True,
-            refresh_labs=args.refresh_labs,
-            target_branch=args.labs_branch,
-            force=args.force,
-            lab_names=args.labs,
-        )
-        setup_payload = {
-            "status": setup_result.status,
-            "upstreamLabsPath": setup_result.upstream_labs_path,
-            "refreshLabs": args.refresh_labs,
-            "labsBranch": args.labs_branch,
-            "force": args.force,
-            "commands": setup_result.commands,
-        }
-        SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
-        if setup_result.status != "passed":
-            print()
-            for line in setup_failure_error_lines(setup_result.commands):
-                print(line)
-            print()
-            for line in setup_failure_action_lines(setup_result.commands):
-                print(line)
-            print(f"Setup details: {SETUP_OUTPUT_PATH}")
-            completed_at = report_timestamp()
-            write_consolidated_report(
-                {
-                    "generatedAt": completed_at.isoformat(),
+    license_state = None
+    try:
+        if args.refresh_report:
+            print("Refreshing reports from existing captured artifacts...")
+        elif not args.skip_setup:
+            print("Running shared workspace setup...")
+            setup_result = run_setup(
+                stream_output=True,
+                refresh_labs=args.refresh_labs,
+                target_branch=args.labs_branch,
+                force=args.force,
+                lab_names=args.labs,
+            )
+            setup_payload = {
+                "status": setup_result.status,
+                "upstreamLabsPath": setup_result.upstream_labs_path,
+                "refreshLabs": args.refresh_labs,
+                "labsBranch": args.labs_branch,
+                "manageLicense": args.manage_license,
+                "force": args.force,
+                "commands": list(setup_result.commands),
+            }
+            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+            if setup_result.status != "passed":
+                print()
+                for line in setup_failure_error_lines(setup_result.commands):
+                    print(line)
+                print()
+                for line in setup_failure_action_lines(setup_result.commands):
+                    print(line)
+                print(f"Setup details: {SETUP_OUTPUT_PATH}")
+                completed_at = report_timestamp()
+                write_consolidated_report(
+                    {
+                        "generatedAt": completed_at.isoformat(),
+                        "status": "failed",
+                        "summary": [
+                            {"label": "Labs discovered", "value": 0},
+                            {"label": "Labs passed", "value": 0},
+                            {"label": "Labs failed", "value": 0},
+                        ],
+                        "setup": setup_payload,
+                        "labs": [],
+                    }
+                )
+                generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
+                archive_local_output_snapshot(completed_at)
+                return 1
+        if not args.refresh_report and args.manage_license:
+            try:
+                license_state = prepare_upstream_labs_license()
+            except RuntimeError as exc:
+                setup_payload = {
                     "status": "failed",
-                    "summary": [
-                        {"label": "Labs discovered", "value": 0},
-                        {"label": "Labs passed", "value": 0},
-                        {"label": "Labs failed", "value": 0},
-                    ],
-                    "setup": setup_payload,
-                    "labs": [],
+                    "upstreamLabsPath": str(ROOT.parent / "labs"),
+                    "refreshLabs": args.refresh_labs,
+                    "labsBranch": args.labs_branch,
+                    "manageLicense": args.manage_license,
+                    "force": args.force,
+                    "commands": [license_failure_dict(str(exc))],
+                }
+                SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+                print()
+                print(f"[error] {exc}")
+                print()
+                print("[Action required]")
+                print("Fix the license setup issue above and rerun the labs.")
+                print(f"Setup details: {SETUP_OUTPUT_PATH}")
+                completed_at = report_timestamp()
+                write_consolidated_report(
+                    {
+                        "generatedAt": completed_at.isoformat(),
+                        "status": "failed",
+                        "summary": [
+                            {"label": "Labs discovered", "value": 0},
+                            {"label": "Labs passed", "value": 0},
+                            {"label": "Labs failed", "value": 0},
+                        ],
+                        "setup": setup_payload,
+                        "labs": [],
+                    }
+                )
+                generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
+                archive_local_output_snapshot(completed_at)
+                return 1
+            if setup_payload is None:
+                setup_payload = {
+                    "status": "passed",
+                    "upstreamLabsPath": str(ROOT.parent / "labs"),
+                    "refreshLabs": args.refresh_labs,
+                    "labsBranch": args.labs_branch,
+                    "manageLicense": args.manage_license,
+                    "force": args.force,
+                    "commands": [],
+                }
+            setup_payload["commands"] = [*setup_payload.get("commands", []), license_setup_dict(license_state)]
+            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+        elif setup_payload is None and not args.refresh_report:
+            setup_payload = {
+                "status": "passed",
+                "upstreamLabsPath": str(ROOT.parent / "labs"),
+                "refreshLabs": args.refresh_labs,
+                "labsBranch": args.labs_branch,
+                "manageLicense": args.manage_license,
+                "force": args.force,
+                "commands": [],
+            }
+            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+
+        labs_git_ref = upstream_labs_git_ref()
+        all_labs = discover_labs()
+        labs = filter_labs(all_labs, args.labs)
+        print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
+
+        lab_results: list[dict[str, Any]] = []
+        total_labs = len(labs)
+        for index, lab in enumerate(labs, start=1):
+            print()
+            print("=" * 78)
+            print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
+            print(f"Lab # {index} of {total_labs}")
+            print("=" * 78)
+            lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
+            result = run_command(
+                lab_command,
+                ROOT,
+                stream_output=True,
+                stream_prefix=f"[all:{lab}]",
+            )
+            report_json_path, report_html_path = snapshot_lab_output(lab)
+            copy_lab_snapshot(lab)
+            lab_report = load_json(report_json_path) if report_json_path.exists() else None
+            duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
+            lab_results.append(
+                {
+                    "name": lab,
+                    "readmeHref": upstream_readme_href(lab),
+                    "status": (lab_report or {}).get("status", "failed"),
+                    "exitCode": result.exit_code,
+                    "durationSeconds": duration_seconds,
+                    "reportJsonPath": str(report_json_path),
+                    "reportHtmlPath": str(report_html_path),
+                    "summary": (lab_report or {}).get("summary", []),
+                    "report": lab_report,
                 }
             )
-            generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
-            archive_local_output_snapshot(completed_at)
-            return 1
 
-    labs_git_ref = upstream_labs_git_ref()
-    all_labs = discover_labs()
-    labs = filter_labs(all_labs, args.labs)
-    print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
-
-    lab_results: list[dict[str, Any]] = []
-    total_labs = len(labs)
-    for index, lab in enumerate(labs, start=1):
-        print()
-        print("=" * 78)
-        print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
-        print(f"Lab # {index} of {total_labs}")
-        print("=" * 78)
-        lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
-        result = run_command(
-            lab_command,
-            ROOT,
-            stream_output=True,
-            stream_prefix=f"[all:{lab}]",
+        completed_at = report_timestamp()
+        consolidated = build_consolidated_payload(
+            setup_payload=setup_payload,
+            labs_git_ref=labs_git_ref,
+            lab_results=lab_results,
+            generated_at=completed_at.isoformat(),
         )
-        report_json_path, report_html_path = snapshot_lab_output(lab)
-        copy_lab_snapshot(lab)
-        lab_report = load_json(report_json_path) if report_json_path.exists() else None
-        duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
-        lab_results.append(
-            {
-                "name": lab,
-                "readmeHref": upstream_readme_href(lab),
-                "status": (lab_report or {}).get("status", "failed"),
-                "exitCode": result.exit_code,
-                "durationSeconds": duration_seconds,
-                "reportJsonPath": str(report_json_path),
-                "reportHtmlPath": str(report_html_path),
-                "summary": (lab_report or {}).get("summary", []),
-                "report": lab_report,
-            }
-        )
-
-    completed_at = report_timestamp()
-    consolidated = build_consolidated_payload(
-        setup_payload=setup_payload,
-        labs_git_ref=labs_git_ref,
-        lab_results=lab_results,
-        generated_at=completed_at.isoformat(),
-    )
-    consolidated["navigation"] = {
-        "comparisonReportHref": "labs-comparison.html",
-    }
-    write_consolidated_report(consolidated)
-    generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
-    archive_local_output_snapshot(completed_at)
-    print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
-    print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
-    print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
-    print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
-    return 0 if consolidated["status"] == "passed" else 1
+        consolidated["navigation"] = {
+            "comparisonReportHref": "labs-comparison.html",
+        }
+        write_consolidated_report(consolidated)
+        generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
+        archive_local_output_snapshot(completed_at)
+        print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
+        print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
+        print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
+        print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
+        return 0 if consolidated["status"] == "passed" else 1
+    finally:
+        restore_upstream_labs_license(license_state)
 
 
 def discover_labs() -> list[str]:

@@ -6,7 +6,9 @@ from pathlib import Path
 from lablib.labs_comparison import (
     analyze_readme_os_documentation,
     build_lab_profile,
+    describe_license_delivery,
     detect_license_mode_from_text,
+    extract_license_source_from_text,
     extract_fenced_code_blocks,
     extract_headings,
 )
@@ -94,6 +96,27 @@ path: ./specs/service.yaml
         self.assertEqual(
             detect_license_mode_from_text("docker.io/specmatic/specmatic:latest\nSpecmatic Core v2.44.2"),
             "oss",
+        )
+
+    def test_extract_license_source_and_delivery_details(self) -> None:
+        enterprise_text = "Using Specmatic Enterprise license initialized from /specmatic/specmatic-license.txt"
+        trial_text = "Using Specmatic Trial license initialized from jar:file:/usr/local/share/enterprise/enterprise.jar!/specmatic-default-trial-license.txt"
+        self.assertEqual(extract_license_source_from_text(enterprise_text), "/specmatic/specmatic-license.txt")
+        self.assertEqual(
+            extract_license_source_from_text(trial_text),
+            "jar:file:/usr/local/share/enterprise/enterprise.jar!/specmatic-default-trial-license.txt",
+        )
+        self.assertIn(
+            "Docker-mounted enterprise license file",
+            describe_license_delivery("enterprise", "/specmatic/specmatic-license.txt", "docker compose up test"),
+        )
+        self.assertIn(
+            "Bundled trial license",
+            describe_license_delivery("trial", "jar:file:/usr/local/share/enterprise/enterprise.jar!/specmatic-default-trial-license.txt", "docker compose up"),
+        )
+        self.assertIn(
+            "OSS Docker image",
+            describe_license_delivery("oss", "", "docker run specmatic/specmatic:latest validate"),
         )
 
 

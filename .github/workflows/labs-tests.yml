@@ -12,6 +12,11 @@ on:
         required: false
         default: "dynamic-labs"
         type: string
+      manage_license:
+        description: "Whether labs-tests should create/replace labs/license.txt before the run and restore it afterward. Defaults to true."
+        required: false
+        default: true
+        type: boolean
   pull_request:
   push:
     branches:
@@ -32,12 +37,6 @@ jobs:
       - name: Check out labs-tests
         uses: actions/checkout@v6
 
-      - name: Set up Specmatic License key
-        run: |
-          echo "Write specmatic license key to file"
-          mkdir -p ~/.specmatic
-          echo "${{ secrets.SPECMATIC_LICENSE_KEY }}" > ~/.specmatic/specmatic-license.txt
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -54,14 +53,23 @@ jobs:
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
           EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
+          WORKFLOW_MANAGE_LICENSE_INPUT: ${{ github.event.inputs.manage_license }}
         timeout-minutes: 40
         run: |
           set +e
+          effective_manage_license="${WORKFLOW_MANAGE_LICENSE_INPUT}"
+          if [[ -z "${effective_manage_license// }" ]]; then
+            effective_manage_license="true"
+          fi
           echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
           echo "[config] effective labs branch: '${EFFECTIVE_LABS_BRANCH}'"
+          echo "[config] manage license.txt: '${effective_manage_license}'"
           echo "[config] selected labs input: '${WORKFLOW_LABS_INPUT}'"
           start_time=$(date +%s)
           run_command=(python3 -u run_all.py --refresh-labs --force --labs-branch "${EFFECTIVE_LABS_BRANCH}")
+          if [[ "${effective_manage_license,,}" == "false" ]]; then
+            run_command+=(--no-manage-license)
+          fi
           echo "[config] executing: ${run_command[*]}"
           if [[ -n "${WORKFLOW_LABS_INPUT}" ]]; then
             # Space-separated lab names from workflow_dispatch are appended as individual args.

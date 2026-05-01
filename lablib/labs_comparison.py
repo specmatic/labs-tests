@@ -411,8 +411,44 @@ def detect_license_mode_from_text(text: str) -> str:
     return "unknown"
 
 
+def extract_license_source_from_text(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "Using Specmatic Enterprise license initialized from " in stripped:
+            return stripped.split("Using Specmatic Enterprise license initialized from ", 1)[1].strip()
+        if "Using Specmatic Trial license initialized from " in stripped:
+            return stripped.split("Using Specmatic Trial license initialized from ", 1)[1].strip()
+    return ""
+
+
+def describe_license_delivery(mode: str, source: str, command_display: str) -> str:
+    if mode == "enterprise":
+        if source == "/specmatic/specmatic-license.txt":
+            return "Docker-mounted enterprise license file from sibling labs/license.txt to /specmatic/specmatic-license.txt."
+        if source:
+            return f"Docker-provided enterprise license source: {source}."
+        return "Enterprise license detected, but the container-side source path was not parsed."
+    if mode == "trial":
+        if source.startswith("jar:file:"):
+            return "Bundled trial license from the enterprise image JAR."
+        if source:
+            return f"Trial license detected from container-side source: {source}."
+        return "Trial license detected, but the container-side source path was not parsed."
+    if mode == "oss":
+        if "specmatic/specmatic" in command_display:
+            return "OSS Docker image (`specmatic/specmatic`) used; no enterprise license file expected."
+        return "OSS/core-only runtime detected; no enterprise license file expected."
+    return "Could not determine how the license was provided from the available Docker artifacts."
+
+
 def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[str, Any]:
     snapshot_root = snapshot.get("root") if snapshot else None
+    snapshot_phases = snapshot.get("phases", []) if snapshot else []
+    snapshot_phase_map = {
+        str(phase.get("name", "")): phase
+        for phase in snapshot_phases
+        if isinstance(phase, dict)
+    }
     rows: list[dict[str, str]] = []
     if not isinstance(snapshot_root, Path):
         return {
@@ -429,22 +465,21 @@ def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[st
         command_log = phase_dir / "command.log"
         text = command_log.read_text(encoding="utf-8", errors="ignore") if command_log.exists() else ""
         mode = detect_license_mode_from_text(text)
+        source = extract_license_source_from_text(text)
+        snapshot_phase = snapshot_phase_map.get(str(getattr(phase, "name", "")), {})
+        command_display = ""
+        if isinstance(snapshot_phase, dict):
+            command_display = str(snapshot_phase.get("command", {}).get("display", ""))
         modes.append(mode)
-        evidence = (
-            "Using Specmatic Enterprise license"
-            if mode == "enterprise"
-            else "Using Specmatic Trial license"
-            if mode == "trial"
-            else "specmatic/specmatic image or core-only output"
-            if mode == "oss"
-            else "No recognizable license signal found in command.log"
-        )
+        evidence = describe_license_delivery(mode, source, command_display)
         rows.append(
             {
                 "phase": str(getattr(phase, "name", phase_dir.name)),
                 "mode": mode,
                 "status": "Pass" if mode != "unknown" else "Fail",
                 "path": str(command_log.relative_to(snapshot_root)) if command_log.exists() else f"{phase_dir.name}/command.log",
+                "dockerCommand": command_display or "(not recorded)",
+                "source": source or "(not detected)",
                 "notes": evidence,
             }
         )
@@ -3318,6 +3353,8 @@ def render_license_lab_section(section: dict[str, Any]) -> str:
         f"<td>{escape(str(row['phase']))}</td>"
         f"<td>{render_artifact_status_chip(str(row['status']))}</td>"
         f"<td><code>{escape(str(row['mode']))}</code></td>"
+        f"<td><code>{escape(str(row['dockerCommand']))}</code></td>"
+        f"<td><code>{escape(str(row['source']))}</code></td>"
         f"<td><code>{escape(str(row['path']))}</code></td>"
         f"<td>{escape(str(row['notes']))}</td>"
         "</tr>"
@@ -3328,7 +3365,7 @@ def render_license_lab_section(section: dict[str, Any]) -> str:
         f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
         f"<p class='muted'>{escape(str(section.get('message', '')))}</p>"
         "<table>"
-        "<thead><tr><th>Phase</th><th>Result</th><th>Detected mode</th><th>Source</th><th>Notes</th></tr></thead>"
+        "<thead><tr><th>Phase</th><th>Result</th><th>Detected mode</th><th>Docker command</th><th>Container-side license source</th><th>Evidence log</th><th>Docker delivery details</th></tr></thead>"
         f"<tbody>{rows_html}</tbody>"
         "</table>"
         "</section>"

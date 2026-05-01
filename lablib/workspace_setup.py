@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,14 @@ class SetupResult:
     status: str
     upstream_labs_path: str
     commands: list[dict[str, Any]]
+
+
+@dataclass
+class LicenseFileState:
+    path: Path
+    existed: bool
+    original_content: str | None
+    applied_source: str
 
 
 def run_setup(
@@ -149,6 +159,77 @@ def run_setup(
         upstream_labs_path=str(UPSTREAM_LABS),
         commands=commands,
     )
+
+
+def prepare_upstream_labs_license() -> LicenseFileState:
+    if not UPSTREAM_LABS.exists():
+        raise RuntimeError(
+            f"Upstream labs repository was not found at {UPSTREAM_LABS}. "
+            "Action required: run with setup enabled or clone the sibling labs repository first."
+        )
+    license_path = UPSTREAM_LABS / "license.txt"
+    existed = license_path.exists()
+    original_content = license_path.read_text(encoding="utf-8") if existed else None
+    content, source = resolve_license_txt_content()
+    license_path.write_text(content, encoding="utf-8")
+    return LicenseFileState(
+        path=license_path,
+        existed=existed,
+        original_content=original_content,
+        applied_source=source,
+    )
+
+
+def restore_upstream_labs_license(state: LicenseFileState | None) -> None:
+    if state is None:
+        return
+    if state.existed and state.original_content is not None:
+        state.path.write_text(state.original_content, encoding="utf-8")
+        return
+    if state.path.exists():
+        state.path.unlink()
+
+
+def license_setup_dict(state: LicenseFileState) -> dict[str, Any]:
+    return note_to_dict(
+        "Prepare upstream labs license.txt",
+        (
+            f"Wrote {state.path} using {state.applied_source}. "
+            + ("An existing license.txt will be restored after the run." if state.original_content is not None else "No previous license.txt existed; the file will be removed after the run.")
+        ),
+    )
+
+
+def license_failure_dict(message: str) -> dict[str, Any]:
+    return info_to_dict("Prepare upstream labs license.txt", message)
+
+
+def resolve_license_txt_content() -> tuple[str, str]:
+    if os.getenv("GITHUB_ACTIONS") or os.getenv("GITHUB_RUN_ID"):
+        license_text = (os.getenv("SPECMATIC_LICENSE_KEY") or "").strip()
+        if not license_text:
+            raise RuntimeError(
+                "SPECMATIC_LICENSE_KEY is not available in the GitHub Actions environment. "
+                "Action required: configure the repository secret and rerun the workflow."
+            )
+        return license_text + ("\n" if not license_text.endswith("\n") else ""), "GitHub Actions secret SPECMATIC_LICENSE_KEY"
+
+    license_json_path = Path.home() / ".specmatic" / "license.json"
+    if not license_json_path.exists():
+        raise RuntimeError(
+            f"Could not find local Specmatic license metadata at {license_json_path}. "
+            "Action required: refresh your local Specmatic license so ~/.specmatic/license.json is available."
+        )
+    payload = json.loads(license_json_path.read_text(encoding="utf-8"))
+    status = payload.get("status") if isinstance(payload, dict) else None
+    license_text = status.get("license") if isinstance(status, dict) else None
+    if not isinstance(license_text, str) or not license_text.strip():
+        raise RuntimeError(
+            f"Could not read status.license from {license_json_path}. "
+            "Action required: refresh your local Specmatic license and rerun."
+        )
+    normalized = license_text if license_text.endswith("\n") else license_text + "\n"
+    return normalized, f"local Specmatic license metadata at {license_json_path}"
 
 
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
@@ -303,6 +384,20 @@ def info_to_dict(summary: str, detail: str) -> dict[str, Any]:
         "command": [],
         "cwd": str(UPSTREAM_LABS),
         "exitCode": 1,
+        "startedAt": "",
+        "finishedAt": "",
+        "durationSeconds": 0,
+        "stdout": detail,
+        "stderr": "",
+    }
+
+
+def note_to_dict(summary: str, detail: str) -> dict[str, Any]:
+    return {
+        "summary": summary,
+        "command": [],
+        "cwd": str(UPSTREAM_LABS),
+        "exitCode": 0,
         "startedAt": "",
         "finishedAt": "",
         "durationSeconds": 0,
