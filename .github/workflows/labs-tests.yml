@@ -57,12 +57,22 @@ jobs:
         timeout-minutes: 40
         run: |
           set +e
+          effective_labs_branch="${WORKFLOW_LABS_BRANCH_INPUT:-main}"
+          if [[ -z "${effective_labs_branch// }" ]]; then
+            effective_labs_branch="main"
+          fi
+          echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
+          echo "[config] requested labs branch input: '${WORKFLOW_LABS_BRANCH_INPUT}'"
+          echo "[config] effective labs branch: '${effective_labs_branch}'"
+          echo "[config] selected labs input: '${WORKFLOW_LABS_INPUT}'"
           start_time=$(date +%s)
-          run_command=(python3 -u run_all.py --refresh-labs --force --labs-branch "${WORKFLOW_LABS_BRANCH_INPUT}")
+          run_command=(python3 -u run_all.py --refresh-labs --force --labs-branch "${effective_labs_branch}")
+          echo "[config] executing: ${run_command[*]}"
           if [[ -n "${WORKFLOW_LABS_INPUT}" ]]; then
             # Space-separated lab names from workflow_dispatch are appended as individual args.
             read -r -a selected_labs <<< "${WORKFLOW_LABS_INPUT}"
             run_command+=(--labs "${selected_labs[@]}")
+            echo "[config] labs filter: ${selected_labs[*]}"
           fi
           "${run_command[@]}" &
           run_pid=$!
@@ -116,6 +126,7 @@ jobs:
           print("")
           print(f"- Status: **{payload.get('status', 'unknown').upper()}**")
           print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
+          print(f"- Labs branch requested: `{environment.get('labsBranchRequested', setup.get('labsBranch', 'n/a'))}`")
           print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
           print(f"- Setup: `{setup.get('status', 'n/a')}`")
           print(f"- Labs discovered: `{summary.get('Labs discovered', 0)}`")
