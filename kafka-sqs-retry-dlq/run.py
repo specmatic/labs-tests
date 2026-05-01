@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,13 @@ README_FILE = UPSTREAM_LAB / "README.md"
 APP_FILE = UPSTREAM_LAB / "service" / "app.py"
 OUTPUT_DIR = ROOT / "kafka-sqs-retry-dlq" / "output"
 LAB_COMMAND = ["docker", "compose", "up", "contract-test", "--build", "--abort-on-container-exit"]
+CONTAINER_NAMES = [
+    "kafka-sqs-retry-dlq-contract-test-1",
+    "kafka-sqs-retry-dlq-provider-1",
+    "kafka-sqs-retry-dlq-kafka-init-1",
+    "kafka-sqs-retry-dlq-localstack-1",
+    "kafka-sqs-retry-dlq-kafka",
+]
 RETRY_THREAD_COMMENT = "            # threading.Thread(target=self._run_retry_consumer, name=\"RetryConsumer\", daemon=True),\n"
 RETRY_THREAD_ENABLED = "            threading.Thread(target=self._run_retry_consumer, name=\"RetryConsumer\", daemon=True),\n"
 
@@ -109,11 +117,17 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
 
 
 def clear_previous_reports(spec: LabSpec) -> None:
+    cleanup_stale_containers()
     clear_docker_owned_build_dir(spec)
 
 
 def teardown_compose(spec: LabSpec) -> None:
-    docker_compose_down(spec, "down", "-v")
+    docker_compose_down(spec, "down", "-v", "--remove-orphans")
+    cleanup_stale_containers()
+
+
+def cleanup_stale_containers() -> None:
+    subprocess.run(["docker", "rm", "-f", *CONTAINER_NAMES], check=False, text=True, capture_output=True)
 
 
 def set_app_baseline(content: str) -> str:
