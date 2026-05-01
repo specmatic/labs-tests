@@ -28,7 +28,8 @@ README_FILE = UPSTREAM_LAB / "README.md"
 SPECMATIC_FILE = UPSTREAM_LAB / "specmatic.yaml"
 OUTPUT_DIR = ROOT / "filters" / "output"
 LAB_COMMAND = ["docker", "compose", "up", "--abort-on-container-exit"]
-FILTER_EXPR = "PATH!='/health,/monitor/{id},/swagger' && TAGS!='WIP' && STATUS='200,201'"
+BASELINE_FILTER = "PATH!='/health,/monitor/{id},/swagger'"
+FILTER_EXPR = "PATH!='/health,/monitor/{id},/swagger' && STATUS='200,201'"
 
 
 def main() -> int:
@@ -124,11 +125,46 @@ def teardown_compose(spec: LabSpec) -> None:
 
 
 def set_baseline_filter(content: str) -> str:
-    return content.replace(FILTER_EXPR, "PATH!='/health,/monitor/{id},/swagger' && TAGS!='WIP'")
+    return set_openapi_filter(content, BASELINE_FILTER)
 
 
 def set_fixed_filter(content: str) -> str:
-    return content.replace("PATH!='/health,/monitor/{id},/swagger' && TAGS!='WIP'", FILTER_EXPR)
+    return set_openapi_filter(content, FILTER_EXPR)
+
+
+def set_openapi_filter(content: str, filter_expr: str) -> str:
+    lines = content.splitlines()
+
+    openapi_idx = None
+    for idx, line in enumerate(lines):
+        if line.strip() == "openapi:":
+            openapi_idx = idx
+            break
+
+    if openapi_idx is None:
+        raise ValueError("Could not locate 'openapi:' block in specmatic.yaml")
+
+    openapi_indent = len(lines[openapi_idx]) - len(lines[openapi_idx].lstrip(" "))
+    block_end = len(lines)
+    for idx in range(openapi_idx + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if not stripped:
+            continue
+        current_indent = len(lines[idx]) - len(lines[idx].lstrip(" "))
+        if current_indent <= openapi_indent:
+            block_end = idx
+            break
+
+    filter_indent = openapi_indent + 2
+    filter_prefix = (" " * filter_indent) + "filter:"
+    for idx in range(openapi_idx + 1, block_end):
+        if lines[idx].lstrip(" ").startswith("filter:"):
+            lines[idx] = f'{filter_prefix} "{filter_expr}"'
+            return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+
+    insert_at = block_end
+    lines.insert(insert_at, f'{filter_prefix} "{filter_expr}"')
+    return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
 
 
 def readme_contains(text: str, success: str, failure: str) -> dict[str, str]:
