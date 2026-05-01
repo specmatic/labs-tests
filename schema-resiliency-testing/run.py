@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -52,17 +51,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("specmatic-report.html", "build/reports/specmatic/test/html/index.html", "specmatic/test/html/index.html", "html", expected_markers=("const report =", "specmaticConfig", "<html")),
             ArtifactSpec("specmatic.yaml", "specmatic.yaml", "specmatic.yaml", "text"),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Start Studio using Docker Compose",
-                "Loop Test",
-                "Goal of this lab",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Loop test baseline",

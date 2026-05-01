@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -111,20 +110,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("examples", "simple-openapi-spec.yaml"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "1. Run the suite using Docker (intentional failure)",
-                "2. Learner task: configure dictionary-based mock data",
-                "3. Re-run the suite after configuring dictionary",
-                "Pass Criteria",
-                "Additional Resources",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

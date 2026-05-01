@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -179,25 +178,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("PLACE_IPHONE_ORDER.json", "api-specs/order-service-async-avro-v3_0_0_examples/PLACE_IPHONE_ORDER.json", "api-specs/order-service-async-avro-v3_0_0_examples/PLACE_IPHONE_ORDER.json", "text", expected_markers=("PLACE_IPHONE_ORDER", "new-orders", "wip-orders")),
             ArtifactSpec("PLACE_MACBOOK_ORDER.json", "api-specs/order-service-async-avro-v3_0_0_examples/PLACE_MACBOOK_ORDER.json", "api-specs/order-service-async-avro-v3_0_0_examples/PLACE_MACBOOK_ORDER.json", "text", expected_markers=("PLACE_MACBOOK_ORDER", "new-orders", "wip-orders")),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "AsyncAPI and Avro Overview Video",
-                "Files in this lab",
-                "Lab Rules",
-                "Architecture mental model",
-                "Run the baseline and observe the failure",
-                "Learner task",
-                "Fix path",
-                "Verify the fix",
-                "What changed and why",
-                "Troubleshooting",
-                "Optional extension",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

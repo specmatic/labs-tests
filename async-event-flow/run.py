@@ -13,7 +13,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -80,19 +79,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("acceptOrder.json", "examples/async-order-service/acceptOrder.json", "examples/async-order-service/acceptOrder.json", "text", expected_markers=("ACCEPT_ORDER", "accepted-orders")),
             ArtifactSpec("outForDeliveryOrder.json", "examples/async-order-service/outForDeliveryOrder.json", "examples/async-order-service/outForDeliveryOrder.json", "text", expected_markers=("ORDER_OUT_FOR_DELIVERY", "tax-invoice-for-order-456")),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Background",
-                "Time required to complete this lab",
-                "Objective",
-                "Prerequisites",
-                "Lab Rules",
-                "How to test these event flows",
-                "Run the contract tests using Specmatic Studio",
-                "Troubleshooting",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

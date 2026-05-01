@@ -14,7 +14,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -55,31 +54,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("openapi:", "info:", "paths:"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Why this lab matters",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Architecture",
-                "Learner task",
-                "Lab Rules",
-                "Specmatic references",
-                "What you learned",
-                "Next step",
-            ),
-            additional_h2_prefixes=(
-                "Backward Compatibility Overview Video",
-                "Part A: Create the intentional breaking change",
-                "Part B: Run the backward compatibility check",
-                "Part C: Fix the contract",
-                "Part D: Re-run the check",
-                "Clean up",
-                "Check backward compatibility in Specmatic Studio before saving",
-                "Common confusion points",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

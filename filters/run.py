@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -54,24 +53,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("specmatic-report.html", "build/reports/specmatic/test/html/index.html", "specmatic/test/html/index.html", "html", expected_markers=("const report =", "specmaticConfig", "<html")),
             ArtifactSpec("specmatic.yaml", "specmatic.yaml", "specmatic.yaml", "text"),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Reference",
-                "Lab Rules",
-                "1. Baseline run (intentional failure)",
-                "2. Start Studio",
-                "3. Run tests in Studio",
-                "4. Persist filters to config",
-                "5. Verify from CLI (with persisted filters)",
-                "Pass Criteria",
-                "Why this lab matters",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

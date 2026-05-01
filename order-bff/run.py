@@ -13,7 +13,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -55,15 +54,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("specmatic-report.html", "build/reports/specmatic/test/html/index.html", "specmatic/test/html/index.html", "html", expected_markers=("const report =", "specmaticConfig", "<html")),
             ArtifactSpec("specmatic.yaml", "specmatic.yaml", "specmatic.yaml", "text", expected_markers=("schemaResiliencyTests: all", "post_specmatic_response_processor")),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Background",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Run Contract Tests",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Contract suite",

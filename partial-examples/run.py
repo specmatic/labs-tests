@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -57,22 +56,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("test_accepted_product_request.json", "examples/test_accepted_product_request.json", "examples/test_accepted_product_request.json", "text"),
             ArtifactSpec("test_find_available_products_book_200.json", "examples/test_find_available_products_book_200.json", "examples/test_find_available_products_book_200.json", "text"),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Validate the examples (intentional failure)",
-                "Start Studio",
-                "Learner task: fix 3 examples using partial examples",
-                "Re-validate after fixing in Studio",
-                "Reference",
-                "Loop Test",
-                "Pass Criteria",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

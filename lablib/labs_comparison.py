@@ -48,6 +48,8 @@ FENCING_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fenc
 FENCING_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.html"
 ARTIFACT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-artifacts-comparison.json"
 ARTIFACT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-artifacts-comparison.html"
+LICENSE_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.json"
+LICENSE_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -69,6 +71,7 @@ CORE_VALIDATION_LABELS = {
     "Command and Output fencing validation",
     "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
     "Generated report artifacts align with README expectations",
+    "Specmatic license mode is detected consistently across executed phases",
 }
 IGNORABLE_MESSAGES = ("(none)",)
 
@@ -152,6 +155,7 @@ def generate_labs_comparison(
     test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     fencing_payload = build_fencing_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     artifact_payload = build_artifact_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
+    license_payload = build_license_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for legacy_path in (
         LEGACY_COMPARISON_JSON_PATH,
@@ -171,6 +175,8 @@ def generate_labs_comparison(
     FENCING_COMPARISON_HTML_PATH.write_text(render_fencing_comparison_html(fencing_payload), encoding="utf-8")
     ARTIFACT_COMPARISON_JSON_PATH.write_text(json.dumps(artifact_payload, indent=2) + "\n", encoding="utf-8")
     ARTIFACT_COMPARISON_HTML_PATH.write_text(render_artifact_comparison_html(artifact_payload), encoding="utf-8")
+    LICENSE_COMPARISON_JSON_PATH.write_text(json.dumps(license_payload, indent=2) + "\n", encoding="utf-8")
+    LICENSE_COMPARISON_HTML_PATH.write_text(render_license_comparison_html(license_payload), encoding="utf-8")
     return payload
 
 
@@ -204,6 +210,12 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     for phase in spec.phases:
         phase_artifacts.extend(artifact_profile(artifact) for artifact in phase.artifact_specs)
 
+    if not spec.readme_path.exists():
+        raise FileNotFoundError(
+            f"Missing upstream README for lab '{spec.name}': {spec.readme_path}. "
+            "This usually means the sibling ../labs checkout is on a branch that does not contain the expected README. "
+            "Action required: switch ../labs to the correct branch or rerun with --labs-branch dynamic-labs."
+        )
     upstream_readme_text = spec.readme_path.read_text(encoding="utf-8")
     readme_doc = parse_readme_document(upstream_readme_text)
     headings = extract_headings(upstream_readme_text)
@@ -238,6 +250,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         if artifact["label"] not in REPORT_ARTIFACT_LABELS and artifact["label"] not in IGNORED_ARTIFACT_LABELS
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
+    license_profile = build_license_profile(spec, report_snapshot)
     readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
     readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
     readme_emtc = readme_doc.metadata.get("expected_missing_test_counts", False)
@@ -369,12 +382,97 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         "warnings": {
             "additionalArtifacts": additional_artifacts,
         },
+        "license": license_profile,
         "testCountConsistency": test_count_consistency,
         "phaseRequirements": {
             "requiredKinds": required_phase_kinds,
             "actualKinds": [phase.id for phase in readme_doc.phases],
             "allRequiredPresent": set(required_phase_kinds) <= {phase.id for phase in readme_doc.phases},
         },
+    }
+
+
+def snapshot_phase_dir_name(phase: Any) -> str:
+    if getattr(phase, "output_dir_name", None):
+        return str(phase.output_dir_name)
+    return "baseline" if "baseline" in getattr(phase, "name", "").lower() else "fixed"
+
+
+def detect_license_mode_from_text(text: str) -> str:
+    lowered = text.lower()
+    if "using specmatic enterprise license" in lowered:
+        return "enterprise"
+    if "using specmatic trial license" in lowered:
+        return "trial"
+    if "specmatic/specmatic" in lowered or "docker.io/specmatic/specmatic" in lowered:
+        return "oss"
+    if "specmatic core v" in lowered and "specmatic enterprise v" not in lowered and "using specmatic " not in lowered:
+        return "oss"
+    return "unknown"
+
+
+def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    snapshot_root = snapshot.get("root") if snapshot else None
+    rows: list[dict[str, str]] = []
+    if not isinstance(snapshot_root, Path):
+        return {
+            "available": False,
+            "consistent": False,
+            "detectedMode": "unknown",
+            "message": "No lab report snapshot was available to determine the Specmatic license mode.",
+            "rows": rows,
+        }
+
+    modes: list[str] = []
+    for phase in getattr(spec, "phases", ()):
+        phase_dir = snapshot_root / snapshot_phase_dir_name(phase)
+        command_log = phase_dir / "command.log"
+        text = command_log.read_text(encoding="utf-8", errors="ignore") if command_log.exists() else ""
+        mode = detect_license_mode_from_text(text)
+        modes.append(mode)
+        evidence = (
+            "Using Specmatic Enterprise license"
+            if mode == "enterprise"
+            else "Using Specmatic Trial license"
+            if mode == "trial"
+            else "specmatic/specmatic image or core-only output"
+            if mode == "oss"
+            else "No recognizable license signal found in command.log"
+        )
+        rows.append(
+            {
+                "phase": str(getattr(phase, "name", phase_dir.name)),
+                "mode": mode,
+                "status": "Pass" if mode != "unknown" else "Fail",
+                "path": str(command_log.relative_to(snapshot_root)) if command_log.exists() else f"{phase_dir.name}/command.log",
+                "notes": evidence,
+            }
+        )
+
+    known_modes = [mode for mode in modes if mode != "unknown"]
+    unique_modes = sorted(set(known_modes))
+    if not known_modes:
+        return {
+            "available": True,
+            "consistent": False,
+            "detectedMode": "unknown",
+            "message": "No recognizable Specmatic license signal was detected in the executed phase logs.",
+            "rows": rows,
+        }
+    if len(unique_modes) > 1 or len(known_modes) != len(modes):
+        return {
+            "available": True,
+            "consistent": False,
+            "detectedMode": ", ".join(unique_modes) if unique_modes else "unknown",
+            "message": "Executed phases did not use one consistent detectable Specmatic license mode.",
+            "rows": rows,
+        }
+    return {
+        "available": True,
+        "consistent": True,
+        "detectedMode": unique_modes[0],
+        "message": f"All executed phases used `{unique_modes[0]}` license mode.",
+        "rows": rows,
     }
 
 
@@ -1343,6 +1441,18 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "cells": [check_report_artifact_bundle(lab) for lab in labs],
         },
         {
+            "label": "Specmatic license mode is detected consistently across executed phases",
+            "tooltip": {
+                "summary": [
+                    "This surfaces which Specmatic license mode each lab actually used at runtime.",
+                    "A lab passes when all executed phases show one consistent detectable mode such as enterprise, trial, or oss.",
+                ],
+                "fullReportHref": "labs-license-comparison.html",
+                "fullReportLabel": "Open full license comparison report",
+            },
+            "cells": [bool(lab["license"]["consistent"]) for lab in labs],
+        },
+        {
             "label": "README does not keep extra, unwanted, or out-of-sequence implementation sections at H2 level",
             "tooltip": {
                 "summary": ["Lab-specific walkthrough sections should move from H2 to H3."],
@@ -1550,6 +1660,48 @@ def build_artifact_comparison_payload(labs: list[dict[str, Any]], generated_at: 
         )
     return {
         "title": "Labs Report Artifacts Comparison",
+        "generatedAt": generated_at,
+        "provenance": detect_report_provenance(),
+        "summary": summary_items,
+        "labs": sections,
+    }
+
+
+def build_license_comparison_payload(labs: list[dict[str, Any]], generated_at: str) -> dict[str, Any]:
+    sections = []
+    summary_items = []
+    for lab in labs:
+        license_profile = lab.get("license", {})
+        rows = list(license_profile.get("rows", []))
+        consistent = bool(license_profile.get("consistent"))
+        detected_mode = license_profile.get("detectedMode", "unknown")
+        if consistent:
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+                    "status": "ok",
+                    "message": f"All executed phases used `{detected_mode}` license mode.",
+                }
+            )
+        else:
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+                    "status": "issues",
+                    "message": license_profile.get("message", "Could not determine a consistent Specmatic license mode."),
+                }
+            )
+        sections.append(
+            {
+                "lab": lab["name"],
+                "href": lab["href"],
+                "detectedMode": detected_mode,
+                "message": license_profile.get("message", ""),
+                "rows": rows,
+            }
+        )
+    return {
+        "title": "Labs Specmatic License Comparison",
         "generatedAt": generated_at,
         "provenance": detect_report_provenance(),
         "summary": summary_items,
@@ -3068,6 +3220,119 @@ def render_artifact_status_chip(status: str) -> str:
     else:
         css_class = "status-fail"
     return f"<span class='status-chip {css_class}'>{escape(status)}</span>"
+
+
+def render_license_comparison_html(payload: dict[str, Any]) -> str:
+    summary_items = "".join(
+        f"<li><strong>{escape(item['lab'])}:</strong> {escape(item['message'])}</li>"
+        for item in payload.get("summary", [])
+    ) or "<li>No lab report snapshots were available.</li>"
+    sections_html = "".join(render_license_lab_section(section) for section in payload.get("labs", []))
+    provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p class='muted'>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(payload.get("title", "Labs Specmatic License Comparison"))}</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f5f1e8;
+      color: #182126;
+    }}
+    main {{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }}
+    .panel {{
+      background: #fffdf8;
+      border: 1px solid #d7ccb8;
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 18px;
+      box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .muted {{ color: #5b6570; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      margin-bottom: 18px;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+    }}
+    a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+    .status-chip {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .status-pass {{
+      color: #1f7a4d;
+      background: #e5f5eb;
+    }}
+    .status-fail {{
+      color: #ab2e2e;
+      background: #fae8e5;
+    }}
+    code {{
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 0.92rem;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>{escape(payload.get("title", "Labs Specmatic License Comparison"))}</h1>
+      {generated_at_html}
+      {provenance_html}
+      <p class="muted">This report detects the actual Specmatic license mode from the executed phase command logs and checks whether each lab used one consistent mode across its phases.</p>
+      <ul>{summary_items}</ul>
+    </section>
+    {sections_html}
+  </main>
+</body>
+</html>
+"""
+
+
+def render_license_lab_section(section: dict[str, Any]) -> str:
+    rows_html = "".join(
+        "<tr>"
+        f"<td>{escape(str(row['phase']))}</td>"
+        f"<td>{render_artifact_status_chip(str(row['status']))}</td>"
+        f"<td><code>{escape(str(row['mode']))}</code></td>"
+        f"<td><code>{escape(str(row['path']))}</code></td>"
+        f"<td>{escape(str(row['notes']))}</td>"
+        "</tr>"
+        for row in section.get("rows", [])
+    )
+    return (
+        "<section class='panel'>"
+        f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
+        f"<p class='muted'>{escape(str(section.get('message', '')))}</p>"
+        "<table>"
+        "<thead><tr><th>Phase</th><th>Result</th><th>Detected mode</th><th>Source</th><th>Notes</th></tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+        "</section>"
+    )
 
 
 def render_fencing_lab_section(section: dict[str, Any]) -> str:

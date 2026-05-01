@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -97,25 +96,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("actions:",),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Learner task",
-                "Lab Rules",
-                "Scenario Context",
-                "References",
-                "Intentional failure",
-                "Step 1:",
-                "Step 2:",
-                "Pass verification",
-                "Pass Criteria",
-                "What you learned",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

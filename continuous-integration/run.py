@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -54,26 +53,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("priority", "productId", "quantity"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Why this lab matters",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Architecture",
-                "Files in this lab",
-                "Learner task",
-                "Lab Rules",
-                "Specmatic references",
-                "Part A: Run the local contract-repo CI simulation",
-                "Part B: Fix the contract",
-                "Part C: Re-run the CI simulation",
-                "Part D: Inspect the GitHub Actions examples",
-                "Troubleshooting",
-                "What you learned",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

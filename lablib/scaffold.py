@@ -67,21 +67,6 @@ class ArtifactSpec:
 
 
 @dataclass
-class ReadmeStructureSpec:
-    """
-    Deprecated transitional structure spec.
-
-    The authoritative README structure now comes from the shared parser/schema
-    in `lablib.readme_expectations` + `lablib.readme_schema`.
-    This dataclass is kept only for gradual cleanup of older lab specs and is
-    no longer used by the shared structure validators.
-    """
-    required_h2_prefixes: tuple[str, ...]
-    additional_h2_prefixes: tuple[str, ...] = ()
-    enforce_required_order: bool = True
-
-
-@dataclass
 class PhaseSpec:
     name: str
     description: str
@@ -115,7 +100,6 @@ class LabSpec:
     phases: tuple[PhaseSpec, ...]
     command_env: dict[str, str] = field(default_factory=dict)
     common_artifact_specs: tuple[ArtifactSpec, ...] = ()
-    readme_structure: ReadmeStructureSpec | None = None  # Deprecated: retained only during legacy spec cleanup.
     setup_failure_message: str = (
         "Workspace setup failed. See output/consolidated-report/setup-output.json from the root setup command for details."
     )
@@ -174,6 +158,12 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 
 
 def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
+    if not spec.readme_path.exists():
+        raise FileNotFoundError(
+            f"Missing upstream README for lab '{spec.name}': {spec.readme_path}. "
+            "This usually means the sibling ../labs checkout is on a branch that does not contain the expected README. "
+            "Action required: switch ../labs to the correct branch or rerun with --labs-branch dynamic-labs."
+        )
     readme_text = spec.readme_path.read_text(encoding="utf-8")
     readme_doc = parse_readme_document(readme_text)
     original_files = {

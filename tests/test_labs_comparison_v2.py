@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lablib.labs_comparison import analyze_readme_os_documentation, build_lab_profile, extract_fenced_code_blocks, extract_headings
+from lablib.labs_comparison import (
+    analyze_readme_os_documentation,
+    build_lab_profile,
+    detect_license_mode_from_text,
+    extract_fenced_code_blocks,
+    extract_headings,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +81,20 @@ path: ./specs/service.yaml
         self.assertEqual(check["status"], "skipped")
         self.assertEqual(check["outputFence"], "yaml")
         self.assertEqual(check["output"], "(not shown)")
+
+    def test_detect_license_mode_from_text(self) -> None:
+        self.assertEqual(
+            detect_license_mode_from_text("Using Specmatic Enterprise license initialized from /specmatic/specmatic-license.txt"),
+            "enterprise",
+        )
+        self.assertEqual(
+            detect_license_mode_from_text("Using Specmatic Trial license initialized from jar:file:/usr/local/share/enterprise/enterprise.jar!/specmatic-default-trial-license.txt"),
+            "trial",
+        )
+        self.assertEqual(
+            detect_license_mode_from_text("docker.io/specmatic/specmatic:latest\nSpecmatic Core v2.44.2"),
+            "oss",
+        )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -84,21 +83,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("securitySchemes:", "oAuth2AuthCode:", "basicAuth:", "apiKeyAuth:"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Architecture",
-                "Security Schemes",
-                "Lab Rules",
-                "Intentional Failure",
-                "Run the failing tests",
-                "Your Task",
-                "Verify the fix",
-                "Troubleshooting",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

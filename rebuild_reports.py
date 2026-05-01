@@ -75,6 +75,8 @@ def main() -> int:
     print(f"Wrote labs command-output fencing comparison HTML report to {labs_comparison_module.FENCING_COMPARISON_HTML_PATH}")
     print(f"Wrote labs artifacts comparison JSON report to {labs_comparison_module.ARTIFACT_COMPARISON_JSON_PATH}")
     print(f"Wrote labs artifacts comparison HTML report to {labs_comparison_module.ARTIFACT_COMPARISON_HTML_PATH}")
+    print(f"Wrote labs license comparison JSON report to {labs_comparison_module.LICENSE_COMPARISON_JSON_PATH}")
+    print(f"Wrote labs license comparison HTML report to {labs_comparison_module.LICENSE_COMPARISON_HTML_PATH}")
     return 0 if consolidated["status"] == "passed" else 1
 
 
@@ -129,6 +131,8 @@ def configure_output_root(output_root: Path) -> None:
     labs_comparison_module.FENCING_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-command-output-fencing-comparison.html"
     labs_comparison_module.ARTIFACT_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-artifacts-comparison.json"
     labs_comparison_module.ARTIFACT_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-artifacts-comparison.html"
+    labs_comparison_module.LICENSE_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-license-comparison.json"
+    labs_comparison_module.LICENSE_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-license-comparison.html"
     labs_comparison_module.LEGACY_COMPARISON_JSON_PATH = output_root / "labs-comparison.json"
     labs_comparison_module.LEGACY_COMPARISON_HTML_PATH = output_root / "labs-comparison.html"
 

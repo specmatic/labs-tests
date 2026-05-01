@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -69,26 +68,7 @@ def build_lab_spec() -> LabSpec:
                 expected_markers=("def do_GET", "Golden Retriever"),
             ),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Why this lab matters",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Files in this lab",
-                "Learner task",
-                "Lab Rules",
-                "Specmatic references",
-                "Part A: Baseline run",
-                "Part B: Fix the provider implementation",
-                "Part C: Re-run tests",
-                "Optional: Run the same check in Studio",
-                "Pass criteria",
-                "Common confusion points",
-                "What you learned",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",

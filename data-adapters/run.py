@@ -12,7 +12,6 @@ from lablib.scaffold import (
     ArtifactSpec,
     LabSpec,
     PhaseSpec,
-    ReadmeStructureSpec,
     ValidationContext,
     add_standard_lab_args,
     assert_condition,
@@ -58,29 +57,7 @@ def build_lab_spec() -> LabSpec:
             ArtifactSpec("http-response.json", "build/data-adapters/http-response.json", "build/data-adapters/http-response.json", "json", ("status", "body", "request")),
             ArtifactSpec("compose.log", "build/data-adapters/compose.log", "build/data-adapters/compose.log", "text"),
         ),
-        readme_structure=ReadmeStructureSpec(
-            required_h2_prefixes=(
-                "Objective",
-                "Time required to complete this lab",
-                "Prerequisites",
-                "Architecture",
-                "Files in this lab",
-                "Reference",
-                "Lab Rules",
-                "1. Start mock + UI",
-                "2. Trigger the mismatch from browser (intentional failure)",
-                "3. Cleanup",
-                "4. Configure hooks in `specmatic.yaml`",
-                "5. Ensure hook scripts are executable",
-                "6. Restart mock + UI",
-                "7. Trigger the matching request/response from browser",
-                "8. Cleanup",
-                "Windows Notes",
-                "9. Verify in Studio (Optional)",
-                "10. Cleanup",
-                "Next step",
-            ),
-        ),
+
         phases=(
             PhaseSpec(
                 name="Baseline mismatch",
