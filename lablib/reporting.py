@@ -565,11 +565,20 @@ def render_assertion_sections(phase: dict[str, Any]) -> str:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for assertion in assertions:
         grouped.setdefault(assertion.get("category", "other"), []).append(assertion)
-
-    sections = "".join(
-        render_assertion_section(phase["name"], category, grouped[category]) for category in ordered_categories(grouped)
-    )
-    return f"<h3 class=\"section-heading\">Validations</h3>{sections}"
+    sections_by_scope: list[str] = []
+    for scope in ("required", "conditional"):
+        categories = [
+            category
+            for category in ordered_categories(grouped)
+            if validation_scope_for_category(category) == scope
+        ]
+        if not categories:
+            continue
+        sections = "".join(
+            render_assertion_section(phase["name"], category, grouped[category]) for category in categories
+        )
+        sections_by_scope.append(f"<h3 class=\"section-heading\">{escape(validation_scope_title(scope))}</h3>{sections}")
+    return "".join(sections_by_scope)
 
 
 def render_assertion_section(phase_name: str, category: str, assertions: list[dict[str, Any]]) -> str:
@@ -711,6 +720,16 @@ def category_title(category: str) -> str:
     return labels.get(category, f"{category.title()} Validations")
 
 
+def validation_scope_for_category(category: str) -> str:
+    if category in {"readme", "implementation", "command"}:
+        return "required"
+    return "conditional"
+
+
+def validation_scope_title(scope: str) -> str:
+    return "Required validations" if scope == "required" else "Conditional validations"
+
+
 def ordered_categories(grouped: dict[str, Any]) -> list[str]:
     preferred = [
         "setup",
@@ -762,18 +781,29 @@ def render_category_summary(phase: dict[str, Any]) -> str:
     for category in standard_report_categories():
         grouped.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "expected": 0, "other": 0})
 
-    rows = "".join(
-        f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['expected']}</td><td>{stats['other']}</td></tr>"
-        for category in ordered_categories(grouped)
-        for stats in [grouped[category]]
-    )
+    def scope_table(scope: str) -> str:
+        rows = "".join(
+            f"<tr><td><a href=\"#{escape(category_section_id(phase['name'], category))}\">{escape(category_title(category))}</a></td><td>{stats['total']}</td><td>{stats['passed']}</td><td>{stats['failed']}</td><td>{stats['skipped']}</td><td>{stats['expected']}</td><td>{stats['other']}</td></tr>"
+            for category in ordered_categories(grouped)
+            if validation_scope_for_category(category) == scope
+            for stats in [grouped[category]]
+        )
+        if not rows:
+            return ""
+        return (
+            f"<h4>{escape(validation_scope_title(scope))}</h4>"
+            "<table>"
+            "<thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Expected</th><th>Other</th></tr></thead>"
+            f"<tbody>{rows}</tbody>"
+            "</table>"
+        )
+
     return (
         '<section class="category-summary">'
-        "<h3>Category Summary</h3>"
-        "<table>"
-        "<thead><tr><th>Category</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Expected</th><th>Other</th></tr></thead>"
-        f"<tbody>{rows}</tbody>"
-        "</table>"
+        "<h3>Validation Scope Summary</h3>"
+        "<p>Required validations should pass for the documented phase contract. Conditional validations depend on README metadata, expected reports, or lab-specific runtime behavior.</p>"
+        f"{scope_table('required')}"
+        f"{scope_table('conditional')}"
         "</section>"
     )
 

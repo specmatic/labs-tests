@@ -67,8 +67,8 @@ def main() -> int:
     print(f"Wrote consolidated HTML report to {run_all_module.CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {labs_comparison_module.COMPARISON_JSON_PATH}")
     print(f"Wrote labs comparison HTML report to {labs_comparison_module.COMPARISON_HTML_PATH}")
-    print(f"Wrote labs other-comparison JSON report to {labs_comparison_module.OTHER_COMPARISON_JSON_PATH}")
-    print(f"Wrote labs other-comparison HTML report to {labs_comparison_module.OTHER_COMPARISON_HTML_PATH}")
+    print(f"Wrote labs heading-structure comparison JSON report to {labs_comparison_module.HEADINGS_COMPARISON_JSON_PATH}")
+    print(f"Wrote labs heading-structure comparison HTML report to {labs_comparison_module.HEADINGS_COMPARISON_HTML_PATH}")
     print(f"Wrote labs test-counts comparison JSON report to {labs_comparison_module.TEST_COUNT_COMPARISON_JSON_PATH}")
     print(f"Wrote labs test-counts comparison HTML report to {labs_comparison_module.TEST_COUNT_COMPARISON_HTML_PATH}")
     print(f"Wrote labs command-output fencing comparison JSON report to {labs_comparison_module.FENCING_COMPARISON_JSON_PATH}")
@@ -121,8 +121,8 @@ def configure_output_root(output_root: Path) -> None:
     labs_comparison_module.COMPARISON_OUTPUT_DIR = consolidated_output_dir
     labs_comparison_module.COMPARISON_JSON_PATH = consolidated_output_dir / "labs-comparison.json"
     labs_comparison_module.COMPARISON_HTML_PATH = consolidated_output_dir / "labs-comparison.html"
-    labs_comparison_module.OTHER_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-other-comparison.json"
-    labs_comparison_module.OTHER_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-other-comparison.html"
+    labs_comparison_module.HEADINGS_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-heading-structure-comparison.json"
+    labs_comparison_module.HEADINGS_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-heading-structure-comparison.html"
     labs_comparison_module.TEST_COUNT_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-test-counts-comparison.json"
     labs_comparison_module.TEST_COUNT_COMPARISON_HTML_PATH = consolidated_output_dir / "labs-test-counts-comparison.html"
     labs_comparison_module.FENCING_COMPARISON_JSON_PATH = consolidated_output_dir / "labs-command-output-fencing-comparison.json"

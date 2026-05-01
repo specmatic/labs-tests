@@ -43,8 +43,8 @@ OUTPUT_DIR = ROOT / "output"
 COMPARISON_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.json"
 COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.html"
-OTHER_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.json"
-OTHER_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-other-comparison.html"
+HEADINGS_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.json"
+HEADINGS_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.html"
 TEST_COUNT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.json"
 TEST_COUNT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.html"
 FENCING_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.json"
@@ -68,8 +68,7 @@ TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 CORE_VALIDATION_LABELS = {
-    "README starts with a top-level H1 title",
-    "README H2 order matches the lab's source-of-truth structure",
+    "Labs Heading Structure Comparison",
     "Command and Output fencing validation",
     "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
     "Generated report artifacts align with README expectations",
@@ -137,6 +136,7 @@ def generate_labs_comparison(
     if selected:
         run_files = [path for path in run_files if path.parent.name in selected]
     labs = [build_lab_profile(path.parent) for path in run_files]
+    common_required_h2 = list(tuple(labs[0]["readme"]["requiredH2"]) if labs else ())
     validation_rows = build_validation_rows(labs)
     payload = {
         "title": "Labs Comparison",
@@ -145,28 +145,29 @@ def generate_labs_comparison(
         "summary": build_summary(labs),
         "commonalities": build_commonalities(labs),
         "differences": build_differences(labs),
-        "validationMatrix": build_validation_matrix(labs, validation_rows, mode="core"),
+        "validationMatrix": build_validation_matrix(labs, validation_rows),
         "labs": labs,
         "navigation": {
             "consolidatedReportHref": "consolidated-report.html",
         },
     }
-    other_payload = {
-        **payload,
-        "title": "Labs Other Comparison",
-        "validationMatrix": build_validation_matrix(labs, validation_rows, mode="other"),
-    }
+    headings_payload = build_heading_comparison_payload(labs, common_required_h2, generated_at or datetime.now().astimezone().isoformat())
     test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     fencing_payload = build_fencing_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     artifact_payload = build_artifact_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
+    for legacy_path in (
+        LEGACY_COMPARISON_JSON_PATH,
+        LEGACY_COMPARISON_HTML_PATH,
+        COMPARISON_OUTPUT_DIR / "labs-other-comparison.json",
+        COMPARISON_OUTPUT_DIR / "labs-other-comparison.html",
+    ):
         if legacy_path.exists():
             legacy_path.unlink()
     COMPARISON_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
-    OTHER_COMPARISON_JSON_PATH.write_text(json.dumps(other_payload, indent=2) + "\n", encoding="utf-8")
-    OTHER_COMPARISON_HTML_PATH.write_text(render_comparison_html(other_payload), encoding="utf-8")
+    HEADINGS_COMPARISON_JSON_PATH.write_text(json.dumps(headings_payload, indent=2) + "\n", encoding="utf-8")
+    HEADINGS_COMPARISON_HTML_PATH.write_text(render_heading_comparison_html(headings_payload), encoding="utf-8")
     TEST_COUNT_COMPARISON_JSON_PATH.write_text(json.dumps(test_count_payload, indent=2) + "\n", encoding="utf-8")
     TEST_COUNT_COMPARISON_HTML_PATH.write_text(render_test_count_comparison_html(test_count_payload), encoding="utf-8")
     FENCING_COMPARISON_JSON_PATH.write_text(json.dumps(fencing_payload, indent=2) + "\n", encoding="utf-8")
@@ -331,6 +332,10 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         "readme": {
             "h1": next((heading["text"] for heading in headings[:1] if heading["level"] == 1), ""),
             "actualH1": [heading["text"] for heading in headings if heading["level"] == 1],
+            "actualHeadings": [
+                {"level": heading["level"], "text": heading["text"], "line": heading["line"]}
+                for heading in headings
+            ],
             "requiredH2": required_h2,
             "optionalH2": [] if readme_doc.is_v2 else list(optional_h2_titles()),
             "additionalH2": list(override.allowed_additional_h2_titles),
@@ -1107,7 +1112,6 @@ def check_report_artifact_bundle(lab: dict[str, Any]) -> bool | str:
 
 
 def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     shared_h2 = tuple(labs[0]["readme"]["requiredH2"]) if labs else ()
     common_required_h2 = list(shared_h2)
     extra_h2_by_lab = {
@@ -1116,17 +1120,13 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     }
     row_definitions = [
         {
-            "label": "README starts with a top-level H1 title",
+            "label": "Labs Heading Structure Comparison",
             "tooltip": {
-                "summary": ["Every compared README starts with an H1 title."],
-                "details": build_h1_details(labs),
+                **build_h2_sequence_tooltip(labs, common_required_h2),
+                "fullReportHref": "labs-heading-structure-comparison.html",
+                "fullReportLabel": "Open full heading structure report",
             },
-            "cells": [bool(lab["readme"]["h1"]) for lab in labs],
-        },
-        {
-            "label": "README H2 order matches the lab's source-of-truth structure",
-            "tooltip": build_h2_sequence_tooltip(labs, common_required_h2),
-            "cells": [lab["readme"]["sharedH2OrderMatches"] for lab in labs],
+            "cells": [bool(lab["readme"]["h1"]) and lab["readme"]["sharedH2OrderMatches"] for lab in labs],
         },
         {
             "label": "README uses H3 headings for lab-specific implementation steps",
@@ -1368,17 +1368,28 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_validation_matrix(
     labs: list[dict[str, Any]],
     row_definitions: list[dict[str, Any]] | None = None,
-    *,
-    mode: str = "core",
 ) -> dict[str, Any]:
     columns = [{"name": lab["name"], "href": lab["href"]} for lab in labs]
     definitions = list(row_definitions or build_validation_rows(labs))
-    if mode == "core":
-        definitions = [row for row in definitions if row["label"] in CORE_VALIDATION_LABELS]
-    elif mode == "other":
-        definitions = [row for row in definitions if row["label"] not in CORE_VALIDATION_LABELS]
+    definitions = [row for row in definitions if row["label"] in CORE_VALIDATION_LABELS]
     rows = [add_row_status_prefix(index, row) for index, row in enumerate(definitions, start=1)]
     return {"columns": columns, "rows": rows}
+
+
+def build_heading_comparison_payload(
+    labs: list[dict[str, Any]],
+    common_required_h2: list[str],
+    generated_at: str,
+) -> dict[str, Any]:
+    tooltip = build_h2_sequence_tooltip(labs, common_required_h2)
+    details = tooltip.get("details", {})
+    return {
+        "title": "Labs Heading Structure Comparison",
+        "generatedAt": generated_at,
+        "provenance": detect_report_provenance(),
+        "summary": tooltip.get("summary", []),
+        "details": details,
+    }
 
 
 def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at: str) -> dict[str, Any]:
@@ -1984,6 +1995,27 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     .matrix-tooltip-details table.matrix-tooltip-wide-table td:last-child {{
       width: 260px;
     }}
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table {{
+      table-layout: fixed;
+      min-width: 980px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table th,
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table td {{
+      font-size: 0.9rem;
+      padding: 8px 7px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      vertical-align: top;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table th:first-child,
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table td:first-child {{
+      width: 52px;
+    }}
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table th:not(:first-child),
+    .matrix-tooltip-details table.matrix-tooltip-heading-sequence-table td:not(:first-child) {{
+      width: 154px;
+    }}
     .matrix-tooltip-cell-status {{
       font-weight: 700;
       white-space: nowrap;
@@ -2000,6 +2032,37 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       border-radius: 0.35rem;
       padding: 0.18rem 0.35rem;
       display: inline-block;
+    }}
+    .matrix-tooltip-heading-cell {{
+      display: block;
+      border-radius: 0.55rem;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid transparent;
+      min-height: 2.4rem;
+    }}
+    .matrix-tooltip-heading-cell.ok {{
+      background: #eaf7ee;
+      border-color: #9bd3a9;
+      color: #1f7a3b;
+      font-weight: 600;
+    }}
+    .matrix-tooltip-heading-cell.warn {{
+      background: #fff7d6;
+      border-color: #f4cd62;
+      color: #9a6700;
+      font-weight: 600;
+    }}
+    .matrix-tooltip-heading-cell.fail {{
+      background: #fff1ea;
+      border-color: #f0b39f;
+      color: #b42318;
+      font-weight: 600;
+    }}
+    .matrix-tooltip-heading-cell.empty {{
+      background: transparent;
+      border-color: transparent;
+      min-height: 0;
+      padding: 0;
     }}
     .matrix-tooltip-cell-action.ok {{
       color: #245b34;
@@ -2162,8 +2225,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       </div>
       <ul id="matrix-tooltip-summary"></ul>
       <p id="matrix-tooltip-report-link" class="tooltip-report-link" hidden><a id="matrix-tooltip-report-link-anchor" href="#" target="_blank" rel="noopener noreferrer">Open full report</a></p>
-      <button id="matrix-tooltip-details-toggle" type="button" class="tooltip-details-toggle" hidden>View details</button>
-      <div id="matrix-tooltip-details" class="matrix-tooltip-details" hidden></div>
     </div>
   </div>
   <script>
@@ -2173,8 +2234,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
       const summary = document.getElementById('matrix-tooltip-summary');
       const reportLink = document.getElementById('matrix-tooltip-report-link');
       const reportLinkAnchor = document.getElementById('matrix-tooltip-report-link-anchor');
-      const details = document.getElementById('matrix-tooltip-details');
-      const detailsToggle = document.getElementById('matrix-tooltip-details-toggle');
       let activeTooltip = null;
       let activeTrigger = null;
       const closeAll = () => {{
@@ -2195,14 +2254,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           reportLinkAnchor.href = '#';
           reportLinkAnchor.textContent = 'Open full report';
         }}
-        if (details) {{
-          details.hidden = true;
-          details.innerHTML = '';
-        }}
-        if (detailsToggle) {{
-          detailsToggle.hidden = true;
-          detailsToggle.textContent = 'View details';
-        }}
         activeTooltip = null;
         activeTrigger = null;
         document.body.style.overflow = '';
@@ -2214,7 +2265,7 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
         const closeButton = target.closest ? target.closest('[data-modal-close="true"]') : null;
         if (trigger) {{
           closeAll();
-          if (!modal || !title || !summary || !reportLink || !reportLinkAnchor || !details || !detailsToggle) return;
+          if (!modal || !title || !summary || !reportLink || !reportLinkAnchor) return;
           const tooltipJson = trigger.getAttribute('data-tooltip-json') || '';
           if (!tooltipJson) return;
           const tooltip = JSON.parse(tooltipJson);
@@ -2229,11 +2280,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           }} else {{
             reportLink.hidden = true;
           }}
-          renderDetails(details, tooltip.details || null);
-          details.hidden = true;
-          detailsToggle.hidden = !tooltip.details;
-          detailsToggle.textContent = 'View details';
-          detailsToggle.setAttribute('aria-expanded', 'false');
           modal.hidden = false;
           document.body.style.overflow = 'hidden';
           trigger.setAttribute('aria-expanded', 'true');
@@ -2247,21 +2293,6 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
           const triggerControl = closeAll();
           if (triggerControl) {{
             triggerControl.focus();
-          }}
-          return;
-        }}
-        if (target === detailsToggle) {{
-          if (!details || !detailsToggle || !activeTooltip) return;
-          const isHidden = details.hidden;
-          if (isHidden) {{
-            renderDetails(details, activeTooltip.details || null);
-            details.hidden = false;
-            detailsToggle.textContent = 'Hide details';
-            detailsToggle.setAttribute('aria-expanded', 'true');
-          }} else {{
-            details.hidden = true;
-            detailsToggle.textContent = 'View details';
-            detailsToggle.setAttribute('aria-expanded', 'false');
           }}
           return;
         }}
@@ -2396,6 +2427,14 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
             headers[3] === 'Command fence'
           ) {{
             table.classList.add('matrix-tooltip-wide-table');
+          }} else if (
+            headers.length >= 4 &&
+            headers[0] === '#' &&
+            headers[1] === 'H1' &&
+            headers[2] === 'H2' &&
+            headers[3] === 'H3'
+          ) {{
+            table.classList.add('matrix-tooltip-heading-sequence-table');
           }}
           headers.forEach((header) => {{
             const th = document.createElement('th');
@@ -2581,6 +2620,189 @@ def render_test_count_comparison_html(payload: dict[str, Any]) -> str:
 </body>
 </html>
 """
+
+
+def render_heading_comparison_html(payload: dict[str, Any]) -> str:
+    provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p class='muted'>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
+    summary_items = "".join(f"<li>{escape(item)}</li>" for item in payload.get("summary", [])) or "<li>No heading summary available.</li>"
+    details = payload.get("details", {})
+    sections_html = "".join(render_heading_details_section(section) for section in details.get("sections", []))
+    note_html = f"<p class='muted'>{escape(details.get('note', ''))}</p>" if details.get("note") else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(payload.get("title", "Labs Heading Structure Comparison"))}</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f5f1e8;
+      color: #182126;
+    }}
+    main {{
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }}
+    .panel {{
+      background: #fffdf8;
+      border: 1px solid #d7ccb8;
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .muted {{
+      color: #66727d;
+      font-size: 0.84rem;
+      line-height: 1.3;
+    }}
+    h1, h2, h3 {{
+      margin-top: 0;
+    }}
+    h1 {{
+      font-size: 1.8rem;
+      margin-bottom: 0.55rem;
+    }}
+    h2 {{
+      font-size: 1.1rem;
+      margin-bottom: 0.45rem;
+    }}
+    h3 {{
+      font-size: 0.98rem;
+      margin-bottom: 0.35rem;
+    }}
+    a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+    ul {{
+      margin: 0;
+      padding-left: 1.2rem;
+      font-size: 0.95rem;
+      line-height: 1.3;
+    }}
+    .detail-block {{
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid #eadfcd;
+      border-radius: 12px;
+      background: #fffaf1;
+    }}
+    .table-wrap {{
+      overflow-x: auto;
+      margin-top: 8px;
+    }}
+    table {{
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 6px 6px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-size: 0.88rem;
+      line-height: 1.15;
+    }}
+    thead th {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #fff7eb;
+    }}
+    .heading-cell {{
+      display: block;
+      border-radius: 0.3rem;
+      padding: 0.28rem 0.4rem;
+      border: 1px solid transparent;
+      min-height: 1.45rem;
+      line-height: 1.15;
+      font-size: 0.84rem;
+    }}
+    .heading-cell.ok {{
+      background: #eaf7ee;
+      border-color: #9bd3a9;
+      color: #1f7a3b;
+      font-weight: 600;
+    }}
+    .heading-cell.warn {{
+      background: #fff7d6;
+      border-color: #f4cd62;
+      color: #9a6700;
+      font-weight: 600;
+    }}
+    .heading-cell.fail {{
+      background: #fff1ea;
+      border-color: #f0b39f;
+      color: #b42318;
+      font-weight: 600;
+    }}
+    .heading-cell.empty {{
+      background: transparent;
+      border-color: transparent;
+      min-height: 0;
+      padding: 0;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>{escape(payload.get("title", "Labs Heading Structure Comparison"))}</h1>
+      {generated_at_html}
+      {provenance_html}
+      {note_html}
+      <ul>{summary_items}</ul>
+    </section>
+    {sections_html}
+  </main>
+</body>
+</html>
+"""
+
+
+def render_heading_details_section(section: dict[str, Any]) -> str:
+    if section.get("type") == "bullets":
+        items = "".join(f"<li>{escape(str(item))}</li>" for item in section.get("items", []))
+        note = f"<p class='muted'>{escape(section.get('note', ''))}</p>" if section.get("note") else ""
+        return f"<section class='detail-block'><h3>{escape(section.get('title', ''))}</h3>{note}<ul>{items}</ul></section>"
+    if section.get("type") == "table":
+        headers = "".join(f"<th>{escape(str(header))}</th>" for header in section.get("headers", []))
+        rows_html = "".join(render_heading_table_row(row) for row in section.get("rows", []))
+        return (
+            f"<section class='detail-block'><h3>{escape(section.get('title', ''))}</h3>"
+            f"<div class='table-wrap'><table><thead><tr>{headers}</tr></thead><tbody>{rows_html}</tbody></table></div></section>"
+        )
+    if section.get("type") == "sections":
+        nested = "".join(render_heading_details_section(item) for item in section.get("sections", []))
+        note = f"<p class='muted'>{escape(section.get('note', ''))}</p>" if section.get("note") else ""
+        title = section.get("title", "")
+        title_html = f"<h2><a href='{escape(section.get('href', '#'))}' target='_blank' rel='noreferrer'>{escape(title)}</a></h2>" if section.get("href") else f"<h2>{escape(title)}</h2>"
+        return f"<section class='panel'>{title_html}{note}{nested}</section>"
+    return ""
+
+
+def render_heading_table_row(row: list[Any]) -> str:
+    cells = []
+    for value in row:
+        raw = value if isinstance(value, dict) else None
+        if raw is not None:
+            text = escape(str(raw.get("text", "")))
+            class_name = escape(str(raw.get("className", "")).replace("matrix-tooltip-heading-cell", "heading-cell"))
+            title_attr = f" title='{escape(str(raw.get('title', '')))}'" if raw.get("title") else ""
+            cells.append(f"<td{title_attr}><span class='{class_name}'>{text}</span></td>")
+        else:
+            cells.append(f"<td>{escape(str(value))}</td>")
+    return "<tr>" + "".join(cells) + "</tr>"
 
 
 def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
@@ -3050,7 +3272,6 @@ def render_matrix_trigger_attrs(tooltip: dict[str, Any], label: str) -> str:
     payload = {
         "title": label,
         "summary": tooltip.get("summary", []),
-        "details": tooltip.get("details"),
         "fullReportHref": tooltip.get("fullReportHref"),
         "fullReportLabel": tooltip.get("fullReportLabel"),
     }
@@ -3967,57 +4188,102 @@ def build_h2_sequence_tooltip(labs: list[dict[str, Any]], common_required_h2: li
     lab_sections = []
     for lab in labs:
         actual_h2 = list(lab["readme"]["actualH2"])
+        actual_headings = list(lab["readme"].get("actualHeadings", []))
         extra_sections = list(lab["readme"]["unexpectedH2"])
-        h1_title = lab["readme"]["h1"] or ""
-        h1_as_h2 = [title for title in actual_h2 if heading_matches(title, h1_title)] if h1_title else []
+        optional_sections = list(lab["readme"]["optionalH2"]) + list(lab["readme"]["additionalH2"])
         missing_sections = [section for section in common_required_h2 if not any(heading_matches(actual, section) for actual in actual_h2)]
-        incorrect_order_sections = []
-        actual_positions = []
-        for index, title in enumerate(actual_h2):
-            matched = next((section for section in common_required_h2 if heading_matches(title, section)), None)
-            if matched is not None:
-                actual_positions.append((matched, index))
-        previous_position = -1
-        previous_expected_title = ""
-        for section in common_required_h2:
-            current = next((index for matched, index in actual_positions if heading_matches(matched, section)), None)
-            if current is None:
-                continue
-            if current < previous_position:
-                message = f"'{section}'"
-                if previous_expected_title:
-                    message += f" appears before '{previous_expected_title}'"
-                incorrect_order_sections.append(message)
-            else:
-                previous_position = current
-                previous_expected_title = section
-        lab_section_list = [
-            build_bullet_section(
-                "Move to H3",
-                extra_sections or h1_as_h2,
-                tone="attention",
-                note="These H2 sections are lab-specific walkthrough content and should move to H3.",
-            ),
-            build_bullet_section(
-                "Allowed optional H2",
-                lab["readme"]["optionalH2"] + lab["readme"]["additionalH2"],
-                tone="ok",
-                note="These H2 sections are allowed by the shared template or lab override.",
-            ),
-            build_bullet_section(
-                "Add as H2",
-                missing_sections,
-                tone="attention",
-                note="These shared H2 sections are missing and should be added at H2 level.",
-            ),
-            build_bullet_section(
-                "Fix H2 order",
-                incorrect_order_sections,
-                tone="attention",
-                note="These shared H2 sections appear out of sequence and should be reordered.",
-            ),
+
+        matched_h2_sequence = [
+            next((section for section in common_required_h2 if heading_matches(title, section)), None)
+            for title in actual_h2
         ]
-        add_lab_section(lab_sections, lab, lab_section_list, note="These are the concrete README heading changes needed for this lab.")
+        matched_h2_sequence = [item for item in matched_h2_sequence if item is not None]
+        actual_expected_positions = {section: index for index, section in enumerate(matched_h2_sequence)}
+        expected_positions = {section: index for index, section in enumerate(common_required_h2)}
+
+        table_rows: list[list[Any]] = []
+        for row_index, heading in enumerate(actual_headings, start=1):
+            level = int(heading.get("level", 0))
+            text = str(heading.get("text", ""))
+            row: list[Any] = [str(row_index)]
+            display_level = level if level <= 4 else 4
+            for target_level in range(1, 5):
+                if target_level != display_level:
+                    row.append({"text": "", "className": "matrix-tooltip-heading-cell empty"})
+                    continue
+                if level == 2:
+                    matched_expected = next((section for section in common_required_h2 if heading_matches(text, section)), None)
+                    if matched_expected is not None:
+                        actual_pos = actual_expected_positions.get(matched_expected)
+                        expected_pos = expected_positions.get(matched_expected)
+                        if actual_pos == expected_pos:
+                            row.append({
+                                "text": text,
+                                "className": "matrix-tooltip-heading-cell ok",
+                                "title": "Expected H2 in the correct sequence.",
+                            })
+                        else:
+                            arrow = "↑" if (expected_pos is not None and actual_pos is not None and expected_pos < actual_pos) else "↓"
+                            row.append({
+                                "text": f"{text} {arrow}",
+                                "className": "matrix-tooltip-heading-cell warn",
+                                "title": f"Expected H2, but it should move {'up' if arrow == '↑' else 'down'} in the sequence.",
+                            })
+                    elif any(heading_matches(text, item) for item in extra_sections):
+                        row.append({
+                            "text": f"{text} (should be H3)",
+                            "className": "matrix-tooltip-heading-cell fail",
+                            "title": "This H2 is lab-specific walkthrough content and should be H3.",
+                        })
+                    elif any(heading_matches(text, item) for item in optional_sections):
+                        row.append({
+                            "text": text,
+                            "className": "matrix-tooltip-heading-cell ok",
+                            "title": "Allowed optional H2 section.",
+                        })
+                    else:
+                        row.append({
+                            "text": f"{text} (unexpected H2)",
+                            "className": "matrix-tooltip-heading-cell fail",
+                            "title": "This H2 is not part of the expected shared structure.",
+                        })
+                elif level == 1:
+                    is_top_h1 = row_index == 1
+                    row.append({
+                        "text": text,
+                        "className": f"matrix-tooltip-heading-cell {'ok' if is_top_h1 else 'fail'}",
+                        "title": "Top-level H1 heading." if is_top_h1 else "H1 exists, but it is not the first heading.",
+                    })
+                else:
+                    row.append({
+                        "text": f"{text} (H{level})" if level > 4 else text,
+                        "className": "matrix-tooltip-heading-cell ok" if level in {3, 4} else "matrix-tooltip-heading-cell",
+                        "title": f"H{level} heading.",
+                    })
+            table_rows.append(row)
+
+        for missing_section in missing_sections:
+            missing_row: list[Any] = [""]
+            for target_level in range(1, 5):
+                if target_level == 2:
+                    missing_row.append({
+                        "text": f"{missing_section} (missing expected H2)",
+                        "className": "matrix-tooltip-heading-cell fail",
+                        "title": "This expected H2 section is missing from the README.",
+                    })
+                else:
+                    missing_row.append({"text": "", "className": "matrix-tooltip-heading-cell empty"})
+            table_rows.append(missing_row)
+
+        lab_section_list = [
+            {
+                "type": "table",
+                "title": "Actual heading flow",
+                "headers": ["#", "H1", "H2", "H3", "H4"],
+                "rows": table_rows or [["1", {"text": "(no headings)", "className": "matrix-tooltip-heading-cell fail"}, "", "", ""]],
+            },
+        ]
+        add_lab_section(lab_sections, lab, lab_section_list, note="Green means expected and correctly placed. Yellow means expected but out of order. Red means the heading belongs at another level or is unexpected.")
     details_sections = [
         {
             "type": "bullets",
