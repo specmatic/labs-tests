@@ -320,9 +320,11 @@ The comparison report will then show those phases as `Expected` instead of plain
 GitHub Actions workflow:
 
 - `.github/workflows/labs-tests.yml`
-- runs `python3 run_all.py --refresh-labs --force`
+- runs `python3 run_all.py --refresh-labs --force --labs-branch dynamic-labs` by default
+- accepts an optional space-separated `labs` workflow input to run only selected labs
+- accepts an optional `labs_branch` workflow input; until the `dynamic-labs` work is merged, the default branch is `dynamic-labs`
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
-- uses a 30-minute timeout for the workflow job and the main lab execution step
+- uses a 40-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
 - includes the consolidated report path and comparison report path in the GitHub job summary so workflow runs can be checked quickly
 - uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact
