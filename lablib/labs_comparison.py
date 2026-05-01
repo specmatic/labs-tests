@@ -3463,6 +3463,7 @@ def render_fencing_notes(notes: str, status: str) -> str:
 
 
 def render_test_count_lab_section(section: dict[str, Any]) -> str:
+    report_label = "MCP JSON" if str(section.get("lab")) == "mcp-auto-test" else "CTRF"
     rows_html = "".join(
         "<tr>"
         f"<td>{escape(str(row['phase']))}</td>"
@@ -3479,7 +3480,7 @@ def render_test_count_lab_section(section: dict[str, Any]) -> str:
         f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
         f"<p class='muted'>{escape(section.get('note', ''))}</p>"
         "<table>"
-        "<thead><tr><th>Phase</th><th>README</th><th>Console</th><th>CTRF</th><th>HTML</th><th>Status</th></tr></thead>"
+        f"<thead><tr><th>Phase</th><th>README</th><th>Console</th><th>{report_label}</th><th>HTML</th><th>Status</th></tr></thead>"
         f"<tbody>{rows_html}</tbody>"
         "</table>"
         "</section>"
