@@ -73,6 +73,8 @@ def run_setup(
             stream_output=stream_output,
         )
         commands.append(command_to_dict(clone_result, "Clone upstream labs repository"))
+        if refresh_labs:
+            commands.extend(refresh_upstream_labs(stream_output=stream_output, target_branch=target_branch))
     else:
         if refresh_labs:
             dirty_state = execute(
