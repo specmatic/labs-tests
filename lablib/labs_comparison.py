@@ -49,6 +49,8 @@ TEST_COUNT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comp
 TEST_COUNT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.html"
 FENCING_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.json"
 FENCING_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.html"
+ARTIFACT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-artifacts-comparison.json"
+ARTIFACT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-artifacts-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
@@ -156,6 +158,7 @@ def generate_labs_comparison(
     }
     test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     fencing_payload = build_fencing_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
+    artifact_payload = build_artifact_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     COMPARISON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for legacy_path in (LEGACY_COMPARISON_JSON_PATH, LEGACY_COMPARISON_HTML_PATH):
         if legacy_path.exists():
@@ -168,6 +171,8 @@ def generate_labs_comparison(
     TEST_COUNT_COMPARISON_HTML_PATH.write_text(render_test_count_comparison_html(test_count_payload), encoding="utf-8")
     FENCING_COMPARISON_JSON_PATH.write_text(json.dumps(fencing_payload, indent=2) + "\n", encoding="utf-8")
     FENCING_COMPARISON_HTML_PATH.write_text(render_fencing_comparison_html(fencing_payload), encoding="utf-8")
+    ARTIFACT_COMPARISON_JSON_PATH.write_text(json.dumps(artifact_payload, indent=2) + "\n", encoding="utf-8")
+    ARTIFACT_COMPARISON_HTML_PATH.write_text(render_artifact_comparison_html(artifact_payload), encoding="utf-8")
     return payload
 
 
@@ -1322,6 +1327,8 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "README metadata still controls whether each artifact is required, optional, or expected to be absent.",
                 ],
                 "details": build_report_artifact_bundle_details(labs),
+                "fullReportHref": "labs-artifacts-comparison.html",
+                "fullReportLabel": "Open full artifacts report",
             },
             "cells": [check_report_artifact_bundle(lab) for lab in labs],
         },
@@ -1453,6 +1460,75 @@ def build_fencing_comparison_payload(labs: list[dict[str, Any]], generated_at: s
         )
     return {
         "title": "Labs Command And Output Fencing Comparison",
+        "generatedAt": generated_at,
+        "provenance": detect_report_provenance(),
+        "summary": summary_items,
+        "labs": sections,
+    }
+
+
+def build_artifact_comparison_payload(labs: list[dict[str, Any]], generated_at: str) -> dict[str, Any]:
+    sections = []
+    summary_items = []
+    for lab in labs:
+        ctrf = evaluate_report_artifact_expectation(lab, "ctrf-report.json", "ctrf")
+        html = evaluate_report_artifact_expectation(lab, "specmatic-report.html", "html")
+        extra_artifacts = lab["warnings"].get("additionalArtifacts", [])
+        overall_ok = bool(ctrf["ok"]) and bool(html["ok"])
+        if overall_ok:
+            message = "Artifact expectations satisfied."
+            if extra_artifacts:
+                message += f" Warning: additional generated artifacts detected: {', '.join(extra_artifacts)}."
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+                    "status": "ok",
+                    "message": message,
+                }
+            )
+        else:
+            summary_items.append(
+                {
+                    "lab": lab["name"],
+                    "status": "issues",
+                    "message": "At least one artifact does not match the README-driven expectation.",
+                }
+            )
+        sections.append(
+            {
+                "lab": lab["name"],
+                "href": lab["href"],
+                "rows": [
+                    {
+                        "artifact": str(ctrf["artifact"]),
+                        "expected": str(ctrf["expectedState"]).replace("_", " "),
+                        "actual": str(ctrf["actualState"]),
+                        "status": str(ctrf["status"]).title(),
+                        "notes": str(ctrf["message"]),
+                    },
+                    {
+                        "artifact": str(html["artifact"]),
+                        "expected": str(html["expectedState"]).replace("_", " "),
+                        "actual": str(html["actualState"]),
+                        "status": str(html["status"]).title(),
+                        "notes": str(html["message"]),
+                    },
+                    {
+                        "artifact": "Additional generated artifacts",
+                        "expected": "warning",
+                        "actual": ", ".join(extra_artifacts) if extra_artifacts else "(none)",
+                        "status": "Warning" if extra_artifacts else "Clear",
+                        "notes": (
+                            "These files are not part of the core CTRF/HTML pair but may indicate old, alternate, or auxiliary report output."
+                            if extra_artifacts
+                            else "No additional generated artifacts detected."
+                        ),
+                    },
+                ],
+            }
+        )
+    return {
+        "title": "Labs Report Artifacts Comparison",
         "generatedAt": generated_at,
         "provenance": detect_report_provenance(),
         "summary": summary_items,
@@ -1853,6 +1929,13 @@ def render_comparison_html(payload: dict[str, Any]) -> str:
     }}
     .matrix-tooltip-cell-status.fail {{
       color: #b42318;
+    }}
+    .matrix-tooltip-cell-status.warn {{
+      color: #9a6700;
+      background: #fff7d6;
+      border-radius: 0.35rem;
+      padding: 0.18rem 0.35rem;
+      display: inline-block;
     }}
     .matrix-tooltip-cell-action.ok {{
       color: #245b34;
@@ -2562,6 +2645,135 @@ def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
 </body>
 </html>
 """
+
+
+def render_artifact_comparison_html(payload: dict[str, Any]) -> str:
+    summary_items = "".join(
+        f"<li><strong>{escape(item['lab'])}:</strong> {escape(item['message'])}</li>"
+        for item in payload.get("summary", [])
+    ) or "<li>No lab report snapshots were available.</li>"
+    sections_html = "".join(render_artifact_lab_section(section) for section in payload.get("labs", []))
+    provenance_html = render_provenance_html(payload.get("provenance"))
+    generated_at_html = f"<p class='muted'>{escape(format_report_datetime(payload['generatedAt']))}</p>" if payload.get("generatedAt") else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(payload.get("title", "Labs Report Artifacts Comparison"))}</title>
+  <style>
+    body {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f5f1e8;
+      color: #182126;
+    }}
+    main {{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }}
+    .panel {{
+      background: #fffdf8;
+      border: 1px solid #d7ccb8;
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 18px;
+      box-shadow: 0 14px 40px rgba(35, 31, 25, 0.08);
+    }}
+    .muted {{ color: #5b6570; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      margin-bottom: 18px;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid #eadfcd;
+      vertical-align: top;
+    }}
+    a {{
+      color: #145a7a;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(20, 90, 122, 0.35);
+    }}
+    .status-chip {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .status-pass {{
+      color: #1f7a4d;
+      background: #e5f5eb;
+    }}
+    .status-fail {{
+      color: #ab2e2e;
+      background: #fae8e5;
+    }}
+    .status-warn {{
+      color: #9a6700;
+      background: #fff2cc;
+    }}
+    .status-expected {{
+      color: #9a6700;
+      background: #fff7d6;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>{escape(payload.get("title", "Labs Report Artifacts Comparison"))}</h1>
+      {generated_at_html}
+      {provenance_html}
+      <p class="muted">CTRF JSON and sibling Specmatic HTML are checked together here, and additional generated artifacts are surfaced as warnings.</p>
+      <ul>{summary_items}</ul>
+    </section>
+    {sections_html}
+  </main>
+</body>
+</html>
+"""
+
+
+def render_artifact_lab_section(section: dict[str, Any]) -> str:
+    rows_html = "".join(
+        "<tr>"
+        f"<td>{escape(str(row['artifact']))}</td>"
+        f"<td>{escape(str(row['expected']))}</td>"
+        f"<td>{escape(str(row['actual']))}</td>"
+        f"<td>{render_artifact_status_chip(str(row['status']))}</td>"
+        f"<td>{escape(str(row['notes']))}</td>"
+        "</tr>"
+        for row in section.get("rows", [])
+    )
+    return (
+        "<section class='panel'>"
+        f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
+        "<table>"
+        "<thead><tr><th>Artifact</th><th>Expected</th><th>Actual</th><th>Result</th><th>Notes</th></tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+        "</section>"
+    )
+
+
+def render_artifact_status_chip(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized == "pass" or normalized == "clear":
+        css_class = "status-pass"
+    elif normalized == "warning":
+        css_class = "status-warn"
+    elif normalized == "expected":
+        css_class = "status-expected"
+    else:
+        css_class = "status-fail"
+    return f"<span class='status-chip {css_class}'>{escape(status)}</span>"
 
 
 def render_fencing_lab_section(section: dict[str, Any]) -> str:
@@ -3510,6 +3722,22 @@ def build_report_artifact_bundle_details(labs: list[dict[str, Any]]) -> dict[str
         ctrf = evaluate_report_artifact_expectation(lab, "ctrf-report.json", "ctrf")
         html = evaluate_report_artifact_expectation(lab, "specmatic-report.html", "html")
         overall_ok = bool(ctrf["ok"]) and bool(html["ok"])
+        extra_artifacts = lab["warnings"].get("additionalArtifacts", [])
+
+        def result_cell(item: dict[str, str | bool]) -> dict[str, str]:
+            status = str(item["status"]).lower()
+            css = "matrix-tooltip-cell-status ok"
+            if status == "fail":
+                css = "matrix-tooltip-cell-status fail"
+            elif status == "expected":
+                css = "matrix-tooltip-cell-status warn"
+            return {
+                "text": str(item["status"]).title(),
+                "className": css,
+                "ariaLabel": str(item["message"]),
+                "title": str(item["message"]),
+            }
+
         lab_sections = [
             {
                 "type": "table",
@@ -3520,15 +3748,39 @@ def build_report_artifact_bundle_details(labs: list[dict[str, Any]]) -> dict[str
                         ctrf["artifact"],
                         str(ctrf["expectedState"]).replace("_", " "),
                         str(ctrf["actualState"]),
-                        str(ctrf["status"]).title(),
+                        result_cell(ctrf),
                         str(ctrf["message"]),
                     ],
                     [
                         html["artifact"],
                         str(html["expectedState"]).replace("_", " "),
                         str(html["actualState"]),
-                        str(html["status"]).title(),
+                        result_cell(html),
                         str(html["message"]),
+                    ],
+                    [
+                        "Additional generated artifacts",
+                        "warning",
+                        ", ".join(extra_artifacts) if extra_artifacts else "(none)",
+                        {
+                            "text": "Warning" if extra_artifacts else "Clear",
+                            "className": "matrix-tooltip-cell-status warn" if extra_artifacts else "matrix-tooltip-cell-status ok",
+                            "ariaLabel": (
+                                f"Additional generated artifacts detected: {', '.join(extra_artifacts)}"
+                                if extra_artifacts
+                                else "No additional generated artifacts detected."
+                            ),
+                            "title": (
+                                f"Additional generated artifacts detected: {', '.join(extra_artifacts)}"
+                                if extra_artifacts
+                                else "No additional generated artifacts detected."
+                            ),
+                        },
+                        (
+                            "These files are not part of the core CTRF/HTML pair but may indicate old, alternate, or auxiliary report output."
+                            if extra_artifacts
+                            else "No additional generated artifacts detected."
+                        ),
                     ],
                 ],
             },
@@ -3547,7 +3799,7 @@ def build_report_artifact_bundle_details(labs: list[dict[str, Any]]) -> dict[str
     return {
         "type": "sections",
         "title": "Generated report artifacts align with README expectations",
-        "note": "CTRF JSON and sibling Specmatic HTML are checked together so mixed states remain visible per lab.",
+        "note": "CTRF JSON and sibling Specmatic HTML are checked together so mixed states remain visible per lab. Additional report-like artifacts are surfaced as warnings here.",
         "sections": sections,
     }
 
