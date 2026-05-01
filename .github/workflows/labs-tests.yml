@@ -8,9 +8,9 @@ on:
         required: false
         type: string
       labs_branch:
-        description: "Optional branch of specmatic/labs to refresh before running. Defaults to main."
+        description: "Optional branch of specmatic/labs to refresh before running. Defaults to dynamic-labs."
         required: false
-        default: "main"
+        default: "dynamic-labs"
         type: string
   pull_request:
   push:
@@ -53,13 +53,13 @@ jobs:
         shell: bash
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
-          WORKFLOW_LABS_BRANCH_INPUT: ${{ github.event.inputs.labs_branch || 'main' }}
+          WORKFLOW_LABS_BRANCH_INPUT: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
         timeout-minutes: 40
         run: |
           set +e
-          effective_labs_branch="${WORKFLOW_LABS_BRANCH_INPUT:-main}"
+          effective_labs_branch="${WORKFLOW_LABS_BRANCH_INPUT:-dynamic-labs}"
           if [[ -z "${effective_labs_branch// }" ]]; then
-            effective_labs_branch="main"
+            effective_labs_branch="dynamic-labs"
           fi
           echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
           echo "[config] requested labs branch input: '${WORKFLOW_LABS_BRANCH_INPUT}'"
