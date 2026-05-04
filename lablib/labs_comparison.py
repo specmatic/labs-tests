@@ -262,18 +262,14 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     license_profile = build_license_profile(spec, report_snapshot)
     readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
     readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
-    readme_emtc = readme_doc.metadata.get("expected_missing_test_counts", False)
-    readme_emtc_reason = readme_doc.metadata.get("expected_missing_test_counts_reason", "")
+    readme_test_counts = bool(readme_doc.metadata.get("test_counts", True))
     effective_efm = spec.expected_failure_mismatch or bool(readme_efm)
     effective_efm_reason = spec.expected_failure_mismatch_reason or readme_efm_reason
-    effective_emtc = spec.expected_missing_test_counts or bool(readme_emtc)
-    effective_emtc_reason = spec.expected_missing_test_counts_reason or readme_emtc_reason
     test_count_consistency = build_test_count_consistency_profile(
         spec,
         readme_doc,
         report_snapshot,
-        expected_missing=effective_emtc,
-        expected_missing_reason=effective_emtc_reason,
+        test_counts_enabled=readme_test_counts,
         expected_failure_mismatch=effective_efm,
         expected_failure_mismatch_reason=effective_efm_reason,
     )
@@ -1551,14 +1547,16 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
-        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-available"]
+        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-applicable"]
+        not_applicable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-applicable"]
         if mismatch_phases:
             summary_items.append({"lab": lab["name"], "status": "mismatch", "message": f"Mismatches in {', '.join(mismatch_phases)}."})
         elif matched_phases:
             summary_items.append({"lab": lab["name"], "status": "match", "message": "Matching counts where data is available."})
         elif expected_unavailable_phases:
-            reason = lab["testCountConsistency"].get("expectedMissingReason") or "This lab does not publish test-count summaries."
-            summary_items.append({"lab": lab["name"], "status": "expected-not-available", "message": f"Count data is expected to be not available. {reason}"})
+            summary_items.append({"lab": lab["name"], "status": "expected-not-applicable", "message": "Test count comparison is not applicable for this lab."})
+        elif not_applicable_phases:
+            summary_items.append({"lab": lab["name"], "status": "not-applicable", "message": "Count comparison is not applicable for one or more phases."})
         elif unavailable_phases:
             summary_items.append({"lab": lab["name"], "status": "not-available", "message": "Count data is not available for comparison."})
         else:
@@ -4633,8 +4631,7 @@ def build_test_count_consistency_profile(
     readme_doc: Any,
     snapshot: dict[str, Any] | None,
     *,
-    expected_missing: bool = False,
-    expected_missing_reason: str = "",
+    test_counts_enabled: bool = True,
     expected_failure_mismatch: bool = False,
     expected_failure_mismatch_reason: str = "",
 ) -> dict[str, Any]:
@@ -4642,8 +4639,7 @@ def build_test_count_consistency_profile(
         return {
             "available": False,
             "consistent": True,
-            "expectedMissing": expected_missing,
-            "expectedMissingReason": expected_missing_reason,
+            "testCountsEnabled": test_counts_enabled,
             "expectedFailureMismatch": expected_failure_mismatch,
             "expectedFailureMismatchReason": expected_failure_mismatch_reason,
             "phases": [],
@@ -4668,7 +4664,7 @@ def build_test_count_consistency_profile(
         readme_summary = selected_summary["summary"] if selected_summary else None
         readme_phase_name = readme_phase.title if readme_phase is not None else None
         expected_sources = expected_report_sources_for_phase(readme_doc, readme_phase)
-        validates_counts = test_counts_for_phase(readme_phase)
+        validates_counts = test_counts_for_phase(readme_doc, readme_phase)
         ctrf_summary = None
         html_summary = None
         if phase_path and phase_path.exists():
@@ -4700,8 +4696,10 @@ def build_test_count_consistency_profile(
             if consistent
             else "mismatch"
             if comparable
-            else "expected-not-available"
-            if expected_missing or not validates_counts or expected_source_count < 2
+            else "expected-not-applicable"
+            if not validates_counts
+            else "not-applicable"
+            if expected_source_count < 2
             else "not-available"
         )
 
@@ -4722,6 +4720,7 @@ def build_test_count_consistency_profile(
                 "htmlCounts": html_counts,
                 "consistent": consistent,
                 "status": status,
+                "testCountsEnabled": validates_counts,
                 "expectedSources": expected_sources,
             }
         )
@@ -4729,8 +4728,7 @@ def build_test_count_consistency_profile(
     return {
         "available": bool(snapshot),
         "consistent": all_consistent,
-        "expectedMissing": expected_missing,
-        "expectedMissingReason": expected_missing_reason,
+        "testCountsEnabled": test_counts_enabled,
         "expectedFailureMismatch": expected_failure_mismatch,
         "expectedFailureMismatchReason": expected_failure_mismatch_reason,
         "phases": comparisons,
@@ -4788,9 +4786,9 @@ def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dic
     }
 
 
-def test_counts_for_phase(readme_phase: Any) -> bool:
-    # Always validate test counts - no longer configurable per phase
-    return True
+def test_counts_for_phase(readme_doc: Any, readme_phase: Any) -> bool:
+    del readme_phase
+    return bool(readme_doc.metadata.get("test_counts", True))
 
 
 def select_readme_summary_for_phase(
@@ -4999,6 +4997,13 @@ def choose_reference_counts(item: dict[str, Any]) -> dict[str, int] | None:
 
 def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any], source_key: str | None = None) -> dict[str, str]:
     expected_sources = comparison_item.get("expectedSources", {}) if isinstance(comparison_item, dict) else {}
+    if isinstance(comparison_item, dict) and not bool(comparison_item.get("testCountsEnabled", True)):
+        return {
+            "text": "Not Applicable",
+            "className": "status-chip status-expected",
+            "title": "Test count comparison is disabled by README metadata for this lab.",
+            "ariaLabel": "Test count comparison is disabled by README metadata for this lab.",
+        }
     if source_key and isinstance(expected_sources, dict) and not bool(expected_sources.get(source_key, True)):
         return {
             "text": "Not Applicable",
@@ -5114,25 +5119,24 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
     verdict_items = []
     for lab in labs:
         comparisons = lab["testCountConsistency"].get("phases", [])
-        expected_missing_reason = lab["testCountConsistency"].get("expectedMissingReason", "")
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
-        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-available"]
+        expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-applicable"]
+        not_applicable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-applicable"]
         if mismatch_phases:
             verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
         elif matched_phases:
             verdict_items.append(f"{lab['name']}: matching counts where data is available.")
         elif expected_unavailable_phases:
-            reason = expected_missing_reason or "This lab does not publish test-count summaries."
-            verdict_items.append(f"{lab['name']}: count data is expected to be not available. **{reason}**")
+            verdict_items.append(f"{lab['name']}: test count comparison is not applicable for this lab.")
+        elif not_applicable_phases:
+            verdict_items.append(f"{lab['name']}: count comparison is not applicable for one or more phases.")
         elif unavailable_phases:
             verdict_items.append(f"{lab['name']}: count data is not-available for comparison.")
         else:
             verdict_items.append(f"{lab['name']}: no phase data was available to validate.")
-        table_note = "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When a lab intentionally does not emit count summaries, the row is marked as expected."
-        if expected_missing_reason:
-            table_note = f"{table_note}\n\nReason: **{expected_missing_reason}**"
+        table_note = "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When `test_counts: false` is configured, the row is treated as not applicable."
         sections.append(
             {
                 "type": "table",
@@ -5223,9 +5227,11 @@ def format_count_status(status: str) -> str:
         return "Match"
     if status == "mismatch":
         return "Mismatch"
-    if status == "expected-not-available":
+    if status == "expected-not-applicable":
         return "Expected"
-    return "Not available"
+    if status == "not-applicable":
+        return "Not Applicable"
+    return "Not Available"
 
 
 def render_bullets(items: list[str]) -> str:
