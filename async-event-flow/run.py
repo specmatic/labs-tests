@@ -28,7 +28,38 @@ README_FILE = UPSTREAM_LAB / "README.md"
 ACCEPT_ORDER_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "acceptOrder.json"
 OUT_FOR_DELIVERY_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "outForDeliveryOrder.json"
 OUTPUT_DIR = ROOT / "async-event-flow" / "output"
-LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d && docker compose exec -T studio specmatic run-suite"]
+LAB_WAIT_FOR_CONTRACT_REPO = (
+    "docker compose exec -T studio sh -lc '"
+    "set -e; "
+    "echo \"[gate] waiting for contract repo at /usr/src/app/.specmatic/repos/labs-contracts\"; "
+    "for i in $(seq 1 30); do "
+    "if [ -d /usr/src/app/.specmatic/repos/labs-contracts/.git ] "
+    "&& git -C /usr/src/app/.specmatic/repos/labs-contracts rev-parse HEAD >/dev/null 2>&1; then "
+    "echo \"[ready] contract repo is ready (attempt ${i}/30)\"; "
+    "exit 0; "
+    "fi; "
+    "echo \"[wait] contract repo not ready yet (${i}/30)\"; "
+    "sleep 2; "
+    "done; "
+    "echo \"[error] contract repo not ready after wait\"; "
+    "ls -la /usr/src/app/.specmatic/repos/labs-contracts || true; "
+    "ls -la /usr/src/app/.specmatic/repos/labs-contracts/.git || true; "
+    "git -C /usr/src/app/.specmatic/repos/labs-contracts status -sb || true; "
+    "git -C /usr/src/app/.specmatic/repos/labs-contracts rev-parse --is-inside-work-tree || true; "
+    "git -C /usr/src/app/.specmatic/repos/labs-contracts rev-parse --abbrev-ref HEAD || true; "
+    "git -C /usr/src/app/.specmatic/repos/labs-contracts rev-parse HEAD || true; "
+    "exit 1'"
+)
+LAB_COMMAND = [
+    "/bin/sh",
+    "-lc",
+    "set -e; "
+    "echo '[gate] starting docker compose services with health wait'; "
+    "docker compose up -d --wait && "
+    f"{LAB_WAIT_FOR_CONTRACT_REPO} && "
+    "echo '[gate] readiness checks passed; starting specmatic run-suite' && "
+    "docker compose exec -T studio specmatic run-suite",
+]
 CONTAINER_NAMES = ["studio", "order-service-sut", "kafka-init", "kafka"]
 BEFORE_FIXTURE = """  "before": [
     {

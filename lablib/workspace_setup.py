@@ -63,6 +63,11 @@ def run_setup(
 ) -> SetupResult:
     commands: list[dict[str, Any]] = []
     selected_labs = set(lab_names or LAB_NAMES)
+    print(
+        f"[setup] start refresh_labs={refresh_labs} branch={target_branch} force={force} "
+        f"selected_labs={sorted(selected_labs)} upstream={UPSTREAM_LABS}",
+        flush=True,
+    )
 
     if not UPSTREAM_LABS.exists():
         clone_result = execute(
@@ -155,6 +160,11 @@ def run_setup(
         )
 
     status = "passed" if all(item["exitCode"] == 0 for item in commands) else "failed"
+    failed_steps = [item.get("summary", "") for item in commands if item.get("exitCode", 0) != 0]
+    print(
+        f"[setup] end status={status} total_steps={len(commands)} failed_steps={failed_steps}",
+        flush=True,
+    )
     return SetupResult(
         status=status,
         upstream_labs_path=str(UPSTREAM_LABS),
