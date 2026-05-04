@@ -175,6 +175,7 @@ def main() -> int:
                 print(f"[error] {exc}")
                 print()
                 print("[Action required]")
+                print("")
                 print("Fix the license setup issue above and rerun the labs.")
                 print(f"Setup details: {SETUP_OUTPUT_PATH}")
                 completed_at = report_timestamp()

@@ -117,6 +117,7 @@ jobs:
               print("Impact: the GitHub Actions job summary cannot show lab results without the consolidated JSON payload.")
               print("")
               print("[Action required]")
+              print("")
               print("Inspect the run_all.py logs above and confirm that output/consolidated-report/consolidated-report.json is created before the summary step runs.")
               raise SystemExit(0)
 
