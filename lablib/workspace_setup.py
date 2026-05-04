@@ -24,7 +24,6 @@ LAB_NAMES = [
     "kafka-avro",
     "kafka-sqs-retry-dlq",
     "mcp-auto-test",
-    "order-bff",
     "overlays",
     "partial-examples",
     "workflow-in-same-spec",

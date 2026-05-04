@@ -46,7 +46,7 @@ LEGACY_CONSOLIDATED_REPORT_JSON_PATH = CONSOLIDATED_OUTPUT_DIR / "report.json"
 LEGACY_CONSOLIDATED_REPORT_HTML_PATH = CONSOLIDATED_OUTPUT_DIR / "report.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
-EXCLUDED_LABS = {"coding-agents", "order-bff", "arazzo-workflow-testing"}
+EXCLUDED_LABS = {"coding-agents", "arazzo-workflow-testing"}
 
 
 def not_in_excluded(var: str) -> bool:

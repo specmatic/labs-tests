@@ -253,7 +253,7 @@ phases:
   - final
 ```
 
-- Use it when a lab intentionally supports a smaller phase set, such as `order-bff` using only `baseline`.
+- Use it when a lab intentionally supports a smaller phase set than the default recognized phase kinds.
 
 ## Minimal recommended example
 
@@ -347,8 +347,6 @@ These are the labs that currently carry README metadata that actively affects va
 | `partial-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `order-bff` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
-| `order-bff` | `phases: [baseline]` | Uses a non-default phase list in the comparison/profile path. |
 | `backward-compatibility-testing` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
 | `backward-compatibility-testing` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
 | `continuous-integration` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
@@ -357,11 +355,3 @@ These are the labs that currently carry README metadata that actively affects va
 | `data-adapters` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
 | `quick-start-mock` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
 | `quick-start-mock` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
-
-### Explicit but same as defaults
-
-These are valid, but they currently restate the default behavior rather than overriding it:
-
-| Lab | Metadata present |
-|---|---|
-| `order-bff` | `reports.ctrf: true`, `reports.html: true`, `reports.readme_summary: true`, `reports.console_summary: true` |

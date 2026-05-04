@@ -39,8 +39,6 @@ Current labs:
   README: [`kafka-sqs-retry-dlq/README.md`](kafka-sqs-retry-dlq/README.md)
 - [`mcp-auto-test`](mcp-auto-test/)
   README: [`mcp-auto-test/README.md`](mcp-auto-test/README.md)
-- [`order-bff`](order-bff/)
-  README: [`order-bff/README.md`](order-bff/README.md)
 - [`overlays`](overlays/)
   README: [`overlays/README.md`](overlays/README.md)
 - [`partial-examples`](partial-examples/)
@@ -138,10 +136,6 @@ python3 kafka-sqs-retry-dlq/run.py --refresh-report
 
 ```bash
 python3 mcp-auto-test/run.py --refresh-report
-```
-
-```bash
-python3 order-bff/run.py --refresh-report
 ```
 
 ```bash

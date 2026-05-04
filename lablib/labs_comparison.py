@@ -52,7 +52,7 @@ LICENSE_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.
 LICENSE_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-license-comparison.html"
 LEGACY_COMPARISON_JSON_PATH = OUTPUT_DIR / "labs-comparison.json"
 LEGACY_COMPARISON_HTML_PATH = OUTPUT_DIR / "labs-comparison.html"
-EXCLUDED_LABS = {"coding-agents", "order-bff", "arazzo-workflow-testing"}
+EXCLUDED_LABS = {"coding-agents", "arazzo-workflow-testing"}
 
 
 def not_in_excluded(var: str) -> bool:
