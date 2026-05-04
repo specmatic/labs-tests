@@ -294,7 +294,7 @@ def setup_failure_error_lines(commands: list[dict[str, Any]]) -> list[str]:
 
 
 def setup_failure_action_lines(commands: list[dict[str, Any]]) -> list[str]:
-    return ["[Action required]", setup_failure_action(commands)]
+    return ["[Action required]", "", setup_failure_action(commands)]
 
 
 def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[dict[str, Any]]:
