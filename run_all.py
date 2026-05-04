@@ -195,6 +195,11 @@ def main() -> int:
                 generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
                 archive_local_output_snapshot(completed_at)
                 return 1
+            print(f"[license] Prepared ../labs/license.txt using {license_state.applied_source}")
+            if license_state.original_content is not None:
+                print("[license] Existing ../labs/license.txt will be restored after the run")
+            else:
+                print("[license] ../labs/license.txt did not exist before this run and will be removed afterward")
             if setup_payload is None:
                 setup_payload = {
                     "status": "passed",
@@ -276,6 +281,11 @@ def main() -> int:
         print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
         return 0 if consolidated["status"] == "passed" else 1
     finally:
+        if license_state is not None:
+            if license_state.existed and license_state.original_content is not None:
+                print("[license] Restoring original ../labs/license.txt")
+            else:
+                print("[license] Removing temporary ../labs/license.txt")
         restore_upstream_labs_license(license_state)
 
 

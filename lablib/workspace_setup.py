@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -216,22 +215,34 @@ def resolve_license_txt_content() -> tuple[str, str]:
             )
         return license_text + ("\n" if not license_text.endswith("\n") else ""), "GitHub Actions secret SPECMATIC_LICENSE_KEY"
 
-    license_json_path = Path.home() / ".specmatic" / "license.json"
-    if not license_json_path.exists():
+    temp_dir = ROOT / "temp"
+    candidates = sorted(
+        path
+        for path in temp_dir.iterdir()
+        if path.is_file()
+        and path.name.lower().startswith("license-labs-test")
+        and path.name.lower().endswith(".txt")
+    ) if temp_dir.exists() else []
+    if not candidates:
         raise RuntimeError(
-            f"Could not find local Specmatic license metadata at {license_json_path}. "
-            "Action required: refresh your local Specmatic license so ~/.specmatic/license.json is available."
+            f"Could not find a local labs-test license file in {ROOT / 'temp'} matching 'License-labs-test*.txt' (case-insensitive). "
+            "Action required: add exactly one file such as temp/License-labs-test.txt or temp/License-labs-test-Local.txt and rerun."
         )
-    payload = json.loads(license_json_path.read_text(encoding="utf-8"))
-    status = payload.get("status") if isinstance(payload, dict) else None
-    license_text = status.get("license") if isinstance(status, dict) else None
-    if not isinstance(license_text, str) or not license_text.strip():
+    if len(candidates) > 1:
+        candidate_list = ", ".join(path.name for path in candidates)
         raise RuntimeError(
-            f"Could not read status.license from {license_json_path}. "
-            "Action required: refresh your local Specmatic license and rerun."
+            f"Found multiple local labs-test license files in {ROOT / 'temp'}: {candidate_list}. "
+            "Action required: keep only one file matching 'License-labs-test*.txt' (case-insensitive) and rerun."
+        )
+    license_path = candidates[0]
+    license_text = license_path.read_text(encoding="utf-8")
+    if not license_text.strip():
+        raise RuntimeError(
+            f"Local labs-test license file {license_path} is empty. "
+            "Action required: put the full license text into that file and rerun."
         )
     normalized = license_text if license_text.endswith("\n") else license_text + "\n"
-    return normalized, f"local Specmatic license metadata at {license_json_path}"
+    return normalized, f"local labs-test license file at {license_path}"
 
 
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:

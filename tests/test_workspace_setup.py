@@ -23,20 +23,48 @@ class WorkspaceSetupLicenseTests(unittest.TestCase):
         self.assertEqual(content, "LICENSE-FROM-SECRET\n")
         self.assertIn("SPECMATIC_LICENSE_KEY", source)
 
-    def test_resolve_license_txt_content_from_local_license_json(self) -> None:
+    def test_resolve_license_txt_content_from_local_temp_file(self) -> None:
         with TemporaryDirectory() as tmp:
-            home = Path(tmp)
-            license_dir = home / ".specmatic"
-            license_dir.mkdir(parents=True)
-            (license_dir / "license.json").write_text(
-                '{"status": {"license": "LOCAL-LICENSE-CONTENT"}}',
+            root = Path(tmp)
+            temp_dir = root / "temp"
+            temp_dir.mkdir(parents=True)
+            (temp_dir / "License-labs-test.txt").write_text(
+                "LOCAL-LICENSE-CONTENT",
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {"GITHUB_ACTIONS": "", "GITHUB_RUN_ID": ""}, clear=False):
-                with patch("lablib.workspace_setup.Path.home", return_value=home):
+                with patch("lablib.workspace_setup.ROOT", root):
                     content, source = resolve_license_txt_content()
         self.assertEqual(content, "LOCAL-LICENSE-CONTENT\n")
-        self.assertIn(".specmatic/license.json", source)
+        self.assertIn("License-labs-test.txt", source)
+
+    def test_resolve_license_txt_content_from_local_temp_file_case_insensitive(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            temp_dir = root / "temp"
+            temp_dir.mkdir(parents=True)
+            (temp_dir / "license-LABS-test-Local.TXT").write_text(
+                "LOCAL-LICENSE-CONTENT",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "", "GITHUB_RUN_ID": ""}, clear=False):
+                with patch("lablib.workspace_setup.ROOT", root):
+                    content, source = resolve_license_txt_content()
+        self.assertEqual(content, "LOCAL-LICENSE-CONTENT\n")
+        self.assertIn("license-LABS-test-Local.TXT", source)
+
+    def test_resolve_license_txt_content_fails_when_multiple_local_temp_files_exist(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            temp_dir = root / "temp"
+            temp_dir.mkdir(parents=True)
+            (temp_dir / "License-labs-test.txt").write_text("ONE", encoding="utf-8")
+            (temp_dir / "License-labs-test-Local.txt").write_text("TWO", encoding="utf-8")
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "", "GITHUB_RUN_ID": ""}, clear=False):
+                with patch("lablib.workspace_setup.ROOT", root):
+                    with self.assertRaises(RuntimeError) as exc:
+                        resolve_license_txt_content()
+        self.assertIn("multiple local labs-test license files", str(exc.exception))
 
     def test_restore_upstream_labs_license_restores_original_or_deletes_file(self) -> None:
         with TemporaryDirectory() as tmp:
