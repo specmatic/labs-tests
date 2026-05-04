@@ -47,6 +47,17 @@ jobs:
           docker --version
           docker compose version
 
+      - name: Verify contracts repo is git-valid
+        shell: bash
+        run: |
+          set -euo pipefail
+          for lab in labs/async-event-flow labs/external-examples labs/partial-examples; do
+            repo="$lab/.specmatic/repos/labs-contracts"
+            echo "[precheck] $repo"
+            git -C "$repo" rev-parse --is-inside-work-tree
+            git -C "$repo" rev-parse HEAD
+          done
+
       - name: Run all lab harnesses
         id: run_labs
         shell: bash
