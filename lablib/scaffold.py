@@ -108,8 +108,6 @@ class LabSpec:
     runtime_warnings: tuple[str, ...] = ()
     known_limitations: tuple[str, ...] = ()
     intentional_differences: tuple[str, ...] = ()
-    expected_missing_test_counts: bool = False
-    expected_missing_test_counts_reason: str = ""
     expected_failure_mismatch: bool = False
     expected_failure_mismatch_reason: str = ""
 
@@ -995,20 +993,23 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
 
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
     phase_doc = context.readme_doc.phase_by_id(context.phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
-    phase_metadata = phase_doc.metadata if phase_doc is not None else {}
-
     # Use global report settings, not phase-level
     global_reports = context.readme_doc.metadata.get("reports", {})
+    counts_enabled = bool(context.readme_doc.metadata.get("test_counts", True))
     expect_ctrf = bool(global_reports.get("ctrf", False))
     expect_html = bool(global_reports.get("html", False))
-    expect_readme_summary = bool(phase_metadata.get("test_counts", False) or global_reports.get("readme_summary", False))
-    if not any((expect_ctrf, expect_html, expect_readme_summary)):
+    expect_readme_summary = counts_enabled and bool(global_reports.get("readme_summary", False))
+    expect_console_summary = counts_enabled and bool(global_reports.get("console_summary", False))
+    if not any((expect_ctrf, expect_html, expect_readme_summary, expect_console_summary)):
         has_report_artifacts = (
             "ctrf-report.json" in context.artifacts
             or first_html_artifact(context.artifacts) is not None
         )
         if not has_report_artifacts:
             return []
+
+    if not counts_enabled:
+        return []
 
     readme_summaries = extract_tests_run_summaries(phase_doc.content if phase_doc is not None else context.readme_text)
     phase_index = next((index for index, phase in enumerate(context.lab.phases) if phase is context.phase), 0)
@@ -1226,17 +1227,17 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
         ),
     ]
 
-    # Always validate summary (test_counts is always True now)
-    assertions.append(
-        assert_condition(
-            bool(extract_tests_run_summaries(phase_doc.content)),
-            "README phase includes a summary block for runtime count validation.",
-            "README phase is missing the documented summary block required for runtime count validation.",
-            category="readme",
-            code="readme.v2.phase.summary",
-            details=[detail("Phase title", phase_doc.title)],
+    if bool(context.readme_doc.metadata.get("test_counts", True)):
+        assertions.append(
+            assert_condition(
+                bool(extract_tests_run_summaries(phase_doc.content)),
+                "README phase includes a summary block for runtime count validation.",
+                "README phase is missing the documented summary block required for runtime count validation.",
+                category="readme",
+                code="readme.v2.phase.summary",
+                details=[detail("Phase title", phase_doc.title)],
+            )
         )
-    )
 
     return assertions
 

@@ -294,22 +294,19 @@ When an ignore annotation is present:
 - it remains visible in the report for traceability
 - it does not count as a failure
 
-How to mark missing test-count summaries as expected behavior for a lab:
+How to mark test-count comparison as not applicable for a lab:
 
-- set `expected_missing_test_counts=True` in the lab's `LabSpec`
-- set `expected_missing_test_counts_reason` to explain why this lab does not emit README/console/CTRF/HTML count summaries
+- add `test_counts: false` to the lab README front matter
 
 Example:
 
-```python
-return LabSpec(
-    ...,
-    expected_missing_test_counts=True,
-    expected_missing_test_counts_reason="This lab validates compatibility verdicts and does not emit test-count summaries.",
-)
+```yaml
+---
+test_counts: false
+---
 ```
 
-The comparison report will then show those phases as `Expected` instead of plain `Not available`.
+The comparison report will then show those phases as `Expected`, and the README / Console / CTRF / HTML cells will render as `Not Applicable`.
 
 GitHub Actions workflow:
 

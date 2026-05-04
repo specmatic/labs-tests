@@ -3,10 +3,12 @@ from __future__ import annotations
 import unittest
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 from lablib.labs_comparison import (
     analyze_readme_os_documentation,
     build_lab_profile,
+    build_count_cell,
     describe_license_delivery,
     detect_license_mode_from_text,
     extract_license_source_from_text,
@@ -15,6 +17,7 @@ from lablib.labs_comparison import (
     extract_tests_run_summaries,
     select_readme_summary_for_v2_phase,
     select_readme_summary_for_phase,
+    test_counts_for_phase,
 )
 from lablib.readme_schema import parse_readme_document
 
@@ -162,6 +165,24 @@ path: ./specs/service.yaml
         self.assertEqual(check["status"], "skipped")
         self.assertEqual(check["outputFence"], "yaml")
         self.assertEqual(check["output"], "(not shown)")
+
+    def test_test_counts_flag_disables_count_validation(self) -> None:
+        readme_doc = SimpleNamespace(metadata={"test_counts": False})
+        self.assertFalse(test_counts_for_phase(readme_doc, None))
+        cell = build_count_cell(
+            None,
+            {
+                "testCountsEnabled": False,
+                "expectedSources": {
+                    "readme_summary": True,
+                    "console_summary": True,
+                    "ctrf": True,
+                    "html": True,
+                },
+            },
+            "readme_summary",
+        )
+        self.assertEqual(cell["text"], "Not Applicable")
 
     def test_detect_license_mode_from_text(self) -> None:
         self.assertEqual(

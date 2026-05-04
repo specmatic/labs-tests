@@ -16,7 +16,7 @@ That means:
 
 Examples:
 - good: `reports.ctrf: false`
-- good: `expected_missing_test_counts: true`
+- good: `test_counts: false`
 - avoid: `reports.ctrf: true` when `true` is already the default
 - avoid: `reports.console_summary: true` when `true` is already the default
 
@@ -115,22 +115,26 @@ Notes:
 - The object form is currently used by the artifact comparison logic.
 - For `readme_summary` and `console_summary`, use booleans.
 
-### `expected_missing_test_counts`
+### `test_counts`
 
-Use this when the lab intentionally does not produce normal test-count summaries across README / console / CTRF / HTML.
+Default:
+
+```yaml
+test_counts: true
+```
+
+Use this only when test-count comparison should be disabled for the lab.
 
 Example:
 
 ```yaml
-expected_missing_test_counts: true
-expected_missing_test_counts_reason: "This lab validates behavior, but it does not emit README/console/CTRF/HTML test-count summaries."
+test_counts: false
 ```
 
 Purpose:
-- Prevents the test-count comparison from treating missing counts as a normal failure.
-
-Related key:
-- `expected_missing_test_counts_reason`
+- Disables README / console / CTRF / HTML test-count comparison for the lab.
+- Causes the test-count report to render those sources as `Not Applicable`.
+- Keeps the comparison row visible as `Expected` instead of treating missing counts as a failure.
 
 ### `expected_failure_mismatch`
 
@@ -267,7 +271,7 @@ lab_schema: v2
 
 Add more metadata only when a default behavior needs to change.
 
-## Example with optional reports and expected missing counts
+## Example with optional reports and disabled test counts
 
 ```yaml
 ---
@@ -275,8 +279,7 @@ lab_schema: v2
 reports:
   ctrf: false
   html: false
-expected_missing_test_counts: true
-expected_missing_test_counts_reason: "This lab validates behavior but does not publish normal cross-source test-count summaries."
+test_counts: false
 optional_components:
   overview_video: true
 ---
@@ -290,8 +293,6 @@ These keys or patterns appear in some READMEs, but they are not currently the so
   - preferred instead:
     - `optional_components.overview_video: true`
     - or `overview_video_optional: true`
-- `test_counts: true`
-  - not currently consumed
 - hidden `phase-meta` YAML comments
   - not currently used by the active phase parser
 - phase-level `expected_reports`
@@ -347,11 +348,7 @@ These are the labs that currently carry README metadata that actively affects va
 | `partial-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `backward-compatibility-testing` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
-| `backward-compatibility-testing` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
-| `continuous-integration` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
-| `continuous-integration` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
-| `data-adapters` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
-| `data-adapters` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
-| `quick-start-mock` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
-| `quick-start-mock` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
+| `backward-compatibility-testing` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
+| `continuous-integration` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
+| `data-adapters` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
+| `quick-start-mock` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |

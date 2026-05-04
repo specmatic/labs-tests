@@ -188,12 +188,12 @@ Expected-difference pattern:
 - include `detail(...)` items for reason and action
 - prefer a stable `code` when the difference is likely to be referenced again
 
-Expected missing test-count summaries:
+Test-count comparison not applicable:
 
 - if a lab does not produce README/console/CTRF/HTML count summaries by design, set:
-  - `expected_missing_test_counts=True`
-  - `expected_missing_test_counts_reason="..."`
-- this should make the comparison report show `Expected` for those phases instead of treating them as an unexplained absence
+  - `test_counts: false`
+  - in the lab README front matter
+- this should make the comparison report show `Expected` for those phases and render the count cells as `Not Applicable`
 
 Hidden README ignore annotation pattern:
 
