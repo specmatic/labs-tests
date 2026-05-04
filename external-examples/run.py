@@ -42,17 +42,17 @@ def validate_command() -> list[str]:
 
 
 def validate_command_windows() -> list[str]:
-    return [
+    command = [
         "docker",
         "run",
         "--rm",
         "-v",
-        ".:/usr/src/app",
-        "-v",
-        "../license.txt:/specmatic/specmatic-license.txt:ro",
-        "specmatic/enterprise:latest",
-        "validate",
+        f"{UPSTREAM_LAB}:/usr/src/app",
     ]
+    if LICENSE_FILE.exists():
+        command.extend(["-v", f"{LICENSE_FILE}:/specmatic/specmatic-license.txt:ro"])
+    command.extend(["specmatic/enterprise:latest", "validate"])
+    return command
 
 
 def main() -> int:
