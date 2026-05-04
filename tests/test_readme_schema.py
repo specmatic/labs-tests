@@ -28,13 +28,21 @@ class ReadmeSchemaTest(unittest.TestCase):
         document = parse_readme_document((LABS_ROOT / "quick-start-api-testing" / "README.md").read_text(encoding="utf-8"))
         self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
-        self.assertEqual([phase.id for phase in document.phases], ["baseline", "final"])
+        self.assertEqual([phase.id for phase in document.phases], ["baseline", "intermediate", "final"])
 
     def test_external_examples_v2_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "external-examples" / "README.md").read_text(encoding="utf-8"))
         self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
-        self.assertEqual([phase.id for phase in document.phases], ["baseline", "final"])
+        self.assertEqual([phase.id for phase in document.phases], ["baseline", "studio", "final"])
+        self.assertFalse(document.metadata["reports"]["ctrf"])
+        self.assertFalse(document.metadata["reports"]["html"])
+
+    def test_partial_examples_v2_readme_parses(self) -> None:
+        document = parse_readme_document((LABS_ROOT / "partial-examples" / "README.md").read_text(encoding="utf-8"))
+        self.assertTrue(document.is_v2)
+        self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
+        self.assertEqual([phase.id for phase in document.phases], ["baseline", "studio", "final"])
         self.assertFalse(document.metadata["reports"]["ctrf"])
         self.assertFalse(document.metadata["reports"]["html"])
 

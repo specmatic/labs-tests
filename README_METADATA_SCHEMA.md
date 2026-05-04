@@ -12,6 +12,7 @@ That means:
 - do not restate defaults in a lab README
 - do not add metadata just for completeness
 - if a lab follows the default behavior, omit the key entirely
+- exception: keep `lab_schema: v2` because it is still the required schema marker for the v2 path
 
 Examples:
 - good: `reports.ctrf: false`
@@ -26,11 +27,6 @@ Place the metadata in YAML front matter at the top of the lab README:
 ```yaml
 ---
 lab_schema: v2
-reports:
-  ctrf: true
-  html: true
-  readme_summary: true
-  console_summary: true
 ---
 ```
 
@@ -204,7 +200,7 @@ Purpose:
 
 ### `required_phases`
 
-Use this when the README needs additional phase ids to be recognized by the current parser.
+This key is still recognized, but it is no longer the preferred way to model normal v2 labs.
 
 Example:
 
@@ -216,58 +212,60 @@ required_phases:
 ```
 
 Purpose:
-- Helps the README parser recognize additional H3 phase ids.
-- Defaults to:
+- Legacy parser hint for recognized phase ids.
+- Most v2 labs should not need this, because the parser already recognizes the built-in phase kinds:
 
 ```yaml
-required_phases:
+phases:
   - baseline
+  - intermediate
+  - studio
+  - inspection
+  - cleanup_verification
   - final
 ```
 
 Important note:
-- Today, `required_phases` is the parser hint that determines which H3 titles are recognized as phases.
-- If you introduce additional phase ids like `intermediate` or `studio`, include them here.
+- Prefer `phases` for the active comparison/profile path.
+- Keep `required_phases` only if an older README or runner still depends on it.
 
 ### `phases`
 
-Some current READMEs also use:
+Use this only when the README needs to narrow or override the default recognized phase ids.
 
 ```yaml
 phases:
   - baseline
-  - intermediate
   - final
 ```
 
 Current status:
-- This is used by parts of the phase-sequence validation/reporting path.
-- Keep it aligned with `required_phases` for now if you use it.
-
-Recommended safe pattern today:
+- This is the active parser/profile hint for recognized phase ids.
+- Most v2 labs do not need it, because the default recognized phase kinds are:
 
 ```yaml
-required_phases:
-  - baseline
-  - intermediate
-  - final
 phases:
   - baseline
   - intermediate
+  - studio
+  - inspection
+  - cleanup_verification
   - final
 ```
 
+- Use it when a lab intentionally supports a smaller phase set, such as `order-bff` using only `baseline`.
+
 ## Minimal recommended example
 
-No metadata at all, unless the lab needs an override.
+The minimum v2 README should keep only the required schema marker:
 
-If a lab follows all defaults, prefer an empty front-matter set:
-
-```md
-# Lab Title
+```yaml
+---
+lab_schema: v2
+---
 ```
 
-Add YAML front matter only when one or more defaults need to change.
+Add more metadata only when a default behavior needs to change.
 
 ## Example with optional reports and expected missing counts
 
@@ -277,18 +275,10 @@ lab_schema: v2
 reports:
   ctrf: false
   html: false
-  readme_summary: true
-  console_summary: true
 expected_missing_test_counts: true
 expected_missing_test_counts_reason: "This lab validates behavior but does not publish normal cross-source test-count summaries."
 optional_components:
   overview_video: true
-required_phases:
-  - baseline
-  - final
-phases:
-  - baseline
-  - final
 ---
 ```
 
@@ -344,9 +334,9 @@ Recommended rule for the team:
 - treat the tests and parser code as the executable source of truth
 - keep both aligned in the same PR
 
-## Current usage in labs
+## Current metadata usage in labs
 
-These are the labs that currently use README metadata to override default behavior in a meaningful way.
+These are the labs that currently carry README metadata that actively affects validation or comparison behavior.
 
 | Lab | Metadata used | What it changes |
 |---|---|---|
@@ -354,7 +344,9 @@ These are the labs that currently use README metadata to override default behavi
 | `external-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `external-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
 | `quick-start-api-testing` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
-| `quick-start-api-testing` | `phases: [baseline, intermediate, final]` | Extends the phase list beyond the default baseline/final flow. |
+| `partial-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
+| `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
+| `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
 | `order-bff` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `order-bff` | `phases: [baseline]` | Uses a non-default phase list in the comparison/profile path. |
 | `backward-compatibility-testing` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
@@ -366,20 +358,10 @@ These are the labs that currently use README metadata to override default behavi
 | `quick-start-mock` | `expected_missing_test_counts: true` | Missing cross-source test counts are treated as expected. |
 | `quick-start-mock` | `expected_missing_test_counts_reason` | Provides the explanation shown in reports. |
 
-### Present in some READMEs, but not currently wired
-
-These keys appear in current lab READMEs but do not actively change validator behavior today:
-
-| Lab | Metadata present | Current status |
-|---|---|---|
-| `external-examples` | `overview_video: false` | Not currently consumed by the active validator. |
-| `external-examples` | `test_counts: true` | Not currently consumed by the active validator. |
-
 ### Explicit but same as defaults
 
 These are valid, but they currently restate the default behavior rather than overriding it:
 
 | Lab | Metadata present |
 |---|---|
-| `quick-start-api-testing` | `reports.ctrf: true`, `reports.html: true`, `reports.readme_summary: true`, `reports.console_summary: true` |
 | `order-bff` | `reports.ctrf: true`, `reports.html: true`, `reports.readme_summary: true`, `reports.console_summary: true` |

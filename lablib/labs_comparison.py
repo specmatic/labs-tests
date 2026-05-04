@@ -4661,12 +4661,12 @@ def build_test_count_consistency_profile(
         spec_phase = spec_phases[index] if index < len(spec_phases) else None
         readme_phase = readme_doc.phase_by_id(getattr(spec_phase, "readme_phase_id", None)) if getattr(readme_doc, "is_v2", False) else None
         selected_summary = (
-            select_readme_summary_for_v2_phase(readme_phase)
+            select_readme_summary_for_v2_phase(readme_phase, spec_phase)
             if readme_phase is not None
             else select_readme_summary_for_phase(readme_summaries, spec_phase, index)
         )
         readme_summary = selected_summary["summary"] if selected_summary else None
-        readme_phase_name = readme_phase.title if readme_phase is not None else (selected_summary["label"] if selected_summary else None)
+        readme_phase_name = readme_phase.title if readme_phase is not None else None
         expected_sources = expected_report_sources_for_phase(readme_doc, readme_phase)
         validates_counts = test_counts_for_phase(readme_phase)
         ctrf_summary = None
@@ -4709,7 +4709,13 @@ def build_test_count_consistency_profile(
             all_consistent = all_consistent and consistent
         comparisons.append(
             {
-                "phase": getattr(spec_phase, "readme_summary_query", None) or readme_phase_name or phase.get("name", f"Phase {index + 1}"),
+                "phase": display_test_count_phase_label(
+                    spec_phase,
+                    readme_phase_name,
+                    selected_summary,
+                    phase.get("name", ""),
+                    index,
+                ),
                 "readmeCounts": readme_counts,
                 "consoleCounts": console_counts,
                 "ctrfCounts": ctrf_counts,
@@ -4731,13 +4737,44 @@ def build_test_count_consistency_profile(
     }
 
 
-def select_readme_summary_for_v2_phase(readme_phase: Any) -> dict[str, str] | None:
+def display_test_count_phase_label(
+    spec_phase: Any,
+    readme_phase_name: str | None,
+    selected_summary: dict[str, str] | None,
+    fallback_phase_name: str,
+    phase_index: int,
+) -> str:
+    query = getattr(spec_phase, "readme_summary_query", None) if spec_phase is not None else None
+    heading_path = selected_summary.get("headingPath") if selected_summary else None
+    path_leaf = heading_path.split(" > ")[-1] if heading_path else None
+    summary_heading = selected_summary.get("heading") if selected_summary else None
+    prefix = readme_phase_name or path_leaf or summary_heading
+    if prefix and query and str(query).startswith(f"{prefix} > "):
+        return str(query)
+    if prefix and query:
+        return f"{prefix} > {query}"
+    if query:
+        return str(query)
+    if readme_phase_name:
+        return readme_phase_name
+    if selected_summary:
+        return selected_summary["label"]
+    return fallback_phase_name or f"Phase {phase_index + 1}"
+
+
+def select_readme_summary_for_v2_phase(readme_phase: Any, phase_spec: Any | None = None) -> dict[str, str] | None:
     summaries = extract_tests_run_summaries(readme_phase.content)
     if not summaries:
         return None
+    if phase_spec is not None and getattr(phase_spec, "readme_summary_query", None):
+        selected = select_readme_summary_for_phase(summaries, phase_spec, 0)
+        if selected is not None:
+            return selected
     return {
         "label": readme_phase.title,
         "summary": summaries[0]["summary"],
+        "heading": summaries[0].get("heading", ""),
+        "headingPath": summaries[0].get("headingPath", ""),
     }
 
 

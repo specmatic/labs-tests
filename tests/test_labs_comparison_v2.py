@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import importlib.util
 from pathlib import Path
 
 from lablib.labs_comparison import (
@@ -11,10 +12,24 @@ from lablib.labs_comparison import (
     extract_license_source_from_text,
     extract_fenced_code_blocks,
     extract_headings,
+    extract_tests_run_summaries,
+    select_readme_summary_for_v2_phase,
+    select_readme_summary_for_phase,
 )
+from lablib.readme_schema import parse_readme_document
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LABS_ROOT = ROOT.parent / "labs"
+
+
+def load_run_module(lab_name: str):
+    module_path = ROOT / lab_name / "run.py"
+    spec = importlib.util.spec_from_file_location(f"{lab_name.replace('-', '_')}_run", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 class LabsComparisonV2Tests(unittest.TestCase):
@@ -41,6 +56,70 @@ class LabsComparisonV2Tests(unittest.TestCase):
                 and "terminaloutput is not required" in item["notes"].lower()
                 for item in checks
             )
+        )
+
+    def test_external_examples_maps_count_rows_to_the_expected_readme_summaries(self) -> None:
+        module = load_run_module("external-examples")
+        spec = module.build_lab_spec()
+        readme_text = (LABS_ROOT / "external-examples" / "README.md").read_text(encoding="utf-8")
+        readme_doc = parse_readme_document(readme_text)
+        summaries = extract_tests_run_summaries(readme_text)
+        readme_phases = {phase.id: phase for phase in readme_doc.phases}
+
+        selected = []
+        for index, phase in enumerate(spec.phases):
+            readme_phase = readme_phases.get(phase.readme_phase_id) if phase.readme_phase_id else None
+            selected.append(
+                select_readme_summary_for_v2_phase(readme_phase)
+                if readme_phase is not None
+                else select_readme_summary_for_phase(summaries, phase, index)
+            )
+        summary_values = [item["summary"] if item else None for item in selected]
+
+        self.assertEqual(
+            [phase.readme_phase_id for phase in spec.phases if phase.readme_phase_id],
+            ["baseline", "baseline", "studio", "final"],
+        )
+        self.assertEqual(
+            summary_values,
+            [
+                "Examples: 1 passed and 3 failed out of 4 total",
+                "Examples: 1 passed and 3 failed out of 4 total",
+                "Examples: 6 passed and 0 failed out of 6 total",
+                "Examples: 6 passed and 0 failed out of 6 total",
+            ],
+        )
+
+    def test_partial_examples_maps_count_rows_to_the_expected_readme_summaries(self) -> None:
+        module = load_run_module("partial-examples")
+        spec = module.build_lab_spec()
+        readme_text = (LABS_ROOT / "partial-examples" / "README.md").read_text(encoding="utf-8")
+        readme_doc = parse_readme_document(readme_text)
+        summaries = extract_tests_run_summaries(readme_text)
+        readme_phases = {phase.id: phase for phase in readme_doc.phases}
+
+        selected = []
+        for index, phase in enumerate(spec.phases):
+            readme_phase = readme_phases.get(phase.readme_phase_id) if phase.readme_phase_id else None
+            selected.append(
+                select_readme_summary_for_v2_phase(readme_phase, phase)
+                if readme_phase is not None
+                else select_readme_summary_for_phase(summaries, phase, index)
+            )
+        summary_values = [item["summary"] if item else None for item in selected]
+
+        self.assertEqual(
+            [phase.readme_phase_id for phase in spec.phases if phase.readme_phase_id],
+            ["baseline", "baseline", "studio", "final"],
+        )
+        self.assertEqual(
+            summary_values,
+            [
+                "Examples: 0 passed and 3 failed out of 3 total",
+                "Examples: 0 passed and 3 failed out of 3 total",
+                "Examples: 3 passed and 0 failed out of 3 total",
+                "Examples: 3 passed and 0 failed out of 3 total",
+            ],
         )
 
     def test_skipped_teardown_command_still_requires_shell_fence(self) -> None:

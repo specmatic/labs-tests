@@ -120,8 +120,8 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     headings = extract_headings(body_text)
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
-    # Parse phases from global config
-    phase_ids = metadata.get("required_phases", list(DEFAULT_REQUIRED_PHASES))
+    # Parse phases from explicit phase ids first, then fall back to supported phase kinds.
+    phase_ids = metadata.get("phases") or metadata.get("required_phases") or list(ALLOWED_PHASE_KINDS)
     phases = extract_v2_phases(body_text, headings, phase_ids) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
     links = extract_markdown_links(body_text)
 

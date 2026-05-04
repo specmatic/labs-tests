@@ -1012,7 +1012,12 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
 
     readme_summaries = extract_tests_run_summaries(phase_doc.content if phase_doc is not None else context.readme_text)
     phase_index = next((index for index, phase in enumerate(context.lab.phases) if phase is context.phase), 0)
-    selected_summary = readme_summaries[0] if phase_doc is not None and readme_summaries else select_readme_summary_for_phase(readme_summaries, context.phase, phase_index)
+    if phase_doc is not None and readme_summaries:
+        selected_summary = select_readme_summary_for_phase(readme_summaries, context.phase, 0)
+        if selected_summary is None:
+            selected_summary = readme_summaries[0]
+    else:
+        selected_summary = select_readme_summary_for_phase(readme_summaries, context.phase, phase_index)
     readme_summary = selected_summary["summary"] if selected_summary else None
     console_summary = extract_tests_run_summary(context.command_result.combined_output)
     assertions: list[dict[str, Any]] = []

@@ -24,22 +24,28 @@ README_FILE = UPSTREAM_LAB / "README.md"
 EXAMPLES_DIR = UPSTREAM_LAB / "examples"
 LICENSE_FILE = ROOT.parent / "labs" / "license.txt"
 OUTPUT_DIR = ROOT / "partial-examples" / "output"
-VALIDATE_COMMAND = ["docker", "run", "--rm", "-v", f"{UPSTREAM_LAB}:/usr/src/app"]
-if LICENSE_FILE.exists():
-    VALIDATE_COMMAND.extend(["-v", f"{LICENSE_FILE}:/specmatic/specmatic-license.txt:ro"])
-VALIDATE_COMMAND.extend(["specmatic/enterprise:latest", "validate"])
-WINDOWS_VALIDATE_COMMAND = [
-    "docker",
-    "run",
-    "--rm",
-    "-v",
-    ".:/usr/src/app",
-    "-v",
-    "../license.txt:/specmatic/specmatic-license.txt:ro",
-    "specmatic/enterprise:latest",
-    "validate",
-]
-LOOP_COMMAND = ["docker", "compose", "up", "--abort-on-container-exit"]
+
+
+def validate_command() -> list[str]:
+    command = ["docker", "run", "--rm", "-v", f"{UPSTREAM_LAB}:/usr/src/app"]
+    if LICENSE_FILE.exists():
+        command.extend(["-v", f"{LICENSE_FILE}:/specmatic/specmatic-license.txt:ro"])
+    command.extend(["specmatic/enterprise:latest", "validate"])
+    return command
+
+
+def validate_command_windows() -> list[str]:
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        ".:/usr/src/app",
+        "-v",
+        "../license.txt:/specmatic/specmatic-license.txt:ro",
+        "specmatic/enterprise:latest",
+        "validate",
+    ]
 
 
 def main() -> int:
@@ -61,7 +67,7 @@ def build_lab_spec() -> LabSpec:
         },
         readme_path=README_FILE,
         output_dir=OUTPUT_DIR,
-        command=VALIDATE_COMMAND,
+        command=validate_command(),
         common_artifact_specs=(
             ArtifactSpec("test_accepted_order_request.json", "examples/test_accepted_order_request.json", "examples/test_accepted_order_request.json", "text"),
             ArtifactSpec("test_accepted_product_request.json", "examples/test_accepted_product_request.json", "examples/test_accepted_product_request.json", "text"),
@@ -73,10 +79,9 @@ def build_lab_spec() -> LabSpec:
                 name="Baseline mismatch",
                 description="Validate the original incomplete examples and verify they fail.",
                 expected_exit_code=1,
+                readme_phase_id="baseline",
                 output_dir_name="baseline",
-                expected_console_phrases=(),
                 include_readme_structure_checks=True,
-                readme_assertions=(),
                 file_transforms={"order": keep_content, "product": keep_content, "search": keep_content},
                 extra_assertions=baseline_assertions,
             ),
@@ -84,20 +89,20 @@ def build_lab_spec() -> LabSpec:
                 name="Baseline mismatch (Windows command parity)",
                 description="Run the Windows single-line validate command and verify the same baseline failure shape.",
                 expected_exit_code=1,
+                readme_phase_id="baseline",
+                readme_summary_query="Windows (PowerShell/CMD) single-line",
                 output_dir_name="baseline-windows",
                 expected_console_phrases=("[FAIL] Examples: 0 passed and 3 failed out of 3 total",),
-                readme_assertions=(),
                 file_transforms={"order": keep_content, "product": keep_content, "search": keep_content},
                 extra_assertions=baseline_assertions,
-                command=WINDOWS_VALIDATE_COMMAND,
+                command=validate_command_windows(),
             ),
             PhaseSpec(
                 name="Fixed contract",
                 description="Convert the incomplete examples into valid partial examples and verify validation passes.",
                 expected_exit_code=0,
+                readme_phase_id="studio",
                 output_dir_name="fixed",
-                expected_console_phrases=(),
-                readme_assertions=(),
                 fix_summary=(
                     "Converted the create request examples into partial examples.",
                     "Updated the search example to a contract-compliant example shape used by loop tests.",
@@ -109,12 +114,13 @@ def build_lab_spec() -> LabSpec:
                 name="Fixed contract (Windows command parity)",
                 description="Run the Windows single-line validate command and verify it passes after the fixes.",
                 expected_exit_code=0,
+                readme_phase_id="final",
+                readme_summary_query="Windows (PowerShell/CMD) single-line",
                 output_dir_name="fixed-windows",
                 expected_console_phrases=("[OK] Examples: 3 passed and 0 failed out of 3 total",),
-                readme_assertions=(),
                 file_transforms={"order": fixed_order_example, "product": fixed_product_example, "search": fixed_search_example},
                 extra_assertions=fixed_assertions,
-                command=WINDOWS_VALIDATE_COMMAND,
+                command=validate_command_windows(),
             ),
         ),
     )

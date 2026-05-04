@@ -91,7 +91,7 @@ def build_lab_spec() -> LabSpec:
                 name="Task A fixed",
                 description="Loosen the finance example with a pattern matcher and verify only one failure remains.",
                 expected_exit_code=1,
-                readme_phase_id="task-a",
+                readme_phase_id="intermediate",
                 output_dir_name="task-a",
                 fix_summary=("Changed examples/test_finance_user_11.json so decision uses $match(pattern: approved|verified).",),
                 file_transforms={"finance_11": set_finance_task_a, "support_55": set_support_baseline},
