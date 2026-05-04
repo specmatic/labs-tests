@@ -232,6 +232,8 @@ def main() -> int:
         lab_results: list[dict[str, Any]] = []
         total_labs = len(labs)
         for index, lab in enumerate(labs, start=1):
+            if not args.refresh_report:
+                ensure_lab_contract_repo_health(lab, args)
             print()
             print("=" * 78)
             print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
@@ -312,6 +314,44 @@ def filter_labs(all_labs: list[str], selected_labs: list[str] | None) -> list[st
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _repo_check_command(repo_path: Path, *git_args: str) -> list[str]:
+    return ["git", "-C", str(repo_path), *git_args]
+
+
+def _has_valid_head(repo_path: Path) -> bool:
+    if not repo_path.exists():
+        return False
+    inside = run_command(_repo_check_command(repo_path, "rev-parse", "--is-inside-work-tree"), ROOT)
+    if inside.exit_code != 0:
+        return False
+    head = run_command(_repo_check_command(repo_path, "rev-parse", "HEAD"), ROOT)
+    return head.exit_code == 0
+
+
+def ensure_lab_contract_repo_health(lab: str, args: argparse.Namespace) -> None:
+    repo_path = ROOT.parent / "labs" / lab / ".specmatic" / "repos" / "labs-contracts"
+    print(f"[repo-check][{lab}] checking contract repo at {repo_path}")
+    if _has_valid_head(repo_path):
+        print(f"[repo-check][{lab}] OK: valid git HEAD present")
+        return
+
+    print(f"[repo-check][{lab}] BROKEN: git HEAD missing or invalid, attempting one-time repair")
+    if repo_path.exists():
+        shutil.rmtree(repo_path, ignore_errors=True)
+    repair_result = run_setup(
+        stream_output=True,
+        refresh_labs=False,
+        target_branch=args.labs_branch,
+        force=args.force,
+        lab_names=[lab],
+    )
+    if repair_result.status == "passed" and _has_valid_head(repo_path):
+        print(f"[repo-check][{lab}] RECOVERED: valid git HEAD present after repair")
+        return
+
+    print(f"[repo-check][{lab}] FAILED: contract repo still invalid after one repair attempt")
 
 
 def write_run_metadata() -> None:
