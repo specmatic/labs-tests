@@ -28,6 +28,17 @@ VALIDATE_COMMAND = ["docker", "run", "--rm", "-v", f"{UPSTREAM_LAB}:/usr/src/app
 if LICENSE_FILE.exists():
     VALIDATE_COMMAND.extend(["-v", f"{LICENSE_FILE}:/specmatic/specmatic-license.txt:ro"])
 VALIDATE_COMMAND.extend(["specmatic/enterprise:latest", "validate"])
+WINDOWS_VALIDATE_COMMAND = [
+    "docker",
+    "run",
+    "--rm",
+    "-v",
+    ".:/usr/src/app",
+    "-v",
+    "../license.txt:/specmatic/specmatic-license.txt:ro",
+    "specmatic/enterprise:latest",
+    "validate",
+]
 LOOP_COMMAND = ["docker", "compose", "up", "--abort-on-container-exit"]
 
 
@@ -70,6 +81,17 @@ def build_lab_spec() -> LabSpec:
                 extra_assertions=baseline_assertions,
             ),
             PhaseSpec(
+                name="Baseline mismatch (Windows command parity)",
+                description="Run the Windows single-line validate command and verify the same baseline failure shape.",
+                expected_exit_code=1,
+                output_dir_name="baseline-windows",
+                expected_console_phrases=("[FAIL] Examples: 0 passed and 3 failed out of 3 total",),
+                readme_assertions=(),
+                file_transforms={"order": keep_content, "product": keep_content, "search": keep_content},
+                extra_assertions=baseline_assertions,
+                command=WINDOWS_VALIDATE_COMMAND,
+            ),
+            PhaseSpec(
                 name="Fixed contract",
                 description="Convert the incomplete examples into valid partial examples and verify validation passes.",
                 expected_exit_code=0,
@@ -82,6 +104,17 @@ def build_lab_spec() -> LabSpec:
                 ),
                 file_transforms={"order": fixed_order_example, "product": fixed_product_example, "search": fixed_search_example},
                 extra_assertions=fixed_assertions,
+            ),
+            PhaseSpec(
+                name="Fixed contract (Windows command parity)",
+                description="Run the Windows single-line validate command and verify it passes after the fixes.",
+                expected_exit_code=0,
+                output_dir_name="fixed-windows",
+                expected_console_phrases=("[OK] Examples: 3 passed and 0 failed out of 3 total",),
+                readme_assertions=(),
+                file_transforms={"order": fixed_order_example, "product": fixed_product_example, "search": fixed_search_example},
+                extra_assertions=fixed_assertions,
+                command=WINDOWS_VALIDATE_COMMAND,
             ),
         ),
     )
