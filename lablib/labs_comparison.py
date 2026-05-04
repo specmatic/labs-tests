@@ -1572,10 +1572,10 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
                 "rows": [
                     {
                         "phase": item["phase"],
-                        "readme": build_count_cell(item.get("readmeCounts"), item),
-                        "console": build_count_cell(item.get("consoleCounts"), item),
-                        "ctrf": build_count_cell(item.get("ctrfCounts"), item),
-                        "html": build_count_cell(item.get("htmlCounts"), item),
+                        "readme": build_count_cell(item.get("readmeCounts"), item, "readme_summary"),
+                        "console": build_count_cell(item.get("consoleCounts"), item, "console_summary"),
+                        "ctrf": build_count_cell(item.get("ctrfCounts"), item, "ctrf"),
+                        "html": build_count_cell(item.get("htmlCounts"), item, "html"),
                         "status": format_count_status(item.get("status", "not-available")),
                     }
                     for item in comparisons
@@ -3489,7 +3489,11 @@ def render_test_count_lab_section(section: dict[str, Any]) -> str:
 
 def render_count_cell_html(value: Any) -> str:
     if isinstance(value, dict):
-        return escape(str(value.get("text", ""))).replace("\n", "<br>")
+        text_html = escape(str(value.get("text", ""))).replace("\n", "<br>")
+        class_name = str(value.get("className", "")).strip()
+        if class_name:
+            return f"<span class='{escape(class_name)}'>{text_html}</span>"
+        return text_html
     return escape(str(value)).replace("\n", "<br>")
 
 
@@ -4956,7 +4960,15 @@ def choose_reference_counts(item: dict[str, Any]) -> dict[str, int] | None:
     return present[0]
 
 
-def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any]) -> dict[str, str]:
+def build_count_cell(counts: dict[str, int] | None, comparison_item: dict[str, Any], source_key: str | None = None) -> dict[str, str]:
+    expected_sources = comparison_item.get("expectedSources", {}) if isinstance(comparison_item, dict) else {}
+    if source_key and isinstance(expected_sources, dict) and not bool(expected_sources.get(source_key, True)):
+        return {
+            "text": "Not Applicable",
+            "className": "status-chip status-expected",
+            "title": f"{source_key.upper()} is disabled by README metadata for this lab.",
+            "ariaLabel": f"{source_key.upper()} is disabled by README metadata for this lab.",
+        }
     reference = choose_reference_counts(comparison_item)
     text = count_cell_text(counts)
     count_legend = "T = Total\nP = Passed\nF = Failed\nS = Skipped\nO = Other"
@@ -5094,10 +5106,10 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
                 "rows": [
                     [
                         item["phase"],
-                        build_count_cell(item.get("readmeCounts"), item),
-                        build_count_cell(item.get("consoleCounts"), item),
-                        build_count_cell(item.get("ctrfCounts"), item),
-                        build_count_cell(item.get("htmlCounts"), item),
+                        build_count_cell(item.get("readmeCounts"), item, "readme_summary"),
+                        build_count_cell(item.get("consoleCounts"), item, "console_summary"),
+                        build_count_cell(item.get("ctrfCounts"), item, "ctrf"),
+                        build_count_cell(item.get("htmlCounts"), item, "html"),
                         format_count_status(item.get("status", "not-available")),
                     ]
                     for item in comparisons
