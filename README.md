@@ -314,7 +314,7 @@ GitHub Actions workflow:
 - runs `python3 run_all.py --refresh-labs --force --labs-branch dynamic-labs` by default
 - accepts an optional space-separated `labs` workflow input to run only selected labs
 - accepts an optional `labs_branch` workflow input; until the `dynamic-labs` work is merged, the default branch is `dynamic-labs`
-- accepts an optional `manage_license` workflow input; by default the workflow creates or replaces `../labs/license.txt` before the run and restores or removes it afterward
+- always creates or replaces `../labs/license.txt` before the GitHub workflow run and restores or removes it afterward
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
 - uses a 40-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
