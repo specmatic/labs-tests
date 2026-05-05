@@ -18,6 +18,50 @@ WINDOWS_COMMAND_FENCE_LANGUAGES = (
 )
 
 OUTPUT_FENCE_LANGUAGE = "terminaloutput"
+STRUCTURED_FILE_DISPLAY_FENCE_LANGUAGES = (
+    "yaml",
+    "json",
+)
+
+
+def is_structured_file_display_language(language: str) -> bool:
+    return (language or "").lower() in STRUCTURED_FILE_DISPLAY_FENCE_LANGUAGES
+
+
+def command_output_skip_reason(command: str) -> str | None:
+    normalized = " ".join(command.strip().lower().split())
+    if not normalized:
+        return None
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " down" in f" {normalized}"
+    ):
+        return "terminaloutput is not required for teardown commands"
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and normalized.endswith(" pull")
+    ):
+        return "terminaloutput is not required for docker image pull commands"
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " stop " in f" {normalized} "
+    ):
+        return "terminaloutput is not required for service stop commands"
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " up" in f" {normalized}"
+        and "--abort-on-container-exit" not in normalized
+        and "--exit-code-from" not in normalized
+    ):
+        return "terminaloutput is not required for service startup commands"
+    teardown_prefixes = ("docker stop", "docker rm")
+    if normalized.startswith(teardown_prefixes):
+        return "terminaloutput is not required for teardown commands"
+    if normalized.startswith("chmod "):
+        return "terminaloutput is not required for file-permission setup commands"
+    if normalized.startswith("git update-index "):
+        return "terminaloutput is not required for git index setup commands"
+    return None
 
 def load_h2_sequence() -> tuple[str, ...]:
     sequence_file = Path(__file__).with_name("readme_h2_sequence.yaml")

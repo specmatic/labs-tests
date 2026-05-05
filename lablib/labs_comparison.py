@@ -12,7 +12,9 @@ from typing import Any
 
 from lablib.readme_expectations import (
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
+    command_output_skip_reason,
     command_block_language,
+    is_structured_file_display_language,
     README_TEMPLATE,
     get_lab_readme_override,
     heading_matches,
@@ -747,31 +749,6 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
-def skipped_command_output_reason(command: str) -> str | None:
-    normalized = " ".join(command.strip().lower().split())
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and " down" in f" {normalized}"
-    ):
-        return "Skipped: terminaloutput is not required for teardown commands."
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and "--profile studio" in normalized
-        and " up" in f" {normalized}"
-        and "--build" in normalized
-    ):
-        return "Skipped: terminaloutput is not required for Studio startup/build commands."
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and normalized.endswith(" pull")
-    ):
-        return "Skipped: terminaloutput is not required for docker image pull commands."
-    teardown_prefixes = ("docker stop", "docker rm")
-    if normalized.startswith(teardown_prefixes):
-        return "Skipped: terminaloutput is not required for teardown commands."
-    return None
-
-
 def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, Any]], code_blocks: list[dict[str, Any]]) -> dict[str, Any]:
     command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
@@ -824,7 +801,7 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "commandFence": block["rawLanguage"] or "(none)",
                     }
                 )
-            skipped_reason = skipped_command_output_reason(block["preview"] or "")
+            skipped_reason = command_output_skip_reason(block["preview"] or "")
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
             next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
             if skipped_reason:
@@ -857,6 +834,7 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
             if (
                 next_block is None
                 or looks_like_console_block(next_block)
+                or is_structured_file_display_language(next_block["rawLanguage"] or "")
                 or (next_heading["text"] if next_heading else "") != (heading["text"] if heading else "")
             ):
                 issue_text = f"{heading_text} -> {block['normalizedPreview'] or '(blank)'}"
@@ -932,22 +910,23 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                     "notes": " ".join(failure_notes) if failure_notes else "Command/output fencing is valid.",
                 }
             )
+        elif is_structured_file_display_language(block["rawLanguage"] or ""):
+            heading_text = heading["text"] if heading else "(no heading)"
+            command_output_checks.append(
+                {
+                    "line": str(block["line"]),
+                    "heading": heading_text,
+                    "commandFence": "(n/a)",
+                    "command": "(file display)",
+                    "outputFence": block["rawLanguage"] or "(none)",
+                    "output": "(not shown)",
+                    "status": "skipped",
+                    "notes": f"Skipped: this is a {block['rawLanguage'] or 'structured'} file display block, not command/output validation.",
+                }
+            )
+            continue
         elif is_output_block_with_paths(block):
             heading_text = heading["text"] if heading else "(no heading)"
-            if (block["rawLanguage"] or "").lower() in {"yaml", "json"}:
-                command_output_checks.append(
-                    {
-                        "line": str(block["line"]),
-                        "heading": heading_text,
-                        "commandFence": "(n/a)",
-                        "command": "(file display)",
-                        "outputFence": block["rawLanguage"] or "(none)",
-                        "output": "(not shown)",
-                        "status": "skipped",
-                        "notes": f"Skipped: this is a {block['rawLanguage'] or 'structured'} file display block, not command/output validation.",
-                    }
-                )
-                continue
             has_path_outputs = True
             for os_name in os_targets:
                 output_coverage[os_name].append(

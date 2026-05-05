@@ -11,7 +11,9 @@ from typing import Any, Callable
 
 from lablib.command_runner import CommandResult, run_command
 from lablib.readme_expectations import (
+    command_output_skip_reason,
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
+    is_structured_file_display_language,
     OUTPUT_FENCE_LANGUAGE,
     optional_h2_titles,
     unexpected_h2_titles_for_lab,
@@ -1168,7 +1170,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     for index, block in enumerate(phase_doc.code_blocks):
         if not block.is_command:
             continue
-        skipped_reason = skipped_command_output_reason(block.body)
+        skipped_reason = command_output_skip_reason(block.body)
         if skipped_reason:
             skipped_command_blocks.append(f"line {block.line} ({skipped_reason})")
             continue
@@ -1442,31 +1444,6 @@ def is_command_language_appropriate(os_name: str, language: str) -> bool:
     return language == "shell"
 
 
-def skipped_command_output_reason(command: str) -> str | None:
-    normalized = " ".join(command.strip().lower().split())
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and " down" in f" {normalized}"
-    ):
-        return "terminaloutput is not required for teardown commands"
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and "--profile studio" in normalized
-        and " up" in f" {normalized}"
-        and "--build" in normalized
-    ):
-        return "terminaloutput is not required for Studio startup/build commands"
-    if (
-        ("docker compose" in normalized or "docker-compose" in normalized)
-        and normalized.endswith(" pull")
-    ):
-        return "terminaloutput is not required for docker image pull commands"
-    teardown_prefixes = ("docker stop", "docker rm")
-    if normalized.startswith(teardown_prefixes):
-        return "terminaloutput is not required for teardown commands"
-    return None
-
-
 def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
     command_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
     output_coverage = {os_name: [] for os_name in ("Windows", "macOS", "Linux")}
@@ -1483,7 +1460,7 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
         os_targets = set(block["osTargets"])
         if block["is_console"]:
             has_commands = True
-            skipped_reason = skipped_command_output_reason(block["preview"] or "")
+            skipped_reason = command_output_skip_reason(block["preview"] or "")
             for os_name in os_targets:
                 command_coverage[os_name].append(
                     {
@@ -1500,6 +1477,7 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
             if (
                 next_block is None
                 or next_block["is_console"]
+                or is_structured_file_display_language(next_block["rawLanguage"] or "")
                 or next_block["heading"] != heading_text
             ):
                 commands_missing_output.append(f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'}")
@@ -1517,6 +1495,8 @@ def analyze_readme_os_documentation(readme_text: str) -> dict[str, Any]:
                 output_language_issues.append(
                     f"{heading_text or '(no heading)'} -> {block['normalizedPreview'] or '(blank)'} uses ```{next_block['rawLanguage'] or '(none)'}``` for output"
                 )
+        elif is_structured_file_display_language(block["rawLanguage"] or ""):
+            continue
         elif is_output_block_with_paths(block, context_text):
             has_path_outputs = True
             for os_name in os_targets:

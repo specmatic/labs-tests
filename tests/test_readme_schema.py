@@ -267,6 +267,55 @@ Text
         self.assertIn("readme.v2.phase.command_fences", failures)
         self.assertNotIn("readme.v2.phase.outputs", failures)
 
+    def test_v2_phase_allows_service_startup_command_without_terminaloutput(self) -> None:
+        readme_text = """---
+lab_schema: v2
+reports:
+  ctrf: false
+  html: false
+  readme_summary: true
+---
+# Sample Lab
+## Objective
+Text
+## Why this lab matters
+Text
+## Time required to complete this lab
+Text
+## Prerequisites
+Text
+## Architecture
+Text
+## Files in this lab
+Text
+## Lab Rules
+Text
+## Specmatic references
+Text
+## Lab Implementation Phases
+### Baseline Phase
+<!--
+phase-meta
+id: baseline
+kind: baseline
+-->
+```shell
+docker compose up consumer --build
+```
+## Pass Criteria
+Text
+## Troubleshooting
+Text
+## Cleanup
+Text
+## What you learned
+Text
+## Next step
+Text
+"""
+        failures = self._phase_failures(readme_text, "baseline")
+        self.assertNotIn("readme.v2.phase.outputs", failures)
+
     def test_v2_phase_rejects_terminaloutput_casing_variants(self) -> None:
         readme_text = """---
 lab_schema: v2
