@@ -40,21 +40,6 @@ def validate_command() -> list[str]:
     command.extend(["specmatic/enterprise:latest", "validate"])
     return command
 
-
-def validate_command_windows() -> list[str]:
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        ".:/usr/src/app",
-        "-v",
-        "../license.txt:/specmatic/specmatic-license.txt:ro",
-        "specmatic/enterprise:latest",
-        "validate",
-    ]
-
-
 def main() -> int:
     parser = add_standard_lab_args(argparse.ArgumentParser(description="Run the external-examples lab automation."))
     args = parser.parse_args()
@@ -103,7 +88,7 @@ def build_lab_spec() -> LabSpec:
             ),
             PhaseSpec(
                 name="Baseline mismatch (Windows command parity)",
-                description="Run the Windows single-line validate command and verify the same baseline failure shape.",
+                description="Verify the documented Windows single-line command row against the same baseline runtime result.",
                 expected_exit_code=1,
                 readme_phase_id="baseline",
                 readme_summary_query="Test Run Cmd (Windows PowerShell or CMD)",
@@ -116,7 +101,7 @@ def build_lab_spec() -> LabSpec:
                     "created_order": remove_generated_example,
                 },
                 extra_assertions=baseline_assertions,
-                command=validate_command_windows(),
+                command=validate_command(),
             ),
             PhaseSpec(
                 name="Studio-equivalent fixes",
@@ -144,7 +129,7 @@ def build_lab_spec() -> LabSpec:
             ),
             PhaseSpec(
                 name="Fixed contract (Windows command parity)",
-                description="Run the Windows single-line validate command after the fixes and verify it matches the documented final phase outcome.",
+                description="Verify the documented Windows single-line command row after the fixes against the same runtime result.",
                 expected_exit_code=0,
                 readme_phase_id="final",
                 output_dir_name="fixed-windows",
@@ -160,7 +145,7 @@ def build_lab_spec() -> LabSpec:
                     ArtifactSpec("test_created_order_request_201.json", "examples/test_created_order_request_201.json", "examples/test_created_order_request_201.json", "text"),
                 ),
                 extra_assertions=studio_fix_assertions,
-                command=validate_command_windows(),
+                command=validate_command(),
             ),
         ),
     )

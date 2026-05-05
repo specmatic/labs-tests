@@ -125,6 +125,16 @@ class LabsComparisonV2Tests(unittest.TestCase):
             ],
         )
 
+    def test_windows_parity_phases_use_executable_linux_commands(self) -> None:
+        for lab_name in ("external-examples", "partial-examples"):
+            module = load_run_module(lab_name)
+            spec = module.build_lab_spec()
+            parity_phases = [phase for phase in spec.phases if "Windows command parity" in phase.name]
+            self.assertTrue(parity_phases)
+            for phase in parity_phases:
+                self.assertNotIn("../license.txt:/specmatic/specmatic-license.txt:ro", phase.command)
+                self.assertTrue(any("/specmatic/specmatic-license.txt:ro" in part for part in phase.command))
+
     def test_skipped_teardown_command_still_requires_shell_fence(self) -> None:
         readme_text = """# Sample
 

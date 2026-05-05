@@ -33,21 +33,6 @@ def validate_command() -> list[str]:
     command.extend(["specmatic/enterprise:latest", "validate"])
     return command
 
-
-def validate_command_windows() -> list[str]:
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        ".:/usr/src/app",
-        "-v",
-        "../license.txt:/specmatic/specmatic-license.txt:ro",
-        "specmatic/enterprise:latest",
-        "validate",
-    ]
-
-
 def main() -> int:
     parser = add_standard_lab_args(argparse.ArgumentParser(description="Run the partial-examples lab automation."))
     args = parser.parse_args()
@@ -87,7 +72,7 @@ def build_lab_spec() -> LabSpec:
             ),
             PhaseSpec(
                 name="Baseline mismatch (Windows command parity)",
-                description="Run the Windows single-line validate command and verify the same baseline failure shape.",
+                description="Verify the documented Windows single-line command row against the same baseline runtime result.",
                 expected_exit_code=1,
                 readme_phase_id="baseline",
                 readme_summary_query="Windows (PowerShell/CMD) single-line",
@@ -95,7 +80,7 @@ def build_lab_spec() -> LabSpec:
                 expected_console_phrases=("[FAIL] Examples: 0 passed and 3 failed out of 3 total",),
                 file_transforms={"order": keep_content, "product": keep_content, "search": keep_content},
                 extra_assertions=baseline_assertions,
-                command=validate_command_windows(),
+                command=validate_command(),
             ),
             PhaseSpec(
                 name="Fixed contract",
@@ -112,7 +97,7 @@ def build_lab_spec() -> LabSpec:
             ),
             PhaseSpec(
                 name="Fixed contract (Windows command parity)",
-                description="Run the Windows single-line validate command and verify it passes after the fixes.",
+                description="Verify the documented Windows single-line command row after the fixes against the same runtime result.",
                 expected_exit_code=0,
                 readme_phase_id="final",
                 readme_summary_query="Windows (PowerShell/CMD) single-line",
@@ -120,7 +105,7 @@ def build_lab_spec() -> LabSpec:
                 expected_console_phrases=("[OK] Examples: 3 passed and 0 failed out of 3 total",),
                 file_transforms={"order": fixed_order_example, "product": fixed_product_example, "search": fixed_search_example},
                 extra_assertions=fixed_assertions,
-                command=validate_command_windows(),
+                command=validate_command(),
             ),
         ),
     )
