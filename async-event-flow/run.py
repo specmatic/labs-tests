@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -28,8 +29,9 @@ README_FILE = UPSTREAM_LAB / "README.md"
 ACCEPT_ORDER_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "acceptOrder.json"
 OUT_FOR_DELIVERY_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "outForDeliveryOrder.json"
 OUTPUT_DIR = ROOT / "async-event-flow" / "output"
-LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d && docker compose exec -T studio specmatic run-suite"]
+LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d kafka kafka-init sut && docker compose run --rm studio run-suite"]
 CONTAINER_NAMES = ["studio", "order-service-sut", "kafka-init", "kafka"]
+CONTRACT_REPO_DIR = UPSTREAM_LAB / ".specmatic" / "repos" / "labs-contracts"
 BEFORE_FIXTURE = """  "before": [
     {
       "type": "http",
@@ -153,6 +155,7 @@ def fixed_assertions(context: ValidationContext) -> list[dict]:
 
 def clear_previous_reports(spec: LabSpec) -> None:
     cleanup_stale_containers()
+    cleanup_stale_contract_checkout()
     clear_docker_owned_build_dir(spec)
 
 
@@ -163,6 +166,12 @@ def teardown_compose(spec: LabSpec) -> None:
 
 def cleanup_stale_containers() -> None:
     subprocess.run(["docker", "rm", "-f", *CONTAINER_NAMES], check=False, text=True, capture_output=True)
+
+
+def cleanup_stale_contract_checkout() -> None:
+    # A partially created checkout under .specmatic/repos/labs-contracts can leave
+    # Git metadata without a valid HEAD, which makes later run-suite executions fail.
+    shutil.rmtree(CONTRACT_REPO_DIR, ignore_errors=True)
 
 
 def set_accept_baseline(content: str) -> str:
