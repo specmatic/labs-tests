@@ -112,12 +112,12 @@ def run_command(
             if timeout_seconds is not None and overall_elapsed >= timeout_seconds and not timed_out:
                 timed_out = True
                 timeout_reason = f"Command exceeded the {int(timeout_seconds)}s timeout."
-                print(f"{prefix}[timeout] {timeout_reason}", flush=True)
+                print(f"{prefix}[error] Command timed out: {timeout_reason}", flush=True)
                 terminate_process(process)
             elif idle_timeout_seconds is not None and idle_elapsed >= idle_timeout_seconds and not timed_out:
                 timed_out = True
                 timeout_reason = f"Command produced no output for {int(idle_timeout_seconds)}s."
-                print(f"{prefix}[timeout] {timeout_reason}", flush=True)
+                print(f"{prefix}[error] Command timed out due to no output: {timeout_reason}", flush=True)
                 terminate_process(process)
             continue
         if line is None:

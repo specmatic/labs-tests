@@ -1449,7 +1449,7 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "summary": [
                     "The README, console output, CTRF JSON, and Specmatic HTML report should describe the same counts.",
                     "Artifact availability rows are counted per lab, while these count-comparison details are shown per phase.",
-                    "When a source is absent for a phase, it is shown as not-available rather than treated as a mismatch.",
+                    "If an expected source is absent for a phase, it is shown as not-available and this check fails.",
                 ],
                 "details": build_test_count_consistency_details(labs),
                 "fullReportHref": "labs-test-counts-comparison.html",
@@ -4717,20 +4717,21 @@ def build_test_count_consistency_profile(
         comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
-        status = (
-            "match"
-            if consistent
-            else "mismatch"
-            if comparable
-            else "expected-not-applicable"
-            if not validates_counts
-            else "not-applicable"
-            if expected_source_count < 2
-            else "not-available"
-        )
+        if consistent:
+            status = "match"
+        elif not validates_counts:
+            status = "expected-not-applicable"
+        elif expected_source_count < 2:
+            status = "not-applicable"
+        elif comparable:
+            status = "mismatch"
+        else:
+            status = "mismatch"
 
         if comparable:
             all_consistent = all_consistent and consistent
+        elif status == "mismatch":
+            all_consistent = False
         comparisons.append(
             {
                 "phase": display_test_count_phase_label(
