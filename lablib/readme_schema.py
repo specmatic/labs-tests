@@ -137,6 +137,21 @@ def parse_readme_document(text: str) -> ReadmeDocument:
 
 def extract_front_matter(text: str) -> tuple[dict[str, Any], str]:
     if not text.startswith("---\n"):
+        # Support metadata in a top-of-file HTML comment block:
+        # <!---
+        # key: value
+        # --->
+        # and standard <!-- ... --> comments.
+        for opener, closer in (("<!---\n", "\n--->"), ("<!--\n", "\n-->")):
+            if text.startswith(opener):
+                end = text.find(closer, len(opener))
+                if end == -1:
+                    return {}, text
+                payload = text[len(opener):end]
+                body = text[end + len(closer):]
+                if body.startswith("\n"):
+                    body = body[1:]
+                return parse_simple_yaml(payload), body
         return {}, text
     end = text.find("\n---\n", 4)
     if end == -1:
