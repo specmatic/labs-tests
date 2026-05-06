@@ -68,8 +68,6 @@ def run_backward_compatibility_check(repo_root: Path, base_revision: str) -> int
         "docker",
         "run",
         "--rm",
-        "--entrypoint",
-        "sh",
         "-e",
         "GIT_CONFIG_COUNT=1",
         "-e",
