@@ -116,6 +116,8 @@ def run_container_git_preflight(repo_root: Path, base_revision: str) -> None:
         "docker",
         "run",
         "--rm",
+        "--entrypoint",
+        "/bin/sh",
         "-v",
         f"{repo_root}:/workspace",
     ]
