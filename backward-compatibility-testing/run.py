@@ -110,7 +110,7 @@ def build_lab_command() -> list[str]:
             "specmatic/enterprise:latest",
             "backward-compatibility-check",
             "--base-branch",
-            "HEAD",
+            "origin/main",
             "--target-path",
             "backward-compatibility-testing/products.yaml",
         ]
@@ -237,7 +237,7 @@ def fixed_readme_assertions() -> list[dict[str, str]]:
         },
         {
             "kind": "readme-contains",
-            "text": "(COMPATIBLE) The spec is backward compatible with the corresponding spec from HEAD",
+            "text": "(COMPATIBLE) The spec is backward compatible with the corresponding spec from origin/main",
             "success": "README documents the compatible verdict.",
             "failure": "README is missing the compatible verdict.",
         },

@@ -308,16 +308,21 @@ def setup_failure_action_lines(commands: list[dict[str, Any]]) -> list[str]:
 
 
 def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[dict[str, Any]]:
-    return [
-        command_to_dict(
-            execute(
-                ["git", "fetch", "origin", target_branch],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
-            ),
-            f"Fetch latest upstream refs for {target_branch}",
-        ),
+    branches_to_fetch = [target_branch] if target_branch == "main" else [target_branch, "main"]
+    commands: list[dict[str, Any]] = []
+    for branch in branches_to_fetch:
+        commands.append(
+            command_to_dict(
+                execute(
+                    ["git", "fetch", "origin", branch],
+                    UPSTREAM_LABS,
+                    "setup:git",
+                    stream_output=stream_output,
+                ),
+                f"Fetch latest upstream refs for {branch}",
+            )
+        )
+    commands.extend([
         command_to_dict(
             execute(
                 ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
@@ -363,7 +368,8 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
             ),
             "Verify selected upstream labs branch after refresh",
         ),
-    ]
+    ])
+    return commands
 
 
 def execute(
