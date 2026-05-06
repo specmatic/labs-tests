@@ -3,7 +3,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -13,12 +12,17 @@ UPSTREAM_LAB = UPSTREAM_LABS / "backward-compatibility-testing"
 TARGET_PATH = Path("backward-compatibility-testing") / "products.yaml"
 BASELINE_SOURCE_REF = "refs/remotes/origin/main"
 BASE_BRANCH = "main"
+TEMP_REPO_ROOT = ROOT / "backward-compatibility-testing" / ".tmp" / "bc-repo"
 
 
 def main() -> int:
-    temp_repo = Path(tempfile.mkdtemp(prefix="backward-compatibility-testing-"))
+    temp_repo = TEMP_REPO_ROOT
+    if temp_repo.exists():
+        shutil.rmtree(temp_repo, ignore_errors=True)
     try:
+        temp_repo.mkdir(parents=True, exist_ok=True)
         base_revision = prepare_temp_repo(temp_repo)
+        run_git_preflight(temp_repo, base_revision)
         return run_backward_compatibility_check(temp_repo, base_revision)
     finally:
         shutil.rmtree(temp_repo, ignore_errors=True)
@@ -34,6 +38,7 @@ def prepare_temp_repo(repo_root: Path) -> str:
     git(["init", "-q"], cwd=repo_root)
     git(["config", "user.name", "Specmatic Labs Test"], cwd=repo_root)
     git(["config", "user.email", "specmatic-labs-tests@example.com"], cwd=repo_root)
+    git(["remote", "add", "origin", "https://github.com/specmatic/labs.git"], cwd=repo_root)
     git(["checkout", "-b", BASE_BRANCH], cwd=repo_root)
     git(["add", str(TARGET_PATH)], cwd=repo_root)
     git(["commit", "-q", "-m", "Baseline contract from origin/main"], cwd=repo_root)
@@ -84,6 +89,21 @@ def run_backward_compatibility_check(repo_root: Path, base_revision: str) -> int
     for line in process.stdout:
         print(line, end="", flush=True)
     return process.wait()
+
+
+def run_git_preflight(repo_root: Path, base_revision: str) -> None:
+    print("[preflight] Verifying temporary backward-compatibility repo...", flush=True)
+    print(f"[preflight] Repo path: {repo_root}", flush=True)
+    head_revision = git_output(["rev-parse", "HEAD"], cwd=repo_root).strip()
+    print(f"[preflight] git rev-parse HEAD -> {head_revision}", flush=True)
+    base_type = git_output(["cat-file", "-t", base_revision], cwd=repo_root).strip()
+    print(f"[preflight] git cat-file -t {base_revision} -> {base_type}", flush=True)
+    diff_output = git_output(["diff", base_revision, "HEAD", "--name-status"], cwd=repo_root).strip()
+    print(f"[preflight] git diff {base_revision} HEAD --name-status", flush=True)
+    if diff_output:
+        print(diff_output, flush=True)
+    else:
+        print("[preflight] (no diff output)", flush=True)
 
 
 def git(args: list[str], *, cwd: Path) -> None:
