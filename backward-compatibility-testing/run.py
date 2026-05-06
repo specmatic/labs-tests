@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -125,9 +126,11 @@ def build_lab_command() -> list[str]:
 
 def resolve_base_revision() -> str:
     repo_root = UPSTREAM_LAB.parent
+    base_branch = os.environ.get("BACKWARD_COMPAT_BASE_BRANCH", "main").strip() or "main"
+    remote_ref = f"refs/remotes/origin/{base_branch}"
     try:
         base_sha = subprocess.check_output(
-            ["git", "-C", str(repo_root), "rev-parse", "refs/remotes/origin/main"],
+            ["git", "-C", str(repo_root), "rev-parse", remote_ref],
             text=True,
         ).strip()
         subprocess.run(
@@ -138,7 +141,7 @@ def resolve_base_revision() -> str:
         )
         return BASE_GIT_REF
     except (OSError, subprocess.CalledProcessError):
-        return "origin/main"
+        return f"origin/{base_branch}"
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:

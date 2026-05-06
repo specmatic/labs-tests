@@ -50,6 +50,7 @@ jobs:
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
           EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
+          BACKWARD_COMPAT_BASE_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
         timeout-minutes: 40
         run: |
           set +e
