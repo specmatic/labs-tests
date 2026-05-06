@@ -634,7 +634,8 @@ def extract_fenced_code_blocks(readme_text: str) -> list[dict[str, Any]]:
     for match in FENCED_CODE_BLOCK_RE.finditer(readme_text):
         body = match.group("body").strip()
         lines = [line.strip() for line in body.splitlines() if line.strip()]
-        preview = lines[0] if lines else ""
+        is_command = bool(lines and SHELL_COMMAND_PREFIXES_RE.match(lines[0]))
+        preview = build_fencing_preview(lines, is_command=is_command)
         blocks.append(
             {
                 "rawLanguage": (match.group("lang") or "").strip(),
@@ -743,6 +744,17 @@ def normalize_output_preview(text: str) -> str:
         text,
     )
     return normalized.strip()
+
+
+def build_fencing_preview(lines: list[str], *, is_command: bool) -> str:
+    if not lines:
+        return ""
+    max_lines = 4
+    selected = lines[:max_lines]
+    preview = "\n".join(selected)
+    if len(lines) > max_lines:
+        preview += "\n..."
+    return preview
 
 
 def is_command_language_appropriate(os_name: str, language: str) -> bool:
@@ -3096,6 +3108,23 @@ def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
       white-space: normal;
       line-height: 1.35;
     }}
+    .toolbar {{
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }}
+    .toggle {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.95rem;
+      color: #3f4a52;
+    }}
+    .fencing-row.skipped-hidden {{
+      display: none;
+    }}
   </style>
 </head>
 <body>
@@ -3106,8 +3135,22 @@ def render_fencing_comparison_html(payload: dict[str, Any]) -> str:
       {provenance_html}
       <p class="muted">Commands must use <code>```shell</code>, outputs must use <code>```terminaloutput</code>, and every command must be followed by its output in the same section.</p>
       <ul>{summary_items}</ul>
+      <div class="toolbar">
+        <label class="toggle"><input id="show-skipped-toggle" type="checkbox" checked> Show skipped rows</label>
+      </div>
     </section>
     {sections_html}
+    <script>
+      const toggle = document.getElementById('show-skipped-toggle');
+      const applySkippedVisibility = () => {{
+        const showSkipped = !!toggle?.checked;
+        document.querySelectorAll('tr[data-status=\"skipped\"]').forEach((row) => {{
+          row.classList.toggle('skipped-hidden', !showSkipped);
+        }});
+      }};
+      toggle?.addEventListener('change', applySkippedVisibility);
+      applySkippedVisibility();
+    </script>
   </main>
 </body>
 </html>
@@ -3393,7 +3436,7 @@ def render_fencing_issue_table(title: str, headers: list[str], rows: list[list[s
     raw_html_columns = raw_html_columns or set()
     header_html = "".join(f"<th>{escape(header)}</th>" for header in headers)
     rows_html = "".join(
-        "<tr>" + "".join(
+        f"<tr class='fencing-row' data-status='{escape(extract_plain_status(row[0]))}'>" + "".join(
             f"<td>{cell if index in raw_html_columns else render_fencing_cell(cell)}</td>"
             for index, cell in enumerate(row)
         ) + "</tr>"
@@ -3437,6 +3480,10 @@ def render_fencing_notes(notes: str, status: str) -> str:
     normalized = status.strip().lower()
     css_class = "ok" if normalized == "pass" else "muted" if normalized == "skipped" else "warn"
     return f"<div class='note-text {css_class}'>{escape(notes)}</div>"
+
+
+def extract_plain_status(status_html: str) -> str:
+    return re.sub(r"<[^>]+>", "", status_html).strip().lower()
 
 
 def render_test_count_lab_section(section: dict[str, Any]) -> str:

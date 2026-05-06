@@ -107,6 +107,7 @@ class LabSpec:
     )
     clear_reports: Callable[["LabSpec"], None] | None = None
     post_phase_cleanup: Callable[["LabSpec"], None] | None = None
+    failure_diagnostics: Callable[["ValidationContext", dict[str, Any]], None] | None = None
     runtime_warnings: tuple[str, ...] = ()
     known_limitations: tuple[str, ...] = ()
     intentional_differences: tuple[str, ...] = ()
@@ -314,9 +315,6 @@ def execute_phase(
         }
         phase_result = build_missing_artifact_phase_result(spec, phase, target_dir, command_info, exc)
         return phase_result
-    finally:
-        if spec.post_phase_cleanup is not None:
-            spec.post_phase_cleanup(spec)
 
     write_text(target_dir / "command.log", result.combined_output)
     artifacts["command.log"] = {"path": target_dir / "command.log", "text": result.combined_output, "kind": "text"}
@@ -331,7 +329,14 @@ def execute_phase(
         artifacts=artifacts,
         original_files=original_files,
     )
-    return build_phase_result(context)
+    try:
+        phase_result = build_phase_result(context)
+        if phase_result["status"] == "failed" and spec.failure_diagnostics is not None:
+            spec.failure_diagnostics(context, phase_result)
+        return phase_result
+    finally:
+        if spec.post_phase_cleanup is not None:
+            spec.post_phase_cleanup(spec)
 
 
 def rebuild_phases_from_artifacts(spec: LabSpec, readme_text: str, readme_doc: Any, original_files: dict[str, str | None]) -> list[dict[str, Any]]:

@@ -29,8 +29,9 @@ README_FILE = UPSTREAM_LAB / "README.md"
 ACCEPT_ORDER_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "acceptOrder.json"
 OUT_FOR_DELIVERY_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "outForDeliveryOrder.json"
 OUTPUT_DIR = ROOT / "async-event-flow" / "output"
-LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d kafka kafka-init sut && docker compose run --rm studio run-suite"]
-CONTAINER_NAMES = ["studio", "order-service-sut", "kafka-init", "kafka"]
+LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d --wait kafka kafka-init sut && docker compose run --rm studio run-suite"]
+CONTAINER_NAMES = ["order-service-sut", "kafka-init", "kafka"]
+STUDIO_RUN_CONTAINER_PREFIX = "async-event-flow-studio-run-"
 CONTRACT_REPO_DIR = UPSTREAM_LAB / ".specmatic" / "repos" / "labs-contracts"
 BEFORE_FIXTURE = """  "before": [
     {
@@ -100,7 +101,18 @@ def build_lab_spec() -> LabSpec:
                 expected_exit_code=0,
                 output_dir_name="fixed",
                 expected_console_phrases=(),
-                readme_assertions=(),
+                readme_assertions=(
+                    readme_contains(
+                        '"tax-invoice-for-order-456": "$match(exact: 2)"',
+                        "README shows the original incorrect tax verification count of 2 for the out-for-delivery example.",
+                        "README does not show the original incorrect tax verification count of 2 for the out-for-delivery example.",
+                    ),
+                    readme_contains(
+                        '"tax-invoice-for-order-456": "$match(exact: 1)"',
+                        "README shows the corrected tax verification count of 1 for the out-for-delivery example.",
+                        "README does not show the corrected tax verification count of 1 for the out-for-delivery example.",
+                    ),
+                ),
                 fix_summary=(
                     "Added the missing before HTTP fixture to examples/async-order-service/acceptOrder.json.",
                     "Changed the TaxService verification count in examples/async-order-service/outForDeliveryOrder.json from 2 to 1.",
@@ -111,6 +123,7 @@ def build_lab_spec() -> LabSpec:
         ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
+        failure_diagnostics=capture_failure_diagnostics,
     )
 
 
@@ -172,6 +185,38 @@ def cleanup_stale_contract_checkout() -> None:
     # A partially created checkout under .specmatic/repos/labs-contracts can leave
     # Git metadata without a valid HEAD, which makes later run-suite executions fail.
     shutil.rmtree(CONTRACT_REPO_DIR, ignore_errors=True)
+
+
+def capture_failure_diagnostics(context: ValidationContext, phase_result: dict[str, object]) -> None:
+    docker_logs_dir = context.target_dir / "docker-logs"
+    docker_logs_dir.mkdir(parents=True, exist_ok=True)
+    for container_name in diagnostic_container_names():
+        log_result = subprocess.run(
+            ["docker", "logs", container_name],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        combined_output = log_result.stdout
+        if log_result.stderr:
+            combined_output = f"{combined_output}\n{log_result.stderr}" if combined_output else log_result.stderr
+        if not combined_output.strip():
+            combined_output = f"(no logs captured for container {container_name})\n"
+        (docker_logs_dir / f"{container_name}.log").write_text(combined_output, encoding="utf-8")
+
+
+def diagnostic_container_names() -> list[str]:
+    names = list(CONTAINER_NAMES)
+    ps_result = subprocess.run(
+        ["docker", "ps", "-a", "--format", "{{.Names}}"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    for name in ps_result.stdout.splitlines():
+        if name.startswith(STUDIO_RUN_CONTAINER_PREFIX):
+            names.append(name)
+    return names
 
 
 def set_accept_baseline(content: str) -> str:
