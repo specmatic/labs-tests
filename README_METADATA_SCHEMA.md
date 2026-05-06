@@ -54,17 +54,15 @@ Note:
 
 Controls which report sources are expected for comparison and artifact validation.
 
-Example:
+Example override:
 
 ```yaml
 reports:
   ctrf: false
   html: false
-  readme_summary: true
-  console_summary: true
 ```
 
-Supported keys:
+Supported keys recognized by the current code:
 - `ctrf`
 - `html`
 - `readme_summary`
@@ -73,25 +71,20 @@ Supported keys:
 Preferred value type:
 - boolean
 
-Examples:
-
-```yaml
-reports:
-  ctrf: true
-  html: true
-  readme_summary: true
-  console_summary: true
-```
+Recommended usage:
 
 ```yaml
 reports:
   ctrf: false
   html: false
-  readme_summary: true
-  console_summary: true
 ```
 
-For `ctrf` and `html`, the comparison report also supports this object form:
+Notes:
+- Only set `reports.*` when you need to override the default.
+- The active labs currently override only `ctrf` and `html`.
+- `readme_summary` and `console_summary` are still recognized by the code, but no current lab in `labs-tests` overrides them.
+
+For `ctrf` and `html`, the comparison/artifact path also supports this object form:
 
 ```yaml
 reports:
@@ -112,7 +105,8 @@ Meaning:
   - the artifact is expected to be absent
 
 Notes:
-- The object form is currently used by the artifact comparison logic.
+- The object form is recognized by the artifact comparison logic.
+- No current lab in `labs-tests` uses the object form.
 - For `readme_summary` and `console_summary`, use booleans.
 
 ### `test_counts`
@@ -153,6 +147,10 @@ Purpose:
 Related key:
 - `expected_failure_mismatch_reason`
 
+Note:
+- This is still recognized by the code.
+- No current lab in the active `labs-tests` harness set uses it.
+
 ### `optional_components`
 
 Currently supported:
@@ -182,6 +180,10 @@ optional_components:
   overview_video: true
 ```
 
+Note:
+- This is still recognized by the code.
+- No current lab in the active `labs-tests` harness set uses it.
+
 ## Supported phase-related options
 
 ### `required_implementation_phases`
@@ -201,6 +203,10 @@ required_implementation_phases:
 
 Purpose:
 - Extends the required phase kinds for README validation and comparison reporting.
+
+Note:
+- This is recognized by the parser and comparison path.
+- No current lab in the active `labs-tests` harness set uses it.
 
 ### `required_phases`
 
@@ -232,6 +238,7 @@ phases:
 Important note:
 - Prefer `phases` for the active comparison/profile path.
 - Keep `required_phases` only if an older README or runner still depends on it.
+- No current lab in the active `labs-tests` harness set uses `required_phases`.
 
 ### `phases`
 
@@ -259,6 +266,9 @@ phases:
 
 - Use it when a lab intentionally supports a smaller phase set than the default recognized phase kinds.
 
+Note:
+- No current lab in the active `labs-tests` harness set uses `phases`.
+
 ## Minimal recommended example
 
 The minimum v2 README should keep only the required schema marker:
@@ -285,18 +295,24 @@ optional_components:
 ---
 ```
 
-## Not currently wired into the active validator
+## Recognized but not currently used by active labs
 
-These keys or patterns appear in some READMEs, but they are not currently the source of truth for active validation behavior:
+These are still recognized in code, but none of the current `labs-tests` harnessed labs rely on them today:
 
-- `overview_video: false`
-  - preferred instead:
-    - `optional_components.overview_video: true`
-    - or `overview_video_optional: true`
-- hidden `phase-meta` YAML comments
-  - not currently used by the active phase parser
-- phase-level `expected_reports`
-  - not currently populated by the active phase parser
+- `expected_failure_mismatch`
+- `expected_failure_mismatch_reason`
+- `optional_components.overview_video`
+- `overview_video_optional`
+- `required_implementation_phases`
+- `required_phases`
+- `phases`
+- `reports.ctrf/html` object form with `expected` / `expected_failure`
+- `reports.readme_summary`
+- `reports.console_summary`
+
+Also note:
+- hidden `phase-meta` YAML comments are no longer the source of truth for active phase parsing
+- phase-level `expected_reports` are not currently populated by the active phase parser
 
 If you want any of those to become first-class supported options, they should be added in `labs-tests` and then documented here.
 
@@ -335,20 +351,22 @@ Recommended rule for the team:
 - treat the tests and parser code as the executable source of truth
 - keep both aligned in the same PR
 
-## Current metadata usage in labs
+## Current metadata usage in active labs-tests labs
 
-These are the labs that currently carry README metadata that actively affects validation or comparison behavior.
+These are the labs in the current `labs-tests` harness set whose README metadata actively changes validation or comparison behavior.
 
 | Lab | Metadata used | What it changes |
 |---|---|---|
 | `external-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `external-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `external-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `quick-start-api-testing` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `partial-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
+| `quick-start-api-testing` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `backward-compatibility-testing` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
 | `continuous-integration` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
 | `data-adapters` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
 | `quick-start-mock` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
+
+Labs in the sibling `labs` repo that still carry metadata but are not part of the active `labs-tests` harness set should not be treated as active examples for this file.
