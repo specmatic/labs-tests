@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from lablib.workspace_setup import LicenseFileState, resolve_license_txt_content, restore_upstream_labs_license
+from lablib.workspace_setup import LicenseFileState, refresh_upstream_labs, resolve_license_txt_content, restore_upstream_labs_license
 
 
 class WorkspaceSetupLicenseTests(unittest.TestCase):
@@ -91,6 +91,63 @@ class WorkspaceSetupLicenseTests(unittest.TestCase):
                 )
             )
             self.assertFalse(license_path.exists())
+
+    def test_refresh_upstream_labs_fetches_remote_tracking_refs_for_target_and_main(self) -> None:
+        executed: list[list[str]] = []
+
+        class FakeResult:
+            def __init__(self, command: list[str]) -> None:
+                self.command = command
+                self.cwd = "/tmp/labs"
+                self.exit_code = 0
+                self.started_at = ""
+                self.finished_at = ""
+                self.duration_seconds = 0.0
+                self.stdout = ""
+                self.stderr = ""
+
+        def fake_execute(command, cwd, prefix, *, stream_output):
+            executed.append(command)
+            return FakeResult(command)
+
+        with patch("lablib.workspace_setup.execute", side_effect=fake_execute):
+            refresh_upstream_labs(stream_output=False, target_branch="dynamic-labs")
+
+        self.assertEqual(
+            executed[0],
+            ["git", "fetch", "origin", "refs/heads/dynamic-labs:refs/remotes/origin/dynamic-labs"],
+        )
+        self.assertEqual(
+            executed[1],
+            ["git", "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"],
+        )
+
+    def test_refresh_upstream_labs_fetches_main_once_when_target_is_main(self) -> None:
+        executed: list[list[str]] = []
+
+        class FakeResult:
+            def __init__(self, command: list[str]) -> None:
+                self.command = command
+                self.cwd = "/tmp/labs"
+                self.exit_code = 0
+                self.started_at = ""
+                self.finished_at = ""
+                self.duration_seconds = 0.0
+                self.stdout = ""
+                self.stderr = ""
+
+        def fake_execute(command, cwd, prefix, *, stream_output):
+            executed.append(command)
+            return FakeResult(command)
+
+        with patch("lablib.workspace_setup.execute", side_effect=fake_execute):
+            refresh_upstream_labs(stream_output=False, target_branch="main")
+
+        self.assertEqual(
+            executed[0],
+            ["git", "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"],
+        )
+        self.assertEqual(sum(1 for command in executed if command[:3] == ["git", "fetch", "origin"]), 1)
 
 
 if __name__ == "__main__":

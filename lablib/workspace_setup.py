@@ -314,7 +314,7 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
         commands.append(
             command_to_dict(
                 execute(
-                    ["git", "fetch", "origin", branch],
+                    ["git", "fetch", "origin", f"refs/heads/{branch}:refs/remotes/origin/{branch}"],
                     UPSTREAM_LABS,
                     "setup:git",
                     stream_output=stream_output,
