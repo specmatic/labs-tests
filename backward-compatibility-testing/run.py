@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,9 +25,6 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "backward-compatibility-testing"
 PRODUCTS_FILE = UPSTREAM_LAB / "products.yaml"
 README_FILE = UPSTREAM_LAB / "README.md"
 OUTPUT_DIR = ROOT / "backward-compatibility-testing" / "output"
-BASE_GIT_REF = "refs/labs-tests/base-main"
-
-
 def main() -> int:
     parser = add_standard_lab_args(argparse.ArgumentParser(description="Run the backward-compatibility-testing lab automation."))
     args = parser.parse_args()
@@ -93,7 +89,6 @@ def build_lab_spec() -> LabSpec:
 def build_lab_command() -> list[str]:
     workspace_root = UPSTREAM_LAB.parent
     license_file = workspace_root / "license.txt"
-    base_revision = resolve_base_revision()
     command = [
         "docker",
         "run",
@@ -115,30 +110,12 @@ def build_lab_command() -> list[str]:
             "specmatic/enterprise:latest",
             "backward-compatibility-check",
             "--base-branch",
-            base_revision,
+            "HEAD",
             "--target-path",
             "backward-compatibility-testing/products.yaml",
         ]
     )
     return command
-
-
-def resolve_base_revision() -> str:
-    repo_root = UPSTREAM_LAB.parent
-    try:
-        base_sha = subprocess.check_output(
-            ["git", "-C", str(repo_root), "rev-parse", "refs/remotes/origin/main"],
-            text=True,
-        ).strip()
-        subprocess.run(
-            ["git", "-C", str(repo_root), "update-ref", BASE_GIT_REF, base_sha],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return BASE_GIT_REF
-    except (OSError, subprocess.CalledProcessError):
-        return "origin/main"
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
@@ -260,7 +237,7 @@ def fixed_readme_assertions() -> list[dict[str, str]]:
         },
         {
             "kind": "readme-contains",
-            "text": "(COMPATIBLE) The spec is backward compatible with the corresponding spec from origin/main",
+            "text": "(COMPATIBLE) The spec is backward compatible with the corresponding spec from HEAD",
             "success": "README documents the compatible verdict.",
             "failure": "README is missing the compatible verdict.",
         },
