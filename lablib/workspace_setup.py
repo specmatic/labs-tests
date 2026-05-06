@@ -325,15 +325,6 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
     commands.extend([
         command_to_dict(
             execute(
-                ["git", "branch", "-f", "origin/main", "refs/remotes/origin/main"],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
-            ),
-            "Create local branch alias origin/main for the fetched main baseline",
-        ),
-        command_to_dict(
-            execute(
                 ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
                 UPSTREAM_LABS,
                 "setup:git",

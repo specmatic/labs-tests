@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
 UPSTREAM_LAB = UPSTREAM_LABS / "backward-compatibility-testing"
 TARGET_PATH = Path("backward-compatibility-testing") / "products.yaml"
-BASE_BRANCH = "origin/main"
+BASELINE_SOURCE_REF = "refs/remotes/origin/main"
+BASE_BRANCH = "main"
 
 
 def main() -> int:
@@ -33,7 +34,6 @@ def prepare_temp_repo(repo_root: Path) -> None:
     git(["init", "-q"], cwd=repo_root)
     git(["config", "user.name", "Specmatic Labs Test"], cwd=repo_root)
     git(["config", "user.email", "specmatic-labs-tests@example.com"], cwd=repo_root)
-    git(["remote", "add", "origin", "https://github.com/specmatic/labs.git"], cwd=repo_root)
     git(["checkout", "-b", BASE_BRANCH], cwd=repo_root)
     git(["add", str(TARGET_PATH)], cwd=repo_root)
     git(["commit", "-q", "-m", "Baseline contract from origin/main"], cwd=repo_root)
@@ -44,12 +44,12 @@ def prepare_temp_repo(repo_root: Path) -> None:
 def read_baseline_contract() -> str:
     try:
         return subprocess.check_output(
-            ["git", "-C", str(UPSTREAM_LABS), "show", f"refs/remotes/origin/main:{TARGET_PATH.as_posix()}"],
+            ["git", "-C", str(UPSTREAM_LABS), "show", f"{BASELINE_SOURCE_REF}:{TARGET_PATH.as_posix()}"],
             text=True,
         )
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
-            "Could not read backward-compatibility baseline from refs/remotes/origin/main. "
+            f"Could not read backward-compatibility baseline from {BASELINE_SOURCE_REF}. "
             "Ensure the upstream labs repo has fetched main before running this lab."
         ) from exc
 

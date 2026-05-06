@@ -121,10 +121,6 @@ class WorkspaceSetupLicenseTests(unittest.TestCase):
             executed[1],
             ["git", "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"],
         )
-        self.assertEqual(
-            executed[2],
-            ["git", "branch", "-f", "origin/main", "refs/remotes/origin/main"],
-        )
 
     def test_refresh_upstream_labs_fetches_main_once_when_target_is_main(self) -> None:
         executed: list[list[str]] = []
@@ -150,10 +146,6 @@ class WorkspaceSetupLicenseTests(unittest.TestCase):
         self.assertEqual(
             executed[0],
             ["git", "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"],
-        )
-        self.assertEqual(
-            executed[1],
-            ["git", "branch", "-f", "origin/main", "refs/remotes/origin/main"],
         )
         self.assertEqual(sum(1 for command in executed if command[:3] == ["git", "fetch", "origin"]), 1)
 
