@@ -26,6 +26,9 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "backward-compatibility-testing"
 PRODUCTS_FILE = UPSTREAM_LAB / "products.yaml"
 README_FILE = UPSTREAM_LAB / "README.md"
 OUTPUT_DIR = ROOT / "backward-compatibility-testing" / "output"
+BASE_GIT_REF = "refs/labs-tests/base-main"
+
+
 def main() -> int:
     parser = add_standard_lab_args(argparse.ArgumentParser(description="Run the backward-compatibility-testing lab automation."))
     args = parser.parse_args()
@@ -123,10 +126,17 @@ def build_lab_command() -> list[str]:
 def resolve_base_revision() -> str:
     repo_root = UPSTREAM_LAB.parent
     try:
-        return subprocess.check_output(
+        base_sha = subprocess.check_output(
             ["git", "-C", str(repo_root), "rev-parse", "refs/remotes/origin/main"],
             text=True,
         ).strip()
+        subprocess.run(
+            ["git", "-C", str(repo_root), "update-ref", BASE_GIT_REF, base_sha],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return BASE_GIT_REF
     except (OSError, subprocess.CalledProcessError):
         return "origin/main"
 
