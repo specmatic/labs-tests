@@ -29,9 +29,8 @@ README_FILE = UPSTREAM_LAB / "README.md"
 ACCEPT_ORDER_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "acceptOrder.json"
 OUT_FOR_DELIVERY_FILE = UPSTREAM_LAB / "examples" / "async-order-service" / "outForDeliveryOrder.json"
 OUTPUT_DIR = ROOT / "async-event-flow" / "output"
-LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d --wait kafka kafka-init sut && docker compose run --rm studio run-suite"]
-CONTAINER_NAMES = ["order-service-sut", "kafka-init", "kafka"]
-STUDIO_RUN_CONTAINER_PREFIX = "async-event-flow-studio-run-"
+LAB_COMMAND = ["/bin/sh", "-lc", "docker compose up -d --wait kafka kafka-init sut && docker compose run --rm --name studio studio run-suite"]
+CONTAINER_NAMES = ["order-service-sut", "kafka-init", "kafka", "studio"]
 CONTRACT_REPO_DIR = UPSTREAM_LAB / ".specmatic" / "repos" / "labs-contracts"
 BEFORE_FIXTURE = """  "before": [
     {
@@ -213,9 +212,6 @@ def diagnostic_container_names() -> list[str]:
         text=True,
         capture_output=True,
     )
-    for name in ps_result.stdout.splitlines():
-        if name.startswith(STUDIO_RUN_CONTAINER_PREFIX):
-            names.append(name)
     return names
 
 
