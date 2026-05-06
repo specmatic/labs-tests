@@ -18,13 +18,13 @@ BASE_BRANCH = "main"
 def main() -> int:
     temp_repo = Path(tempfile.mkdtemp(prefix="backward-compatibility-testing-"))
     try:
-        prepare_temp_repo(temp_repo)
-        return run_backward_compatibility_check(temp_repo)
+        base_revision = prepare_temp_repo(temp_repo)
+        return run_backward_compatibility_check(temp_repo, base_revision)
     finally:
         shutil.rmtree(temp_repo, ignore_errors=True)
 
 
-def prepare_temp_repo(repo_root: Path) -> None:
+def prepare_temp_repo(repo_root: Path) -> str:
     repo_target = repo_root / TARGET_PATH
     repo_target.parent.mkdir(parents=True, exist_ok=True)
     baseline = read_baseline_contract()
@@ -37,8 +37,10 @@ def prepare_temp_repo(repo_root: Path) -> None:
     git(["checkout", "-b", BASE_BRANCH], cwd=repo_root)
     git(["add", str(TARGET_PATH)], cwd=repo_root)
     git(["commit", "-q", "-m", "Baseline contract from origin/main"], cwd=repo_root)
+    base_revision = git_output(["rev-parse", "HEAD"], cwd=repo_root).strip()
     git(["checkout", "-b", "labs-tests-check"], cwd=repo_root)
     repo_target.write_text(current, encoding="utf-8")
+    return base_revision
 
 
 def read_baseline_contract() -> str:
@@ -54,7 +56,7 @@ def read_baseline_contract() -> str:
         ) from exc
 
 
-def run_backward_compatibility_check(repo_root: Path) -> int:
+def run_backward_compatibility_check(repo_root: Path, base_revision: str) -> int:
     license_file = UPSTREAM_LABS / "license.txt"
     command = [
         "docker",
@@ -72,7 +74,7 @@ def run_backward_compatibility_check(repo_root: Path) -> int:
             "specmatic/enterprise:latest",
             "backward-compatibility-check",
             "--base-branch",
-            BASE_BRANCH,
+            base_revision,
             "--target-path",
             TARGET_PATH.as_posix(),
         ]
@@ -86,6 +88,10 @@ def run_backward_compatibility_check(repo_root: Path) -> int:
 
 def git(args: list[str], *, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def git_output(args: list[str], *, cwd: Path) -> str:
+    return subprocess.check_output(["git", *args], cwd=cwd, text=True)
 
 
 if __name__ == "__main__":
