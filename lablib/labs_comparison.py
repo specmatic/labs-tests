@@ -3523,7 +3523,7 @@ def render_count_status_chip(status: str) -> str:
     normalized = status.strip().lower()
     if normalized == "match":
         css_class = "status-match"
-    elif normalized == "mismatch":
+    elif normalized in {"mismatch", "test execution failed"}:
         css_class = "status-mismatch"
     elif normalized == "expected":
         css_class = "status-expected"
@@ -4715,7 +4715,11 @@ def build_test_count_consistency_profile(
         comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
-        if consistent:
+        phase_execution_failed = phase_has_failed_command_assertion(phase)
+
+        if phase.get("status") == "failed" and phase_execution_failed:
+            status = "execution-failed"
+        elif consistent:
             status = "match"
         elif not validates_counts:
             status = "expected-not-applicable"
@@ -4728,7 +4732,7 @@ def build_test_count_consistency_profile(
 
         if comparable:
             all_consistent = all_consistent and consistent
-        elif status == "mismatch":
+        elif status in {"mismatch", "execution-failed"}:
             all_consistent = False
         comparisons.append(
             {
@@ -5248,6 +5252,8 @@ def build_required_phase_details(labs: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def format_count_status(status: str) -> str:
+    if status == "execution-failed":
+        return "Test Execution Failed"
     if status == "match":
         return "Match"
     if status == "mismatch":
@@ -5257,6 +5263,13 @@ def format_count_status(status: str) -> str:
     if status == "not-applicable":
         return "Not Applicable"
     return "Not Available"
+
+
+def phase_has_failed_command_assertion(phase: dict[str, Any]) -> bool:
+    for assertion in phase.get("assertions", []):
+        if assertion.get("status") == "failed" and assertion.get("category") == "command":
+            return True
+    return False
 
 
 def render_bullets(items: list[str]) -> str:

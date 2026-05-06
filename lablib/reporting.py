@@ -482,6 +482,7 @@ def render_phase(phase: dict[str, Any]) -> str:
     category_summary = render_category_summary(phase)
     artifacts_html = render_artifacts_section(phase.get("artifacts", []))
     phase_css = "pass" if phase["status"] == "passed" else "fail"
+    phase_status_label = display_phase_status_label(phase)
     command_html = ""
     command = phase.get("command")
     readme_phase = phase.get("readmePhase") or {}
@@ -518,7 +519,7 @@ def render_phase(phase: dict[str, Any]) -> str:
 
     return (
         f"<details class=\"panel phase-block {phase_css}\">"
-        f"<summary><div class=\"summary-row\"><div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase['status'].upper())}</div><h2>{escape(phase['name'])}</h2></div></summary>"
+        f"<summary><div class=\"summary-row\"><div class=\"status {'pass' if phase['status'] == 'passed' else 'fail'}\">{escape(phase_status_label)}</div><h2>{escape(phase['name'])}</h2></div></summary>"
         f"<p class=\"toggle-hint\">Click the section title to expand or collapse details.</p>"
         f"<p>{escape(phase['description'])}</p>"
         f"{readme_phase_html}"
@@ -531,6 +532,19 @@ def render_phase(phase: dict[str, Any]) -> str:
         f"{console_html}"
         f"</details>"
     )
+
+
+def display_phase_status_label(phase: dict[str, Any]) -> str:
+    if phase.get("status") == "failed" and phase_has_failed_command_assertion(phase):
+        return "Test Execution Failed"
+    return str(phase.get("status", "")).upper()
+
+
+def phase_has_failed_command_assertion(phase: dict[str, Any]) -> bool:
+    for assertion in phase.get("assertions", []):
+        if assertion.get("status") == "failed" and assertion.get("category") == "command":
+            return True
+    return False
 
 
 def render_report_nav(consolidated_href: str, comparison_href: str) -> str:

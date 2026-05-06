@@ -504,6 +504,8 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
             "display": " ".join(context.executed_command),
             "exitCode": command_result.exit_code,
             "durationSeconds": round(command_result.duration_seconds, 2),
+            "timedOut": command_result.timed_out,
+            "timeoutReason": command_result.timeout_reason,
         },
         "assertions": assertions,
         "artifacts": build_artifact_links(spec, phase, context.target_dir),
@@ -769,6 +771,8 @@ def build_missing_artifact_phase_result(
             "display": " ".join(phase.command or spec.command),
             "exitCode": command_info.get("exitCode", "n/a"),
             "durationSeconds": round(command_info.get("durationSeconds", 0.0), 2),
+            "timedOut": bool(command_info.get("timedOut", False)),
+            "timeoutReason": str(command_info.get("timeoutReason", "")),
         },
         "assertions": [
             {

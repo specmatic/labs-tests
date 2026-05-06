@@ -248,11 +248,13 @@ def main() -> int:
             copy_lab_snapshot(lab)
             lab_report = load_json(report_json_path) if report_json_path.exists() else None
             duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
+            status = (lab_report or {}).get("status", "failed")
             lab_results.append(
                 {
                     "name": lab,
                     "readmeHref": upstream_readme_href(lab),
-                    "status": (lab_report or {}).get("status", "failed"),
+                    "status": status,
+                    "displayStatus": display_lab_status(status, lab_report),
                     "exitCode": result.exit_code,
                     "durationSeconds": duration_seconds,
                     "reportJsonPath": str(report_json_path),
@@ -656,6 +658,24 @@ def render_provenance_html(provenance: dict[str, Any] | None) -> str:
     return f'<p class="report-nav"><strong>{label}:</strong> {display}</p>'
 
 
+def display_lab_status(status: str, lab_report: dict[str, Any] | None) -> str:
+    if status == "failed" and lab_has_command_execution_failure(lab_report):
+        return "Test Execution Failed"
+    return status
+
+
+def lab_has_command_execution_failure(lab_report: dict[str, Any] | None) -> bool:
+    if not lab_report:
+        return False
+    for phase in lab_report.get("phases", []):
+        if phase.get("status") != "failed":
+            continue
+        for assertion in phase.get("assertions", []):
+            if assertion.get("status") == "failed" and assertion.get("category") == "command":
+                return True
+    return False
+
+
 def render_lab_row(lab: dict[str, Any]) -> str:
     failures = next((item["value"] for item in lab.get("summary", []) if item["label"] == "Failures"), "n/a")
     total_tests = next((item["value"] for item in lab.get("summary", []) if item["label"] == "Validations"), "n/a")
@@ -665,7 +685,7 @@ def render_lab_row(lab: dict[str, Any]) -> str:
     return (
         "<tr>"
         f"<td><a href=\"{readme_href}\" target=\"_blank\" rel=\"noopener noreferrer\">{escape(lab['name'])}</a></td>"
-        f"<td>{escape(lab['status'])}</td>"
+        f"<td>{escape(str(lab.get('displayStatus', lab['status'])))}</td>"
         f"<td>{escape(str(lab['exitCode']))}</td>"
         f"<td>{escape(str(lab.get('durationSeconds', 'n/a')))}</td>"
         f"<td><a href=\"{escape(json_link)}\">json</a> / <a href=\"{escape(html_link)}\">html</a></td>"
