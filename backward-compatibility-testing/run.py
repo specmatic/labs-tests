@@ -25,6 +25,7 @@ UPSTREAM_LAB = ROOT.parent / "labs" / "backward-compatibility-testing"
 PRODUCTS_FILE = UPSTREAM_LAB / "products.yaml"
 README_FILE = UPSTREAM_LAB / "README.md"
 OUTPUT_DIR = ROOT / "backward-compatibility-testing" / "output"
+
 def main() -> int:
     parser = add_standard_lab_args(argparse.ArgumentParser(description="Run the backward-compatibility-testing lab automation."))
     args = parser.parse_args()
@@ -87,35 +88,7 @@ def build_lab_spec() -> LabSpec:
 
 
 def build_lab_command() -> list[str]:
-    workspace_root = UPSTREAM_LAB.parent
-    license_file = workspace_root / "license.txt"
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{workspace_root}:/workspace",
-    ]
-    if license_file.exists():
-        command.extend(
-            [
-                "-v",
-                f"{license_file}:/specmatic/specmatic-license.txt:ro",
-            ]
-        )
-    command.extend(
-        [
-            "-w",
-            "/workspace",
-            "specmatic/enterprise:latest",
-            "backward-compatibility-check",
-            "--base-branch",
-            "refs/remotes/origin/main",
-            "--target-path",
-            "backward-compatibility-testing/products.yaml",
-        ]
-    )
-    return command
+    return ["python3", str(ROOT / "lablib" / "backward_compatibility_runner.py")]
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:
