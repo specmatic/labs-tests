@@ -14,7 +14,6 @@ FENCED_CODE_BLOCK_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]+)?\s*\n(?P<body>.*
 HTML_COMMENT_RE = re.compile(r"<!--(?P<body>.*?)-->", re.DOTALL)
 MARKDOWN_LINK_RE = re.compile(r"(!)?\[(?P<label>[^\]]*)\]\((?P<target>[^)]+)\)")
 SHELL_COMMAND_PREFIXES_RE = re.compile(r"^(docker|python|python3|chmod|git|curl|cd|npm|pnpm|yarn|make|bash|sh)\b")
-V2_SCHEMA_VERSION = "v2"
 BASELINE_PHASE = "baseline"
 FINAL_PHASE = "final"
 DEFAULT_REQUIRED_PHASES = (BASELINE_PHASE, FINAL_PHASE)
@@ -94,17 +93,12 @@ class ReadmeDocument:
     text: str
     body_text: str
     metadata: dict[str, Any]
-    schema_version: str | None
     headings: list[Heading]
     h1_title: str
     h2_titles: list[str]
     phases: list[ReadmePhase]
     links: list[MarkdownLink]
     overview_video_url: str | None
-
-    @property
-    def is_v2(self) -> bool:
-        return self.schema_version == V2_SCHEMA_VERSION
 
     def phase_by_id(self, phase_id: str | None) -> ReadmePhase | None:
         if not phase_id:
@@ -120,9 +114,8 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     headings = extract_headings(body_text)
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
-    # Parse phases from explicit phase ids first, then fall back to supported phase kinds.
     phase_ids = metadata.get("phases") or metadata.get("required_phases") or list(ALLOWED_PHASE_KINDS)
-    phases = extract_v2_phases(body_text, headings, phase_ids) if metadata.get("lab_schema") == V2_SCHEMA_VERSION else []
+    phases = extract_v2_phases(body_text, headings, phase_ids)
     links = extract_markdown_links(body_text)
 
     # Extract overview video URL from "What you will learn" > "### Overview Video" section
@@ -133,7 +126,6 @@ def parse_readme_document(text: str) -> ReadmeDocument:
         text=text,
         body_text=body_text,
         metadata=metadata,
-        schema_version=metadata.get("lab_schema"),
         headings=headings,
         h1_title=h1_title,
         h2_titles=h2_titles,

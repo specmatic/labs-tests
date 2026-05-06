@@ -12,7 +12,6 @@ That means:
 - do not restate defaults in a lab README
 - do not add metadata just for completeness
 - if a lab follows the default behavior, omit the key entirely
-- exception: keep `lab_schema: v2` because it is still the required schema marker for the v2 path
 
 Examples:
 - good: `reports.ctrf: false`
@@ -25,28 +24,17 @@ Examples:
 Place the metadata in YAML front matter at the top of the lab README:
 
 ```yaml
----
-lab_schema: v2
----
+# No metadata needed when the lab uses all defaults
 ```
 
-## Required key
+## Schema model
 
-### `lab_schema`
+There is only one supported README schema now: the current canonical schema used by `labs-tests`.
 
-Use:
-
-```yaml
-lab_schema: v2
-```
-
-Purpose:
-- Enables the canonical README structure validation path.
-- Tells `labs-tests` to validate the README against the shared H2 sequence.
-
-Note:
-- This is currently still used by the code to opt a README into the canonical v2 path.
-- It is not just a descriptive label.
+That means:
+- lab READMEs do not need a schema version marker
+- if a lab uses only default behavior, it does not need any YAML front matter at all
+- metadata should be added only for real overrides
 
 ## Supported global options
 
@@ -210,7 +198,7 @@ Note:
 
 ### `required_phases`
 
-This key is still recognized, but it is no longer the preferred way to model normal v2 labs.
+This key is still recognized, but it is no longer the preferred way to model normal labs.
 
 Example:
 
@@ -223,7 +211,7 @@ required_phases:
 
 Purpose:
 - Legacy parser hint for recognized phase ids.
-- Most v2 labs should not need this, because the parser already recognizes the built-in phase kinds:
+- Most labs should not need this, because the parser already recognizes the built-in phase kinds:
 
 ```yaml
 phases:
@@ -271,12 +259,10 @@ Note:
 
 ## Minimal recommended example
 
-The minimum v2 README should keep only the required schema marker:
+The minimum canonical README should have no front matter when no overrides are needed:
 
 ```yaml
----
-lab_schema: v2
----
+# No metadata needed when the lab uses all defaults
 ```
 
 Add more metadata only when a default behavior needs to change.
@@ -285,7 +271,6 @@ Add more metadata only when a default behavior needs to change.
 
 ```yaml
 ---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -357,13 +342,10 @@ These are the labs in the current `labs-tests` harness set whose README metadata
 
 | Lab | Metadata used | What it changes |
 |---|---|---|
-| `external-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `external-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `external-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `partial-examples` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
 | `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `quick-start-api-testing` | `lab_schema: v2` | Enables the canonical v2 README validation path. |
 | `backward-compatibility-testing` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
 | `continuous-integration` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
 | `data-adapters` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |

@@ -23,7 +23,6 @@ from lablib.readme_schema import (
     BASELINE_PHASE,
     DEFAULT_REQUIRED_PHASES,
     FINAL_PHASE,
-    V2_SCHEMA_VERSION,
     command_fence_languages,
     expected_h2_titles_for_document,
     parse_readme_document,
@@ -430,7 +429,7 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
     spec = context.lab
     phase = context.phase
     command_result = context.command_result
-    readme_phase = context.readme_doc.phase_by_id(phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
+    readme_phase = context.readme_doc.phase_by_id(phase.readme_phase_id)
     assertions: list[dict[str, Any]] = []
 
     assertions.append(
@@ -949,7 +948,7 @@ def evaluate_readme_console_structure(context: ValidationContext) -> list[dict[s
 
 
 def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[str, Any]]:
-    if getattr(context.readme_doc, "is_v2", False):
+    if context.readme_doc.phase_by_id(context.phase.readme_phase_id) is not None:
         return []
     profile = analyze_readme_os_documentation(context.readme_text)
     assertions: list[dict[str, Any]] = []
@@ -1048,7 +1047,7 @@ def evaluate_readme_os_documentation(context: ValidationContext) -> list[dict[st
 
 
 def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str, Any]]:
-    phase_doc = context.readme_doc.phase_by_id(context.phase.readme_phase_id) if getattr(context.readme_doc, "is_v2", False) else None
+    phase_doc = context.readme_doc.phase_by_id(context.phase.readme_phase_id)
     # Use global report settings, not phase-level
     global_reports = context.readme_doc.metadata.get("reports", {})
     counts_enabled = bool(context.readme_doc.metadata.get("test_counts", True))
@@ -1200,9 +1199,6 @@ def select_readme_summary_for_phase(
 
 def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[str, Any]]:
     document = context.readme_doc
-    if not getattr(document, "is_v2", False):
-        return []
-
     phase_doc = document.phase_by_id(context.phase.readme_phase_id)
     if phase_doc is None:
         return [
@@ -1211,7 +1207,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
                 "README contains the mapped implementation phase.",
                 "README is missing the implementation phase mapped to this automated phase.",
                 category="readme",
-                code="readme.v2.phase_mapping.present",
+                code="readme.phase_mapping.present",
                 details=[detail("Expected phase id", context.phase.readme_phase_id or "(missing)")],
             )
         ]
@@ -1240,7 +1236,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             "README phase documents at least one executable command.",
             "README phase does not document any executable command.",
             category="readme",
-            code="readme.v2.phase.commands",
+            code="readme.phase.commands",
             details=[detail("Phase title", phase_doc.title)],
         ),
         assert_condition(
@@ -1248,7 +1244,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             "README phase includes a following terminaloutput block for each command block.",
             "README phase is missing a following terminaloutput block for one or more command blocks.",
             category="readme",
-            code="readme.v2.phase.outputs",
+            code="readme.phase.outputs",
             details=[
                 detail("Phase title", phase_doc.title),
                 detail("Commands missing following output", ", ".join(command_blocks_missing_following_output) or "(none)"),
@@ -1260,7 +1256,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             "README phase command blocks use ```shell``` fences.",
             "README phase command blocks do not consistently use ```shell``` fences.",
             category="readme",
-            code="readme.v2.phase.command_fences",
+            code="readme.phase.command_fences",
             details=[
                 detail(
                     "Invalid command fence languages",
@@ -1273,7 +1269,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             "README phase output blocks use terminaloutput fences.",
             "README phase output blocks do not consistently use terminaloutput fences.",
             category="readme",
-            code="readme.v2.phase.output_fences",
+            code="readme.phase.output_fences",
             details=[
                 detail(
                     "Invalid output fence languages",
@@ -1290,7 +1286,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
                 "README phase includes a summary block for runtime count validation.",
                 "README phase is missing the documented summary block required for runtime count validation.",
                 category="readme",
-                code="readme.v2.phase.summary",
+                code="readme.phase.summary",
                 details=[detail("Phase title", phase_doc.title)],
             )
         )
@@ -1357,30 +1353,21 @@ def validate_canonical_readme_structure(context: ValidationContext) -> list[dict
     runner_phase_ids = [phase.readme_phase_id for phase in context.lab.phases if phase.readme_phase_id]
     readme_phase_ids = [phase.id for phase in document.phases if phase.id]
     assertions: list[dict[str, Any]] = [
-        assert_equal(
-            document.schema_version,
-            V2_SCHEMA_VERSION,
-            "README declares schema version v2.",
-            f"README does not declare schema version {V2_SCHEMA_VERSION}.",
-            category="readme",
-            code="readme.v2.schema_version",
-            details=[detail("Declared schema version", document.schema_version or "(missing)")],
-        ),
         assert_condition(
             bool(document.h1_title),
             "README contains one top-level H1 title.",
             "README is missing the top-level H1 title.",
             category="readme",
-            code="readme.v2.h1.present",
+            code="readme.h1.present",
             details=[detail("H1 title", document.h1_title or "(missing)")],
         ),
         assert_equal(
             actual_h2,
             expected_h2,
-            "README H2 sections match the canonical v2 sequence.",
-            "README H2 sections do not match the canonical v2 sequence.",
+            "README H2 sections match the canonical sequence.",
+            "README H2 sections do not match the canonical sequence.",
             category="readme",
-            code="readme.v2.h2_sequence",
+            code="readme.h2_sequence",
             details=[
                 detail("Expected H2 sequence", " -> ".join(expected_h2)),
                 detail("Actual H2 sequence", " -> ".join(actual_h2) or "(none)"),
@@ -1391,7 +1378,7 @@ def validate_canonical_readme_structure(context: ValidationContext) -> list[dict
             "README lab implementation phases follow the required baseline-to-final flow.",
             f"README lab implementation phases do not follow the required baseline-to-final flow: {sequence_message}",
             category="readme",
-            code="readme.v2.phase_sequence",
+            code="readme.phase_sequence",
             details=[
                 detail("Phase ids", ", ".join(phase.id for phase in document.phases) or "(none)"),
             ],
@@ -1402,7 +1389,7 @@ def validate_canonical_readme_structure(context: ValidationContext) -> list[dict
             "Automated lab phases align with the README phase ids.",
             "Automated lab phases do not align with the README phase ids.",
             category="readme",
-            code="readme.v2.phase_mapping.sequence",
+            code="readme.phase_mapping.sequence",
             details=[
                 detail("README phase ids", ", ".join(readme_phase_ids) or "(none)"),
                 detail("Automated phase ids", ", ".join(runner_phase_ids) or "(none)"),

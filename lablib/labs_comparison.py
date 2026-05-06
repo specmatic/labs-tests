@@ -249,8 +249,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     console_blocks = [block for block in code_blocks if looks_like_console_block(block)]
     shell_console_sections = build_shell_console_sections(headings, shell_console_blocks)
     os_documentation = analyze_readme_os_documentation(upstream_readme_text, headings, code_blocks)
-    if readme_doc.is_v2:
-        os_documentation = normalize_v2_os_documentation(os_documentation, readme_doc)
+    os_documentation = normalize_v2_os_documentation(os_documentation, readme_doc)
     video_links = detect_video_links(readme_doc)
     # Check if "Overview Video" H3 section exists
     video_section_text, _ = extract_overview_video_section(upstream_readme_text, readme_doc.headings)
@@ -384,7 +383,6 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "hasOverviewVideoSection": has_overview_video_section,
             "unexpectedH2": unexpected_h2,
             "sharedH2OrderMatches": shared_h2_matches,
-            "schemaVersion": readme_doc.schema_version or "legacy",
         },
         "warnings": {
             "additionalArtifacts": additional_artifacts,
@@ -4681,7 +4679,7 @@ def build_test_count_consistency_profile(
         phase_path = phase_artifact_root(snapshot_root, phase)
         console_summary = extract_phase_command_log_summary(phase_path) or extract_tests_run_summary(phase.get("consoleSnippet", ""))
         spec_phase = spec_phases[index] if index < len(spec_phases) else None
-        readme_phase = readme_doc.phase_by_id(getattr(spec_phase, "readme_phase_id", None)) if getattr(readme_doc, "is_v2", False) else None
+        readme_phase = readme_doc.phase_by_id(getattr(spec_phase, "readme_phase_id", None))
         selected_summary = (
             select_readme_summary_for_v2_phase(readme_phase, spec_phase)
             if readme_phase is not None

@@ -24,23 +24,20 @@ class ReadmeSchemaTest(unittest.TestCase):
     def test_h2_yaml_file_is_the_single_source_of_truth(self) -> None:
         self.assertEqual(CANONICAL_README_H2_SEQUENCE, load_h2_sequence())
 
-    def test_quick_start_api_testing_v2_readme_parses(self) -> None:
+    def test_quick_start_api_testing_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "quick-start-api-testing" / "README.md").read_text(encoding="utf-8"))
-        self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "intermediate", "final"])
 
-    def test_external_examples_v2_readme_parses(self) -> None:
+    def test_external_examples_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "external-examples" / "README.md").read_text(encoding="utf-8"))
-        self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "studio", "final"])
         self.assertFalse(document.metadata["reports"]["ctrf"])
         self.assertFalse(document.metadata["reports"]["html"])
 
-    def test_partial_examples_v2_readme_parses(self) -> None:
+    def test_partial_examples_readme_parses(self) -> None:
         document = parse_readme_document((LABS_ROOT / "partial-examples" / "README.md").read_text(encoding="utf-8"))
-        self.assertTrue(document.is_v2)
         self.assertEqual(document.h2_titles, list(CANONICAL_README_H2_SEQUENCE))
         self.assertEqual([phase.id for phase in document.phases], ["baseline", "studio", "final"])
         self.assertFalse(document.metadata["reports"]["ctrf"])
@@ -48,7 +45,6 @@ class ReadmeSchemaTest(unittest.TestCase):
 
     def test_v2_phase_requires_shell_fences(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -96,11 +92,10 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertIn("readme.v2.phase.command_fences", failures)
+        self.assertIn("readme.phase.command_fences", failures)
 
     def test_v2_phase_requires_following_terminaloutput_in_same_phase(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -154,11 +149,10 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertIn("readme.v2.phase.outputs", failures)
+        self.assertIn("readme.phase.outputs", failures)
 
     def test_v2_phase_allows_skipped_teardown_command_without_terminaloutput(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -209,11 +203,10 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertNotIn("readme.v2.phase.outputs", failures)
+        self.assertNotIn("readme.phase.outputs", failures)
 
     def test_v2_phase_requires_shell_for_skipped_teardown_command(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -264,12 +257,11 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertIn("readme.v2.phase.command_fences", failures)
-        self.assertNotIn("readme.v2.phase.outputs", failures)
+        self.assertIn("readme.phase.command_fences", failures)
+        self.assertNotIn("readme.phase.outputs", failures)
 
     def test_v2_phase_allows_service_startup_command_without_terminaloutput(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -314,11 +306,10 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertNotIn("readme.v2.phase.outputs", failures)
+        self.assertNotIn("readme.phase.outputs", failures)
 
     def test_v2_phase_rejects_terminaloutput_casing_variants(self) -> None:
         readme_text = """---
-lab_schema: v2
 reports:
   ctrf: false
   html: false
@@ -366,7 +357,7 @@ Text
 Text
 """
         failures = self._phase_failures(readme_text, "baseline")
-        self.assertIn("readme.v2.phase.output_fences", failures)
+        self.assertIn("readme.phase.output_fences", failures)
 
     def test_command_output_validation_rejects_bare_command_fences(self) -> None:
         readme_text = """# Sample Lab
