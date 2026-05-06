@@ -110,7 +110,7 @@ def build_lab_command() -> list[str]:
             "specmatic/enterprise:latest",
             "backward-compatibility-check",
             "--base-branch",
-            "origin/main",
+            "refs/remotes/origin/main",
             "--target-path",
             "backward-compatibility-testing/products.yaml",
         ]
