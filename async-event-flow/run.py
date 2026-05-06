@@ -122,7 +122,6 @@ def build_lab_spec() -> LabSpec:
         ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
-        failure_diagnostics=capture_failure_diagnostics,
     )
 
 
@@ -184,35 +183,6 @@ def cleanup_stale_contract_checkout() -> None:
     # A partially created checkout under .specmatic/repos/labs-contracts can leave
     # Git metadata without a valid HEAD, which makes later run-suite executions fail.
     shutil.rmtree(CONTRACT_REPO_DIR, ignore_errors=True)
-
-
-def capture_failure_diagnostics(context: ValidationContext, phase_result: dict[str, object]) -> None:
-    docker_logs_dir = context.target_dir / "docker-logs"
-    docker_logs_dir.mkdir(parents=True, exist_ok=True)
-    for container_name in diagnostic_container_names():
-        log_result = subprocess.run(
-            ["docker", "logs", container_name],
-            check=False,
-            text=True,
-            capture_output=True,
-        )
-        combined_output = log_result.stdout
-        if log_result.stderr:
-            combined_output = f"{combined_output}\n{log_result.stderr}" if combined_output else log_result.stderr
-        if not combined_output.strip():
-            combined_output = f"(no logs captured for container {container_name})\n"
-        (docker_logs_dir / f"{container_name}.log").write_text(combined_output, encoding="utf-8")
-
-
-def diagnostic_container_names() -> list[str]:
-    names = list(CONTAINER_NAMES)
-    ps_result = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}"],
-        check=False,
-        text=True,
-        capture_output=True,
-    )
-    return names
 
 
 def set_accept_baseline(content: str) -> str:

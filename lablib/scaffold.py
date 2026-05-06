@@ -107,7 +107,6 @@ class LabSpec:
     )
     clear_reports: Callable[["LabSpec"], None] | None = None
     post_phase_cleanup: Callable[["LabSpec"], None] | None = None
-    failure_diagnostics: Callable[["ValidationContext", dict[str, Any]], None] | None = None
     runtime_warnings: tuple[str, ...] = ()
     known_limitations: tuple[str, ...] = ()
     intentional_differences: tuple[str, ...] = ()
@@ -273,6 +272,45 @@ def docker_compose_down(spec: LabSpec, *compose_args: str) -> CommandResult:
     return run_command(["docker", "compose", *compose_args], spec.upstream_lab)
 
 
+def collect_default_phase_diagnostics(context: ValidationContext) -> None:
+    compose_file = context.lab.upstream_lab / "docker-compose.yaml"
+    if not compose_file.exists():
+        return
+
+    diagnostics_dir = context.target_dir / "docker-logs"
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+
+    ps_result = run_command(
+        ["docker", "compose", "ps", "-a"],
+        context.lab.upstream_lab,
+        stream_output=False,
+        timeout_seconds=60,
+    )
+    ps_text = ps_result.combined_output or "(no docker compose ps output captured)\n"
+    write_text(diagnostics_dir / "docker-compose-ps.txt", ps_text)
+
+    container_names_result = run_command(
+        ["docker", "compose", "ps", "-a", "--format", "{{.Name}}"],
+        context.lab.upstream_lab,
+        stream_output=False,
+        timeout_seconds=60,
+    )
+    container_names = [name.strip() for name in container_names_result.stdout.splitlines() if name.strip()]
+    if not container_names:
+        write_text(diagnostics_dir / "docker-compose.log", "(no docker compose containers found for this phase)\n")
+        return
+
+    for container_name in container_names:
+        logs_result = run_command(
+            ["docker", "logs", container_name],
+            context.lab.upstream_lab,
+            stream_output=False,
+            timeout_seconds=120,
+        )
+        combined_output = logs_result.combined_output or f"(no logs captured for container {container_name})\n"
+        write_text(diagnostics_dir / f"{container_name}.log", combined_output)
+
+
 def clear_docker_owned_build_dir(spec: LabSpec) -> None:
     docker_compose_down(spec, "down", "-v")
     build_dir = spec.upstream_lab / "build"
@@ -314,6 +352,18 @@ def execute_phase(
             "durationSeconds": round(result.duration_seconds, 2),
         }
         phase_result = build_missing_artifact_phase_result(spec, phase, target_dir, command_info, exc)
+        context = ValidationContext(
+            lab=spec,
+            phase=phase,
+            target_dir=target_dir,
+            command_result=result,
+            executed_command=phase_command,
+            readme_text=readme_text,
+            readme_doc=readme_doc,
+            artifacts={"command.log": {"path": target_dir / "command.log", "text": result.combined_output, "kind": "text"}},
+            original_files=original_files,
+        )
+        collect_default_phase_diagnostics(context)
         return phase_result
 
     write_text(target_dir / "command.log", result.combined_output)
@@ -331,8 +381,7 @@ def execute_phase(
     )
     try:
         phase_result = build_phase_result(context)
-        if phase_result["status"] == "failed" and spec.failure_diagnostics is not None:
-            spec.failure_diagnostics(context, phase_result)
+        collect_default_phase_diagnostics(context)
         return phase_result
     finally:
         if spec.post_phase_cleanup is not None:
