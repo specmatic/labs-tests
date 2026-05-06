@@ -68,6 +68,8 @@ def run_backward_compatibility_check(repo_root: Path, base_revision: str) -> int
         "docker",
         "run",
         "--rm",
+        "--entrypoint",
+        "sh",
         "-v",
         f"{repo_root}:/workspace",
     ]
@@ -124,7 +126,6 @@ def run_container_git_preflight(repo_root: Path, base_revision: str) -> None:
             "-w",
             "/workspace",
             "specmatic/enterprise:latest",
-            "sh",
             "-lc",
             (
                 "pwd; "
