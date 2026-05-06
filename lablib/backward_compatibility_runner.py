@@ -23,6 +23,7 @@ def main() -> int:
         temp_repo.mkdir(parents=True, exist_ok=True)
         base_revision = prepare_temp_repo(temp_repo)
         run_git_preflight(temp_repo, base_revision)
+        run_container_git_preflight(temp_repo, base_revision)
         return run_backward_compatibility_check(temp_repo, base_revision)
     finally:
         shutil.rmtree(temp_repo, ignore_errors=True)
@@ -104,6 +105,46 @@ def run_git_preflight(repo_root: Path, base_revision: str) -> None:
         print(diff_output, flush=True)
     else:
         print("[preflight] (no diff output)", flush=True)
+
+
+def run_container_git_preflight(repo_root: Path, base_revision: str) -> None:
+    print("[preflight] Verifying git visibility inside container...", flush=True)
+    license_file = UPSTREAM_LABS / "license.txt"
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{repo_root}:/workspace",
+    ]
+    if license_file.exists():
+        command.extend(["-v", f"{license_file}:/specmatic/specmatic-license.txt:ro"])
+    command.extend(
+        [
+            "-w",
+            "/workspace",
+            "specmatic/enterprise:latest",
+            "sh",
+            "-lc",
+            (
+                "pwd; "
+                "git rev-parse --show-toplevel; "
+                "git rev-parse HEAD; "
+                f"git cat-file -t {base_revision}; "
+                f"git diff {base_revision} HEAD --name-status"
+            ),
+        ]
+    )
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(f"[preflight:container] {line}", end="", flush=True)
+    exit_code = process.wait()
+    if exit_code != 0:
+        raise RuntimeError(
+            "Container git preflight failed. The mounted /workspace repo could not resolve the base revision "
+            f"{base_revision}."
+        )
 
 
 def git(args: list[str], *, cwd: Path) -> None:
