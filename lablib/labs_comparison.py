@@ -427,23 +427,107 @@ def extract_license_source_from_text(text: str) -> str:
 
 
 def describe_license_delivery(mode: str, source: str, command_display: str) -> str:
+    wrapper_note = ""
+    normalized = command_display.strip()
+    if normalized.startswith("python3 ") and "/lablib/" in normalized and normalized.endswith("_runner.py"):
+        wrapper_note = " Runtime was invoked via a Python wrapper, which then ran Docker Compose."
+    if mode == "not-applicable":
+        return "No Specmatic runtime was observed for this phase, so license detection is not applicable." + wrapper_note
     if mode == "enterprise":
         if source == "/specmatic/specmatic-license.txt":
-            return "Docker-mounted enterprise license file from sibling labs/license.txt to /specmatic/specmatic-license.txt."
+            return (
+                "Docker-mounted enterprise license file from sibling labs/license.txt to "
+                f"/specmatic/specmatic-license.txt.{wrapper_note}"
+            )
         if source:
-            return f"Docker-provided enterprise license source: {source}."
-        return "Enterprise license detected, but the container-side source path was not parsed."
+            return f"Docker-provided enterprise license source: {source}.{wrapper_note}"
+        return "Enterprise license detected, but the container-side source path was not parsed." + wrapper_note
     if mode == "trial":
         if source.startswith("jar:file:"):
-            return "Bundled trial license from the enterprise image JAR."
+            return "Bundled trial license from the enterprise image JAR." + wrapper_note
         if source:
-            return f"Trial license detected from container-side source: {source}."
-        return "Trial license detected, but the container-side source path was not parsed."
+            return f"Trial license detected from container-side source: {source}.{wrapper_note}"
+        return "Trial license detected, but the container-side source path was not parsed." + wrapper_note
     if mode == "oss":
         if "specmatic/specmatic" in command_display:
-            return "OSS Docker image (`specmatic/specmatic`) used; no enterprise license file expected."
-        return "OSS/core-only runtime detected; no enterprise license file expected."
-    return "Could not determine how the license was provided from the available Docker artifacts."
+            return "OSS Docker image (`specmatic/specmatic`) used; no enterprise license file expected." + wrapper_note
+        return "OSS/core-only runtime detected; no enterprise license file expected." + wrapper_note
+    return "Could not determine how the license was provided from the available Docker artifacts." + wrapper_note
+
+
+def license_evidence_candidates(phase_dir: Path) -> list[tuple[Path, str]]:
+    candidates: list[tuple[Path, str]] = []
+    command_log = phase_dir / "command.log"
+    if command_log.exists():
+        candidates.append((command_log, command_log.read_text(encoding="utf-8", errors="ignore")))
+    for path in sorted(phase_dir.rglob("*.log")):
+        if path == command_log:
+            continue
+        candidates.append((path, path.read_text(encoding="utf-8", errors="ignore")))
+    return candidates
+
+
+def extract_specmatic_compose_targets(compose_file: Path) -> set[str]:
+    if not compose_file.exists():
+        return set()
+    lines = compose_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+    in_services = False
+    current_service: str | None = None
+    current_indent = 0
+    targets: set[str] = set()
+    current_container_name: str | None = None
+    image_is_specmatic = False
+    for raw_line in lines:
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if stripped == "services:":
+            in_services = True
+            current_service = None
+            continue
+        if not in_services:
+            continue
+        if indent == 2 and stripped.endswith(":"):
+            if current_service and image_is_specmatic:
+                targets.add(current_service)
+                if current_container_name:
+                    targets.add(current_container_name)
+            current_service = stripped[:-1].strip()
+            current_container_name = None
+            image_is_specmatic = False
+            current_indent = indent
+            continue
+        if current_service is None or indent <= current_indent:
+            continue
+        if stripped.startswith("image:"):
+            image_value = stripped.split(":", 1)[1].strip().strip("'\"")
+            if "specmatic/" in image_value.lower():
+                image_is_specmatic = True
+        elif stripped.startswith("container_name:"):
+            current_container_name = stripped.split(":", 1)[1].strip().strip("'\"")
+    if current_service and image_is_specmatic:
+        targets.add(current_service)
+        if current_container_name:
+            targets.add(current_container_name)
+    return {target for target in targets if target}
+
+
+def phase_observed_specmatic_runtime(phase_dir: Path, compose_targets: set[str], candidates: list[tuple[Path, str]]) -> bool:
+    lowered_targets = {target.lower() for target in compose_targets}
+    for path, text in candidates:
+        lower_stem = path.stem.lower()
+        if lower_stem in lowered_targets:
+            return True
+        lowered = text.lower()
+        if "using specmatic " in lowered or "specmatic enterprise v" in lowered or "specmatic core v" in lowered:
+            return True
+        for line in lowered.splitlines():
+            prefix, sep, _ = line.partition("|")
+            if sep and prefix.strip() in lowered_targets:
+                return True
+    return False
 
 
 def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -465,12 +549,23 @@ def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[st
         }
 
     modes: list[str] = []
+    compose_targets = extract_specmatic_compose_targets(spec.upstream_lab / "docker-compose.yaml")
     for phase in getattr(spec, "phases", ()):
         phase_dir = snapshot_root / snapshot_phase_dir_name(phase)
-        command_log = phase_dir / "command.log"
-        text = command_log.read_text(encoding="utf-8", errors="ignore") if command_log.exists() else ""
-        mode = detect_license_mode_from_text(text)
-        source = extract_license_source_from_text(text)
+        candidates = license_evidence_candidates(phase_dir)
+        evidence_path = f"{phase_dir.name}/command.log"
+        mode = "unknown"
+        source = ""
+        for path, text in candidates:
+            mode = detect_license_mode_from_text(text)
+            source = extract_license_source_from_text(text)
+            if mode != "unknown":
+                evidence_path = str(path.relative_to(snapshot_root))
+                break
+        observed_specmatic_runtime = phase_observed_specmatic_runtime(phase_dir, compose_targets, candidates)
+        if mode == "unknown" and not observed_specmatic_runtime:
+            mode = "not-applicable"
+            evidence_path = "(not applicable)"
         snapshot_phase = snapshot_phase_map.get(str(getattr(phase, "name", "")), {})
         command_display = ""
         if isinstance(snapshot_phase, dict):
@@ -481,17 +576,17 @@ def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[st
             {
                 "phase": str(getattr(phase, "name", phase_dir.name)),
                 "mode": mode,
-                "status": "Pass" if mode != "unknown" else "Fail",
-                "path": str(command_log.relative_to(snapshot_root)) if command_log.exists() else f"{phase_dir.name}/command.log",
+                "status": "Not Applicable" if mode == "not-applicable" else ("Pass" if mode != "unknown" else "Fail"),
+                "path": evidence_path,
                 "dockerCommand": command_display or "(not recorded)",
                 "source": source or "(not detected)",
                 "notes": evidence,
             }
         )
 
-    known_modes = [mode for mode in modes if mode != "unknown"]
+    known_modes = [mode for mode in modes if mode not in {"unknown", "not-applicable"}]
     unique_modes = sorted(set(known_modes))
-    if not known_modes:
+    if not known_modes and any(mode == "unknown" for mode in modes):
         return {
             "available": True,
             "consistent": False,
@@ -499,7 +594,15 @@ def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[st
             "message": "No recognizable Specmatic license signal was detected in the executed phase logs.",
             "rows": rows,
         }
-    if len(unique_modes) > 1 or len(known_modes) != len(modes):
+    if not known_modes and all(mode == "not-applicable" for mode in modes):
+        return {
+            "available": True,
+            "consistent": True,
+            "detectedMode": "not-applicable",
+            "message": "No executed phase in this lab started a Specmatic runtime, so license detection was not applicable.",
+            "rows": rows,
+        }
+    if len(unique_modes) > 1 or any(mode == "unknown" for mode in modes):
         return {
             "available": True,
             "consistent": False,

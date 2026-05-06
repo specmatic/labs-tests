@@ -3,14 +3,17 @@ from __future__ import annotations
 import unittest
 import importlib.util
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 
 from lablib.labs_comparison import (
     analyze_readme_os_documentation,
+    build_license_profile,
     build_lab_profile,
     build_count_cell,
     describe_license_delivery,
     detect_license_mode_from_text,
+    extract_specmatic_compose_targets,
     extract_license_source_from_text,
     extract_fenced_code_blocks,
     extract_headings,
@@ -292,6 +295,102 @@ tags:
             "OSS Docker image",
             describe_license_delivery("oss", "", "docker run specmatic/specmatic:latest validate"),
         )
+        self.assertIn(
+            "not applicable",
+            describe_license_delivery("not-applicable", "", ""),
+        )
+
+    def test_extract_specmatic_compose_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            compose_file = Path(tmp) / "docker-compose.yaml"
+            compose_file.write_text(
+                """
+services:
+  consumer:
+    image: python:3.14-alpine
+  mock:
+    container_name: quick-start-mock-server
+    image: specmatic/enterprise:latest
+  studio:
+    image: specmatic/enterprise:latest
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                extract_specmatic_compose_targets(compose_file),
+                {"mock", "studio", "quick-start-mock-server"},
+            )
+
+    def test_build_license_profile_falls_back_to_compose_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream_lab = root / "lab"
+            upstream_lab.mkdir()
+            (upstream_lab / "docker-compose.yaml").write_text(
+                """
+services:
+  camelCaseService:
+    container_name: camel-case-service
+    image: specmatic/enterprise:latest
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            phase_dir = root / "baseline"
+            phase_dir.mkdir(parents=True)
+            (phase_dir / "build" / "data-adapters").mkdir(parents=True)
+            (phase_dir / "command.log").write_text("python3 wrapper.py\n", encoding="utf-8")
+            (phase_dir / "build" / "data-adapters" / "compose.log").write_text(
+                "camel-case-service | Using Specmatic Trial license initialized from jar:file:/usr/local/share/enterprise/enterprise.jar!/specmatic-default-trial-license.txt\n",
+                encoding="utf-8",
+            )
+            spec = SimpleNamespace(
+                upstream_lab=upstream_lab,
+                phases=(SimpleNamespace(name="Baseline mismatch", output_dir_name="baseline"),),
+            )
+            snapshot = {"root": root, "phases": [{"name": "Baseline mismatch", "command": {"display": "python3 wrapper.py"}}]}
+            profile = build_license_profile(spec, snapshot)
+            self.assertTrue(profile["consistent"])
+            self.assertEqual(profile["detectedMode"], "trial")
+            self.assertEqual(profile["rows"][0]["status"], "Pass")
+            self.assertIn("compose.log", profile["rows"][0]["path"])
+
+    def test_build_license_profile_marks_non_specmatic_phase_not_applicable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream_lab = root / "lab"
+            upstream_lab.mkdir()
+            (upstream_lab / "docker-compose.yaml").write_text(
+                """
+services:
+  consumer:
+    container_name: quick-start-mock-consumer
+    image: python:3.14-alpine
+  mock:
+    container_name: quick-start-mock-server
+    image: specmatic/enterprise:latest
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            phase_dir = root / "baseline"
+            phase_dir.mkdir(parents=True)
+            (phase_dir / "command.log").write_text("python3 wrapper.py\n", encoding="utf-8")
+            (phase_dir / "docker-logs").mkdir(parents=True)
+            (phase_dir / "docker-logs" / "quick-start-mock-consumer.log").write_text(
+                "serving http on 0.0.0.0 port 8081\n",
+                encoding="utf-8",
+            )
+            spec = SimpleNamespace(
+                upstream_lab=upstream_lab,
+                phases=(SimpleNamespace(name="Baseline mismatch", output_dir_name="baseline"),),
+            )
+            snapshot = {"root": root, "phases": [{"name": "Baseline mismatch", "command": {"display": "python3 wrapper.py"}}]}
+            profile = build_license_profile(spec, snapshot)
+            self.assertTrue(profile["consistent"])
+            self.assertEqual(profile["detectedMode"], "not-applicable")
+            self.assertEqual(profile["rows"][0]["status"], "Not Applicable")
 
 
 if __name__ == "__main__":

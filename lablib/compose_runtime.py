@@ -84,19 +84,17 @@ def rewrite_compose_file(source: Path, destination: Path, service_ports: dict[st
             block.append(lines[i])
             i += 1
 
-        if service in service_ports:
-            output.extend(rewrite_service_block(block, service_ports[service]))
-        else:
-            output.extend(block)
+        output.extend(rewrite_service_block(block, service_ports.get(service), source.parent))
     destination.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
-def rewrite_service_block(block: list[str], ports: dict[int, int]) -> list[str]:
+def rewrite_service_block(block: list[str], ports: dict[int, int] | None, compose_dir: Path) -> list[str]:
     output: list[str] = []
     i = 0
+    in_volumes = False
     while i < len(block):
         line = block[i]
-        if line.startswith("    ports:"):
+        if line.startswith("    ports:") and ports is not None:
             output.append("    ports:")
             for container_port, host_port in ports.items():
                 output.append(f'      - "{host_port}:{container_port}"')
@@ -104,6 +102,32 @@ def rewrite_service_block(block: list[str], ports: dict[int, int]) -> list[str]:
             while i < len(block) and block[i].startswith("      "):
                 i += 1
             continue
+        if line.startswith("    volumes:"):
+            in_volumes = True
+            output.append(line)
+            i += 1
+            continue
+        if in_volumes and line.startswith("      - "):
+            output.append(normalize_volume_line(line, compose_dir))
+            i += 1
+            continue
+        if in_volumes and not line.startswith("      "):
+            in_volumes = False
         output.append(line)
         i += 1
     return output
+
+
+def normalize_volume_line(line: str, compose_dir: Path) -> str:
+    prefix = "      - "
+    value = line[len(prefix) :].strip()
+    if value.startswith("{") or value.startswith("["):
+        return line
+    if ":" not in value:
+        return line
+    source, remainder = value.split(":", 1)
+    stripped = source.strip().strip("\"'")
+    if stripped.startswith("./") or stripped.startswith("../"):
+        absolute_source = (compose_dir / stripped).resolve()
+        return f"{prefix}{absolute_source}:{remainder}"
+    return line
