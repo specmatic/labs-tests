@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import os
 import queue
@@ -43,7 +43,7 @@ def run_command(
     timeout_seconds: float | None = None,
     idle_timeout_seconds: float | None = None,
 ) -> CommandResult:
-    started = datetime.now(UTC)
+    started = datetime.now(timezone.utc)
     process_env = os.environ.copy()
     if env:
         process_env.update(env)
@@ -56,7 +56,7 @@ def run_command(
             check=False,
             env=process_env,
         )
-        finished = datetime.now(UTC)
+        finished = datetime.now(timezone.utc)
         return CommandResult(
             command=list(command),
             cwd=str(cwd),
@@ -136,7 +136,7 @@ def run_command(
     if timed_out:
         exit_code = 124
         stderr_lines.append(f"{timeout_reason}\n")
-    finished = datetime.now(UTC)
+    finished = datetime.now(timezone.utc)
     return CommandResult(
         command=list(command),
         cwd=str(cwd),

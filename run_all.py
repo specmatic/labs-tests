@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from html import escape
 import json
 import os
@@ -326,7 +326,7 @@ def write_run_metadata() -> None:
     lines.extend(
         f"{label}: {value}" for label, value in metadata.items() if value
     )
-    lines.append(f"Generated at (UTC): {datetime.now(UTC).isoformat()}")
+    lines.append(f"Generated at (UTC): {datetime.now(timezone.utc).isoformat()}")
     RUN_METADATA_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

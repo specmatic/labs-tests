@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from html import escape
 import json
 from pathlib import Path
@@ -850,7 +850,7 @@ def build_report(
     readme_href = f"https://github.com/specmatic/labs/blob/main/{lab_path.name}/README.md"
 
     return {
-        "generatedAt": datetime.now(UTC).isoformat(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
         "provenance": detect_report_provenance(),
         "status": overall_status,
         "lab": {
