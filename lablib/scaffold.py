@@ -26,7 +26,6 @@ from lablib.readme_schema import (
     command_fence_languages,
     expected_h2_titles_for_document,
     parse_readme_document,
-    parse_required_implementation_phases,
     phase_sequence_is_valid,
     validate_external_link,
     validate_internal_link,
@@ -1057,8 +1056,8 @@ def evaluate_runtime_summary_drift(context: ValidationContext) -> list[dict[str,
     counts_enabled = bool(context.readme_doc.metadata.get("test_counts", True))
     expect_ctrf = bool(global_reports.get("ctrf", False))
     expect_html = bool(global_reports.get("html", False))
-    expect_readme_summary = counts_enabled and bool(global_reports.get("readme_summary", False))
-    expect_console_summary = counts_enabled and bool(global_reports.get("console_summary", False))
+    expect_readme_summary = counts_enabled
+    expect_console_summary = counts_enabled
     if not any((expect_ctrf, expect_html, expect_readme_summary, expect_console_summary)):
         has_report_artifacts = (
             "ctrf-report.json" in context.artifacts
@@ -1351,9 +1350,7 @@ def validate_canonical_readme_structure(context: ValidationContext) -> list[dict
     document = context.readme_doc
     actual_h2 = document.h2_titles
     expected_h2 = list(expected_h2_titles_for_document(document))
-    # Get phase IDs from global config
-    phase_ids = document.metadata.get("phases", [])
-    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, phase_ids)
+    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, list(ALLOWED_PHASE_KINDS))
     runner_phase_ids = [phase.readme_phase_id for phase in context.lab.phases if phase.readme_phase_id]
     readme_phase_ids = [phase.id for phase in document.phases if phase.id]
     assertions: list[dict[str, Any]] = [

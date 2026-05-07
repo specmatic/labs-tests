@@ -29,7 +29,6 @@ from lablib.readme_schema import (
     expected_h2_titles_for_document,
     extract_overview_video_section,
     parse_readme_document,
-    parse_required_implementation_phases,
     phase_sequence_is_valid,
     validate_external_link,
 )
@@ -261,44 +260,22 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     )
     report_snapshot = load_lab_report_snapshot(spec.name)
     license_profile = build_license_profile(spec, report_snapshot)
-    readme_efm = readme_doc.metadata.get("expected_failure_mismatch", False)
-    readme_efm_reason = readme_doc.metadata.get("expected_failure_mismatch_reason", "")
     readme_test_counts = bool(readme_doc.metadata.get("test_counts", True))
-    effective_efm = spec.expected_failure_mismatch or bool(readme_efm)
-    effective_efm_reason = spec.expected_failure_mismatch_reason or readme_efm_reason
     test_count_consistency = build_test_count_consistency_profile(
         spec,
         readme_doc,
         report_snapshot,
         test_counts_enabled=readme_test_counts,
-        expected_failure_mismatch=effective_efm,
-        expected_failure_mismatch_reason=effective_efm_reason,
+        expected_failure_mismatch=spec.expected_failure_mismatch,
+        expected_failure_mismatch_reason=spec.expected_failure_mismatch_reason,
     )
     override = get_lab_readme_override(spec.name)
     required_h2 = list(expected_h2_titles_for_document(readme_doc))
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
     shared_h2_matches = h2_headings == required_h2
 
-    # Helper function to parse report metadata with backward compatibility
-    def parse_report_metadata(report_metadata: Any) -> dict[str, bool]:
-        """
-        Parse report metadata, supporting both old boolean and new object formats.
-
-        Old format: ctrf: true
-        New format: ctrf: { expected: true, expected_failure: false }
-        """
-        if isinstance(report_metadata, bool):
-            # Old format: ctrf: true
-            return {"expected": report_metadata, "expected_failure": False}
-        elif isinstance(report_metadata, dict):
-            # New format: ctrf: { expected: true, expected_failure: false }
-            return {
-                "expected": report_metadata.get("expected", False),
-                "expected_failure": report_metadata.get("expected_failure", False)
-            }
-        else:
-            # Default
-            return {"expected": False, "expected_failure": False}
+    def parse_report_expected(report_metadata: Any) -> bool:
+        return report_metadata if isinstance(report_metadata, bool) else False
 
     # Create mapping from phase id to readme_doc phase metadata
     phase_metadata_map = {
@@ -307,8 +284,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
     }
     defaults_from_readme = readme_doc.metadata.get("reports", {})
 
-    # Parse required_implementation_phases from README frontmatter
-    required_phase_kinds = parse_required_implementation_phases(readme_doc.metadata)
+    required_phase_kinds = list(DEFAULT_REQUIRED_PHASES)
 
     return {
         "name": spec.name,
@@ -326,12 +302,16 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
                 "expectedConsolePhrases": list(phase.expected_console_phrases),
                 "artifactLabels": [artifact.label for artifact in phase.artifact_specs],
                 "expectedReports": {
-                    "ctrf": parse_report_metadata(
+                    "ctrf": {
+                        "expected": parse_report_expected(
                         phase_metadata_map.get(phase.name, {}).get("ctrf", defaults_from_readme.get("ctrf", False))
-                    ),
-                    "html": parse_report_metadata(
+                        ),
+                    },
+                    "html": {
+                        "expected": parse_report_expected(
                         phase_metadata_map.get(phase.name, {}).get("html", defaults_from_readme.get("html", False))
-                    ),
+                        ),
+                    },
                 },
             }
             for phase in spec.phases
@@ -367,7 +347,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             "h2Count": len(h2_headings),
             "h3Count": len(h3_headings),
             "phaseIds": [phase.id for phase in readme_doc.phases],
-            "requiredPhases": readme_doc.metadata.get("required_phases", list(DEFAULT_REQUIRED_PHASES)),
+            "requiredPhases": list(DEFAULT_REQUIRED_PHASES),
             "shellConsoleBlockCount": len(shell_console_blocks),
             "consoleBlockCount": len(console_blocks),
             "hasAtLeastTwoShellConsoleBlocks": len(shell_console_blocks) >= 2,
@@ -705,12 +685,6 @@ def detect_video_links(readme_doc: Any) -> list[dict[str, str]]:
 
 
 def overview_video_is_optional(readme_doc: Any) -> bool:
-    metadata = readme_doc.metadata or {}
-    optional_components = metadata.get("optional_components", {}) or {}
-    if isinstance(optional_components, dict) and "overview_video" in optional_components:
-        return bool(optional_components.get("overview_video"))
-    if "overview_video_optional" in metadata:
-        return bool(metadata.get("overview_video_optional"))
     return False
 
 
@@ -1232,69 +1206,21 @@ def build_differences(labs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def check_expected_failure(lab: dict[str, Any], artifact_label: str, report_key: str) -> bool | str:
-    """
-    Check if an artifact passes validation, considering expected_failure.
-
-    Returns:
-    - True: Normal pass (report produced when expected, or not required)
-    - False: Normal fail (report missing when expected, or produced when marked as expected_failure)
-    - "expected_failure_pass": Special pass (! icon) when report not produced but marked as expected_failure
-
-    Args:
-        lab: Lab profile dictionary
-        artifact_label: The artifact file name (e.g., "ctrf-report.json")
-        report_key: The report type key (e.g., "ctrf" or "html")
-    """
+def check_expected_failure(lab: dict[str, Any], artifact_label: str, report_key: str) -> bool:
     artifact_exists = artifact_label in lab["artifacts"]["generatedLabels"]
-
-    # Check if any phase has this report marked as expected_failure
-    has_expected_failure = any(
-        phase["expectedReports"][report_key]["expected_failure"]
-        for phase in lab["phases"]
-    )
-
-    if has_expected_failure:
-        # Inverted logic: report should NOT be produced
-        if artifact_exists:
-            return False  # Fail - report was produced despite expected_failure
-        else:
-            return "expected_failure_pass"  # Special pass - ! icon
-    else:
-        # Normal logic: check if report is expected and exists
-        any_expected = any(
-            phase["expectedReports"][report_key]["expected"]
-            for phase in lab["phases"]
-        )
-        return (not any_expected) or artifact_exists
-
-
-def evaluate_report_artifact_expectation(lab: dict[str, Any], artifact_label: str, report_key: str) -> dict[str, str | bool]:
-    artifact_exists = artifact_label in lab["artifacts"]["generatedLabels"]
-    has_expected_failure = any(
-        phase["expectedReports"][report_key]["expected_failure"]
-        for phase in lab["phases"]
-    )
     any_expected = any(
         phase["expectedReports"][report_key]["expected"]
         for phase in lab["phases"]
     )
+    return (not any_expected) or artifact_exists
 
-    if has_expected_failure:
-        ok = not artifact_exists
-        return {
-            "artifact": artifact_label,
-            "reportKey": report_key,
-            "expectedState": "expected_failure",
-            "actualState": "present" if artifact_exists else "missing",
-            "status": "expected" if ok else "fail",
-            "message": (
-                "Missing as expected because README metadata marks this report as expected_failure."
-                if ok
-                else "Present even though README metadata marks this report as expected_failure."
-            ),
-            "ok": ok,
-        }
+
+def evaluate_report_artifact_expectation(lab: dict[str, Any], artifact_label: str, report_key: str) -> dict[str, str | bool]:
+    artifact_exists = artifact_label in lab["artifacts"]["generatedLabels"]
+    any_expected = any(
+        phase["expectedReports"][report_key]["expected"]
+        for phase in lab["phases"]
+    )
 
     if any_expected:
         ok = artifact_exists
@@ -1333,8 +1259,6 @@ def check_report_artifact_bundle(lab: dict[str, Any]) -> bool | str:
     checks = [ctrf, html]
     if not all(bool(item["ok"]) for item in checks):
         return False
-    if any(item["status"] == "expected" for item in checks):
-        return "expected_failure_pass"
     return True
 
 
@@ -3653,18 +3577,9 @@ def render_lab_link(name: str, href: str) -> str:
 def render_validation_matrix_row(row: dict[str, Any]) -> str:
     tooltip_attrs = render_matrix_trigger_attrs(row.get("tooltip", {}), row["label"])
     cells = "".join(render_matrix_cell(cell, row["label"]) for cell in row["cells"])
-
-    # Check if any cell is an expected_failure_pass
-    has_expected_failure_pass = any(cell == "expected_failure_pass" for cell in row["cells"])
-
-    if has_expected_failure_pass:
-        status_class = "expected-failure"
-        status_text = "Pass"
-        status_symbol = "&#33;"
-    else:
-        status_class = "pass" if row.get("overallPassed") else "fail"
-        status_text = "Pass" if row.get("overallPassed") else "Failed"
-        status_symbol = "&#10003;" if row.get("overallPassed") else "&#10007;"
+    status_class = "pass" if row.get("overallPassed") else "fail"
+    status_text = "Pass" if row.get("overallPassed") else "Failed"
+    status_symbol = "&#10003;" if row.get("overallPassed") else "&#10007;"
 
     return (
         "<tr>"
@@ -3684,18 +3599,7 @@ def render_validation_matrix_row(row: dict[str, Any]) -> str:
 
 
 def render_matrix_cell(cell_value: bool | str, validation_label: str) -> str:
-    """
-    Render a validation matrix cell, handling boolean and expected_failure_pass states.
-
-    Args:
-        cell_value: True (pass), False (fail), or "expected_failure_pass" (! icon)
-        validation_label: The validation label for title/aria attributes
-    """
-    if cell_value == "expected_failure_pass":
-        symbol = "&#33;"  # Exclamation mark
-        state = "expected-failure"
-        title = "expected failure - report not produced as intended"
-    elif cell_value:
+    if cell_value:
         symbol = "&#10003;"  # Checkmark
         state = "yes"
         title = "present"
@@ -4386,48 +4290,12 @@ def build_artifact_details(labs: list[dict[str, Any]], label: str) -> dict[str, 
     for lab in labs:
         present = label in lab["artifacts"]["generatedLabels"]
 
-        # Check if this artifact has expected_failure or expected set
         expected = False
-        expected_failure = False
         if report_key:
             for phase in lab["phases"]:
                 expected = expected or phase["expectedReports"][report_key]["expected"]
-                expected_failure = expected_failure or phase["expectedReports"][report_key]["expected_failure"]
 
-        # Build sections based on state
-        if expected_failure:
-            # Expected failure case
-            if present:
-                # Report was produced despite expected_failure - this is a problem
-                lab_sections = [
-                    {
-                        "type": "bullets",
-                        "title": "Status",
-                        "tone": "attention",
-                        "items": ["Produced (marked as expected failure)"],
-                    },
-                    {
-                        "type": "bullets",
-                        "title": "Issue",
-                        "tone": "attention",
-                        "items": [f"Report {label} was produced despite being marked as expected_failure. Remove the file or update metadata."],
-                    },
-                ]
-            else:
-                # Report not produced as expected - this is correct
-                lab_sections = [
-                    {
-                        "type": "bullets",
-                        "title": "Status",
-                        "tone": "expected-failure",
-                        "items": [
-                            {
-                                "html": "<span style='font-size: 1.2em; font-weight: 700; color: #ca8a04;'>&#33;</span> Expected Failure - report not produced as intended"
-                            }
-                        ],
-                    },
-                ]
-        elif expected:
+        if expected:
             # Normal expected case
             lab_sections = [
                 {
@@ -4911,8 +4779,8 @@ def select_readme_summary_for_v2_phase(readme_phase: Any, phase_spec: Any | None
 def expected_report_sources_for_phase(readme_doc: Any, readme_phase: Any) -> dict[str, bool]:
     # Only use global settings, ignore phase-level expected_reports
     return {
-        "readme_summary": bool(readme_doc.metadata.get("reports", {}).get("readme_summary", True)),
-        "console_summary": bool(readme_doc.metadata.get("reports", {}).get("console_summary", True)),
+        "readme_summary": True,
+        "console_summary": True,
         "ctrf": bool(readme_doc.metadata.get("reports", {}).get("ctrf", True)),
         "html": bool(readme_doc.metadata.get("reports", {}).get("html", True)),
     }

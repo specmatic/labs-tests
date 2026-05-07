@@ -21,27 +21,6 @@ OPTIONAL_PHASE_KINDS = ("intermediate", "studio", "inspection", "cleanup_verific
 ALLOWED_PHASE_KINDS = DEFAULT_REQUIRED_PHASES + OPTIONAL_PHASE_KINDS
 
 
-def parse_required_implementation_phases(metadata: dict[str, Any]) -> list[str]:
-    """Parse and merge required implementation phase kinds from README metadata.
-
-    Args:
-        metadata: README frontmatter metadata dict
-
-    Returns:
-        List of required phase kinds (defaults + user-specified, no duplicates)
-    """
-    user_required = metadata.get("required_implementation_phases", [])
-
-    # Normalize to list if it's a single string
-    if isinstance(user_required, str):
-        user_required = [user_required]
-
-    # Merge: defaults + user-specified (avoiding duplicates)
-    return list(DEFAULT_REQUIRED_PHASES) + [
-        phase for phase in user_required if phase not in DEFAULT_REQUIRED_PHASES
-    ]
-
-
 @dataclass(frozen=True)
 class Heading:
     level: int
@@ -114,8 +93,7 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     headings = extract_headings(body_text)
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
-    phase_ids = metadata.get("phases") or metadata.get("required_phases") or list(ALLOWED_PHASE_KINDS)
-    phases = extract_v2_phases(body_text, headings, phase_ids)
+    phases = extract_v2_phases(body_text, headings, list(ALLOWED_PHASE_KINDS))
     links = extract_markdown_links(body_text)
 
     # Extract overview video URL from "What you will learn" > "### Overview Video" section
