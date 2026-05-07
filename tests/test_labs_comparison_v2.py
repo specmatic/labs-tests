@@ -20,6 +20,7 @@ from lablib.labs_comparison import (
     extract_tests_run_summaries,
     select_readme_summary_for_v2_phase,
     select_readme_summary_for_phase,
+    expected_report_sources_for_phase,
     test_counts_for_phase,
 )
 from lablib.readme_schema import parse_readme_document
@@ -39,6 +40,41 @@ def load_run_module(lab_name: str):
 
 
 class LabsComparisonV2Tests(unittest.TestCase):
+    def test_removed_phase_metadata_keys_are_ignored_for_phase_extraction(self) -> None:
+        readme = """---
+phases:
+  - baseline
+  - final
+required_phases:
+  - baseline
+  - final
+required_implementation_phases:
+  - studio
+---
+# Sample
+## Lab Implementation Phases
+### Baseline Phase
+```shell
+echo baseline
+```
+### Studio Phase
+```shell
+echo studio
+```
+### Final Phase
+```shell
+echo final
+```
+"""
+        document = parse_readme_document(readme)
+        self.assertEqual([phase.id for phase in document.phases], ["baseline", "studio", "final"])
+
+    def test_removed_report_summary_toggles_are_ignored(self) -> None:
+        readme_doc = SimpleNamespace(metadata={"reports": {"readme_summary": False, "console_summary": False}})
+        sources = expected_report_sources_for_phase(readme_doc, None)
+        self.assertTrue(sources["readme_summary"])
+        self.assertTrue(sources["console_summary"])
+
     def test_quick_start_api_testing_surfaces_shell_and_output_validation_fields(self) -> None:
         profile = build_lab_profile(ROOT / "quick-start-api-testing")
         self.assertTrue(profile["readme"]["allCommandBlocksUseExecutableSyntax"])
