@@ -97,32 +97,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    if not args.refresh_report and args.manage_license:
-        try:
-            resolve_license_txt_content()
-        except RuntimeError as exc:
-            setup_payload = {
-                "status": "failed",
-                "upstreamLabsPath": str(ROOT.parent / "labs"),
-                "refreshLabs": args.refresh_labs,
-                "labsBranch": args.labs_branch,
-                "manageLicense": args.manage_license,
-                "force": args.force,
-                "commands": [license_failure_dict(str(exc))],
-            }
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
-            print()
-            print(f"[error] {exc}")
-            print()
-            print("[Action required]")
-            print("")
-            print("Fix the license setup issue above and rerun the labs.")
-            print(f"Setup details: {SETUP_OUTPUT_PATH}")
-            return 1
+def validate_license_prerequisites(args: argparse.Namespace) -> int | None:
+    if args.refresh_report or not args.manage_license:
+        return None
+    try:
+        resolve_license_txt_content()
+    except RuntimeError as exc:
+        setup_payload = failed_setup_payload(args, [license_failure_dict(str(exc))])
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        write_setup_payload(setup_payload)
+        print()
+        print(f"[error] {exc}")
+        print()
+        print("[Action required]")
+        print("")
+        print("Fix the license setup issue above and rerun the labs.")
+        print(f"Setup details: {SETUP_OUTPUT_PATH}")
+        return 1
+    return None
+
+
+def initialize_output_workspace() -> None:
     preserve_existing_local_output()
     # `run_all.py` owns the destructive cleanup so one end-to-end run always starts
     # from a clean generated-output tree. `rebuild_reports.py` deliberately skips this
@@ -133,187 +129,228 @@ def main() -> int:
     CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     write_run_metadata()
 
-    setup_payload: dict[str, Any] | None = None
+
+def empty_setup_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "status": "passed",
+        "upstreamLabsPath": str(ROOT.parent / "labs"),
+        "refreshLabs": args.refresh_labs,
+        "labsBranch": args.labs_branch,
+        "manageLicense": args.manage_license,
+        "force": args.force,
+        "commands": [],
+    }
+
+
+def failed_setup_payload(args: argparse.Namespace, commands: list[dict[str, Any]]) -> dict[str, Any]:
+    payload = empty_setup_payload(args)
+    payload["status"] = "failed"
+    payload["commands"] = commands
+    return payload
+
+
+def write_setup_payload(payload: dict[str, Any]) -> None:
+    SETUP_OUTPUT_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def write_failed_run_reports(setup_payload: dict[str, Any]) -> int:
+    completed_at = report_timestamp()
+    write_consolidated_report(
+        {
+            "generatedAt": completed_at.isoformat(),
+            "status": "failed",
+            "summary": [
+                {"label": "Labs discovered", "value": 0},
+                {"label": "Labs passed", "value": 0},
+                {"label": "Labs failed", "value": 0},
+            ],
+            "setup": setup_payload,
+            "labs": [],
+        }
+    )
+    generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
+    archive_local_output_snapshot(completed_at)
+    return 1
+
+
+def execute_shared_setup(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int | None]:
+    if args.refresh_report:
+        print("Refreshing reports from existing captured artifacts...")
+        return None, None
+    if args.skip_setup:
+        return None, None
+
+    print("Running shared workspace setup...")
+    setup_result = run_setup(
+        stream_output=True,
+        refresh_labs=args.refresh_labs,
+        target_branch=args.labs_branch,
+        force=args.force,
+        lab_names=args.labs,
+    )
+    setup_payload = {
+        "status": setup_result.status,
+        "upstreamLabsPath": setup_result.upstream_labs_path,
+        "refreshLabs": args.refresh_labs,
+        "labsBranch": args.labs_branch,
+        "manageLicense": args.manage_license,
+        "force": args.force,
+        "commands": list(setup_result.commands),
+    }
+    write_setup_payload(setup_payload)
+    if setup_result.status == "passed":
+        return setup_payload, None
+
+    print()
+    for line in setup_failure_error_lines(setup_result.commands):
+        print(line)
+    print()
+    for line in setup_failure_action_lines(setup_result.commands):
+        print(line)
+    print(f"Setup details: {SETUP_OUTPUT_PATH}")
+    return setup_payload, write_failed_run_reports(setup_payload)
+
+
+def prepare_license_for_run(
+    args: argparse.Namespace,
+    setup_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, object | None, int | None]:
+    if args.refresh_report:
+        return setup_payload, None, None
+    if not args.manage_license:
+        payload = setup_payload or empty_setup_payload(args)
+        write_setup_payload(payload)
+        return payload, None, None
+
+    try:
+        license_state = prepare_upstream_labs_license()
+    except RuntimeError as exc:
+        payload = failed_setup_payload(args, [license_failure_dict(str(exc))])
+        write_setup_payload(payload)
+        print()
+        print(f"[error] {exc}")
+        print()
+        print("[Action required]")
+        print("")
+        print("Fix the license setup issue above and rerun the labs.")
+        print(f"Setup details: {SETUP_OUTPUT_PATH}")
+        return payload, None, write_failed_run_reports(payload)
+
+    print(f"[license] Prepared ../labs/license.txt using {license_state.applied_source}")
+    if license_state.original_content is not None:
+        print("[license] Existing ../labs/license.txt will be restored after the run")
+    else:
+        print("[license] ../labs/license.txt did not exist before this run and will be removed afterward")
+
+    payload = setup_payload or empty_setup_payload(args)
+    payload["commands"] = [*payload.get("commands", []), license_setup_dict(license_state)]
+    write_setup_payload(payload)
+    return payload, license_state, None
+
+
+def discover_selected_labs(args: argparse.Namespace) -> list[str]:
+    labs = filter_labs(discover_labs(), args.labs)
+    print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
+    return labs
+
+
+def run_lab_and_collect_result(lab: str, index: int, total_labs: int, refresh_report: bool) -> dict[str, Any]:
+    print()
+    print("=" * 78)
+    print(f"{'REFRESHING REPORT FOR' if refresh_report else 'RUNNING LAB'}: {lab}")
+    print(f"Lab # {index} of {total_labs}")
+    print("=" * 78)
+    lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
+    result = run_command(
+        lab_command,
+        ROOT,
+        stream_output=True,
+        stream_prefix=f"[all:{lab}]",
+    )
+    report_json_path, report_html_path = snapshot_lab_output(lab)
+    copy_lab_snapshot(lab)
+    lab_report = load_json(report_json_path) if report_json_path.exists() else None
+    duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
+    status = (lab_report or {}).get("status", "failed")
+    return {
+        "name": lab,
+        "readmeHref": upstream_readme_href(lab),
+        "status": status,
+        "displayStatus": display_lab_status(status, lab_report),
+        "exitCode": result.exit_code,
+        "durationSeconds": duration_seconds,
+        "reportJsonPath": str(report_json_path),
+        "reportHtmlPath": str(report_html_path),
+        "summary": (lab_report or {}).get("summary", []),
+        "report": lab_report,
+    }
+
+
+def run_selected_labs(labs: list[str], refresh_report: bool) -> list[dict[str, Any]]:
+    lab_results: list[dict[str, Any]] = []
+    total_labs = len(labs)
+    for index, lab in enumerate(labs, start=1):
+        lab_results.append(run_lab_and_collect_result(lab, index, total_labs, refresh_report))
+    return lab_results
+
+
+def finalize_run(
+    setup_payload: dict[str, Any] | None,
+    labs: list[str],
+    lab_results: list[dict[str, Any]],
+) -> int:
+    completed_at = report_timestamp()
+    consolidated = build_consolidated_payload(
+        setup_payload=setup_payload,
+        labs_git_ref=upstream_labs_git_ref(),
+        lab_results=lab_results,
+        generated_at=completed_at.isoformat(),
+    )
+    consolidated["navigation"] = {
+        "comparisonReportHref": "labs-comparison.html",
+    }
+    write_consolidated_report(consolidated)
+    generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
+    archive_local_output_snapshot(completed_at)
+    print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
+    print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
+    print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
+    print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
+    return 0 if consolidated["status"] == "passed" else 1
+
+
+def restore_license_after_run(license_state: object | None) -> None:
+    if license_state is not None:
+        if license_state.existed and license_state.original_content is not None:
+            print("[license] Restoring original ../labs/license.txt")
+        else:
+            print("[license] Removing temporary ../labs/license.txt")
+    restore_upstream_labs_license(license_state)
+
+
+def main() -> int:
+    args = parse_args()
+    preflight_result = validate_license_prerequisites(args)
+    if preflight_result is not None:
+        return preflight_result
+
+    initialize_output_workspace()
+
     license_state = None
     try:
-        if args.refresh_report:
-            print("Refreshing reports from existing captured artifacts...")
-        elif not args.skip_setup:
-            print("Running shared workspace setup...")
-            setup_result = run_setup(
-                stream_output=True,
-                refresh_labs=args.refresh_labs,
-                target_branch=args.labs_branch,
-                force=args.force,
-                lab_names=args.labs,
-            )
-            setup_payload = {
-                "status": setup_result.status,
-                "upstreamLabsPath": setup_result.upstream_labs_path,
-                "refreshLabs": args.refresh_labs,
-                "labsBranch": args.labs_branch,
-                "manageLicense": args.manage_license,
-                "force": args.force,
-                "commands": list(setup_result.commands),
-            }
-            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
-            if setup_result.status != "passed":
-                print()
-                for line in setup_failure_error_lines(setup_result.commands):
-                    print(line)
-                print()
-                for line in setup_failure_action_lines(setup_result.commands):
-                    print(line)
-                print(f"Setup details: {SETUP_OUTPUT_PATH}")
-                completed_at = report_timestamp()
-                write_consolidated_report(
-                    {
-                        "generatedAt": completed_at.isoformat(),
-                        "status": "failed",
-                        "summary": [
-                            {"label": "Labs discovered", "value": 0},
-                            {"label": "Labs passed", "value": 0},
-                            {"label": "Labs failed", "value": 0},
-                        ],
-                        "setup": setup_payload,
-                        "labs": [],
-                    }
-                )
-                generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
-                archive_local_output_snapshot(completed_at)
-                return 1
-        if not args.refresh_report and args.manage_license:
-            try:
-                license_state = prepare_upstream_labs_license()
-            except RuntimeError as exc:
-                setup_payload = {
-                    "status": "failed",
-                    "upstreamLabsPath": str(ROOT.parent / "labs"),
-                    "refreshLabs": args.refresh_labs,
-                    "labsBranch": args.labs_branch,
-                    "manageLicense": args.manage_license,
-                    "force": args.force,
-                    "commands": [license_failure_dict(str(exc))],
-                }
-                SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
-                print()
-                print(f"[error] {exc}")
-                print()
-                print("[Action required]")
-                print("")
-                print("Fix the license setup issue above and rerun the labs.")
-                print(f"Setup details: {SETUP_OUTPUT_PATH}")
-                completed_at = report_timestamp()
-                write_consolidated_report(
-                    {
-                        "generatedAt": completed_at.isoformat(),
-                        "status": "failed",
-                        "summary": [
-                            {"label": "Labs discovered", "value": 0},
-                            {"label": "Labs passed", "value": 0},
-                            {"label": "Labs failed", "value": 0},
-                        ],
-                        "setup": setup_payload,
-                        "labs": [],
-                    }
-                )
-                generate_labs_comparison(ROOT, [], generated_at=completed_at.isoformat())
-                archive_local_output_snapshot(completed_at)
-                return 1
-            print(f"[license] Prepared ../labs/license.txt using {license_state.applied_source}")
-            if license_state.original_content is not None:
-                print("[license] Existing ../labs/license.txt will be restored after the run")
-            else:
-                print("[license] ../labs/license.txt did not exist before this run and will be removed afterward")
-            if setup_payload is None:
-                setup_payload = {
-                    "status": "passed",
-                    "upstreamLabsPath": str(ROOT.parent / "labs"),
-                    "refreshLabs": args.refresh_labs,
-                    "labsBranch": args.labs_branch,
-                    "manageLicense": args.manage_license,
-                    "force": args.force,
-                    "commands": [],
-                }
-            setup_payload["commands"] = [*setup_payload.get("commands", []), license_setup_dict(license_state)]
-            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
-        elif setup_payload is None and not args.refresh_report:
-            setup_payload = {
-                "status": "passed",
-                "upstreamLabsPath": str(ROOT.parent / "labs"),
-                "refreshLabs": args.refresh_labs,
-                "labsBranch": args.labs_branch,
-                "manageLicense": args.manage_license,
-                "force": args.force,
-                "commands": [],
-            }
-            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+        setup_payload, early_exit = execute_shared_setup(args)
+        if early_exit is not None:
+            return early_exit
 
-        labs_git_ref = upstream_labs_git_ref()
-        all_labs = discover_labs()
-        labs = filter_labs(all_labs, args.labs)
-        print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
+        setup_payload, license_state, early_exit = prepare_license_for_run(args, setup_payload)
+        if early_exit is not None:
+            return early_exit
 
-        lab_results: list[dict[str, Any]] = []
-        total_labs = len(labs)
-        for index, lab in enumerate(labs, start=1):
-            print()
-            print("=" * 78)
-            print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
-            print(f"Lab # {index} of {total_labs}")
-            print("=" * 78)
-            lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if args.refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
-            result = run_command(
-                lab_command,
-                ROOT,
-                stream_output=True,
-                stream_prefix=f"[all:{lab}]",
-            )
-            report_json_path, report_html_path = snapshot_lab_output(lab)
-            copy_lab_snapshot(lab)
-            lab_report = load_json(report_json_path) if report_json_path.exists() else None
-            duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
-            status = (lab_report or {}).get("status", "failed")
-            lab_results.append(
-                {
-                    "name": lab,
-                    "readmeHref": upstream_readme_href(lab),
-                    "status": status,
-                    "displayStatus": display_lab_status(status, lab_report),
-                    "exitCode": result.exit_code,
-                    "durationSeconds": duration_seconds,
-                    "reportJsonPath": str(report_json_path),
-                    "reportHtmlPath": str(report_html_path),
-                    "summary": (lab_report or {}).get("summary", []),
-                    "report": lab_report,
-                }
-            )
-
-        completed_at = report_timestamp()
-        consolidated = build_consolidated_payload(
-            setup_payload=setup_payload,
-            labs_git_ref=labs_git_ref,
-            lab_results=lab_results,
-            generated_at=completed_at.isoformat(),
-        )
-        consolidated["navigation"] = {
-            "comparisonReportHref": "labs-comparison.html",
-        }
-        write_consolidated_report(consolidated)
-        generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
-        archive_local_output_snapshot(completed_at)
-        print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
-        print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
-        print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
-        print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
-        return 0 if consolidated["status"] == "passed" else 1
+        labs = discover_selected_labs(args)
+        lab_results = run_selected_labs(labs, args.refresh_report)
+        return finalize_run(setup_payload, labs, lab_results)
     finally:
-        if license_state is not None:
-            if license_state.existed and license_state.original_content is not None:
-                print("[license] Restoring original ../labs/license.txt")
-            else:
-                print("[license] Removing temporary ../labs/license.txt")
-        restore_upstream_labs_license(license_state)
+        restore_license_after_run(license_state)
 
 
 def discover_labs() -> list[str]:
