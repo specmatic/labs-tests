@@ -23,7 +23,7 @@ permissions:
 jobs:
   run-labs:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     env:
       SPECMATIC_LICENSE_KEY: ${{ secrets.SPECMATIC_LICENSE_KEY }}
@@ -50,7 +50,7 @@ jobs:
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
           EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
-        timeout-minutes: 40
+        timeout-minutes: 60
         run: |
           set +e
           echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
