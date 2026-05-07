@@ -7,7 +7,7 @@ It does not automate Specmatic Studio flows, but the comparison report can indic
 
 Prerequisites:
 
-- Python `3.14.x`
+- Python `3.9.x`
 - Docker with the daemon running
 - sibling upstream checkout at `../labs`
 
