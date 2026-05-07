@@ -24,6 +24,7 @@ from lablib.workspace_setup import (
     license_failure_dict,
     license_setup_dict,
     prepare_upstream_labs_license,
+    resolve_license_txt_content,
     restore_upstream_labs_license,
     run_setup,
     setup_failure_action_lines,
@@ -98,6 +99,30 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if not args.refresh_report and args.manage_license:
+        try:
+            resolve_license_txt_content()
+        except RuntimeError as exc:
+            setup_payload = {
+                "status": "failed",
+                "upstreamLabsPath": str(ROOT.parent / "labs"),
+                "refreshLabs": args.refresh_labs,
+                "labsBranch": args.labs_branch,
+                "manageLicense": args.manage_license,
+                "force": args.force,
+                "commands": [license_failure_dict(str(exc))],
+            }
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            CONSOLIDATED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            SETUP_OUTPUT_PATH.write_text(json.dumps(setup_payload, indent=2) + "\n", encoding="utf-8")
+            print()
+            print(f"[error] {exc}")
+            print()
+            print("[Action required]")
+            print("")
+            print("Fix the license setup issue above and rerun the labs.")
+            print(f"Setup details: {SETUP_OUTPUT_PATH}")
+            return 1
     preserve_existing_local_output()
     # `run_all.py` owns the destructive cleanup so one end-to-end run always starts
     # from a clean generated-output tree. `rebuild_reports.py` deliberately skips this
