@@ -309,21 +309,16 @@ def finalize_run(
         generated_at=completed_at.isoformat(),
     )
     matrix = comparison_payload.get("validationMatrix", {})
-    matrix_columns = list(matrix.get("columns", []))
     matrix_rows = list(matrix.get("rows", []))
     required_labels = {
         "Command and Output fencing validation",
         "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
     }
     selected_rows = [row for row in matrix_rows if row.get("label") in required_labels]
-    if selected_rows and matrix_columns:
-        for lab_entry in consolidated.get("labs", []):
-            lab_name = str(lab_entry.get("name", ""))
-            col_index = next((i for i, column in enumerate(matrix_columns) if str(column.get("name", "")) == lab_name), None)
-            if col_index is None:
-                continue
-            per_lab_pass = all(bool(row.get("cells", [])[col_index]) for row in selected_rows if col_index < len(row.get("cells", [])))
-            lab_entry["displayStatus"] = "passed" if per_lab_pass else "failed"
+    selected_rows_passed: bool | None = None
+    if selected_rows:
+        selected_rows_passed = all(bool(row.get("overallPassed")) for row in selected_rows)
+        consolidated["status"] = "passed" if selected_rows_passed else "failed"
 
     consolidated["navigation"] = {
         "comparisonReportHref": "labs-comparison.html",
@@ -335,10 +330,8 @@ def finalize_run(
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
     print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
 
-    if matrix_rows:
-        if selected_rows:
-            selected_rows_passed = all(bool(row.get("overallPassed")) for row in selected_rows)
-            return 0 if selected_rows_passed else 1
+    if matrix_rows and selected_rows_passed is not None:
+        return 0 if selected_rows_passed else 1
     return 0 if consolidated["status"] == "passed" else 1
 
 
