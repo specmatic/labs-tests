@@ -309,6 +309,7 @@ def finalize_run(
         generated_at=completed_at.isoformat(),
     )
     matrix = comparison_payload.get("validationMatrix", {})
+    matrix_columns = list(matrix.get("columns", []))
     matrix_rows = list(matrix.get("rows", []))
     required_labels = {
         "Command and Output fencing validation",
@@ -319,6 +320,17 @@ def finalize_run(
     if selected_rows:
         selected_rows_passed = all(bool(row.get("overallPassed")) for row in selected_rows)
         consolidated["status"] = "passed" if selected_rows_passed else "failed"
+        if matrix_columns:
+            for lab_entry in consolidated.get("labs", []):
+                lab_name = str(lab_entry.get("name", ""))
+                col_index = next((index for index, column in enumerate(matrix_columns) if str(column.get("name", "")) == lab_name), None)
+                if col_index is None:
+                    continue
+                per_lab_pass = all(
+                    col_index < len(row.get("cells", [])) and bool(row.get("cells", [])[col_index])
+                    for row in selected_rows
+                )
+                lab_entry["displayStatus"] = "passed" if per_lab_pass else "failed"
 
     consolidated["navigation"] = {
         "comparisonReportHref": "labs-comparison.html",
