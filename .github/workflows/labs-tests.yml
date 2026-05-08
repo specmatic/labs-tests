@@ -97,6 +97,7 @@ jobs:
           ]
           report_path = next((path for path in report_candidates if path.exists()), None)
           comparison_path = Path("output/consolidated-report/labs-comparison.html")
+          comparison_json_path = Path("output/consolidated-report/labs-comparison.json")
 
           if report_path is None:
               print("## Specmatic Labs Tests")
@@ -129,11 +130,42 @@ jobs:
           print(f"- Comparison report HTML: `{comparison_path.as_posix()}`" if comparison_path.exists() else "- Comparison report HTML: `not generated`")
           print("- Reports artifact: `specmatic-labs-reports`")
           print("")
+          matrix_rows = []
+          matrix_columns = []
+          required_labels = {
+              "Command and Output fencing validation",
+              "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
+          }
+          if comparison_json_path.exists():
+              try:
+                  comparison_payload = json.loads(comparison_json_path.read_text(encoding="utf-8"))
+                  matrix = comparison_payload.get("validationMatrix", {})
+                  matrix_rows = [row for row in matrix.get("rows", []) if row.get("label") in required_labels]
+                  matrix_columns = list(matrix.get("columns", []))
+              except Exception:
+                  matrix_rows = []
+                  matrix_columns = []
+
           print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")
           print("| --- | --- | ---: | ---: | ---: | ---: |")
           for lab in payload.get("labs", []):
               status = lab.get("status", "unknown")
-              status_symbol = "✅" if status == "passed" else "❌" if status == "failed" else status
+              col_index = next(
+                  (
+                      index
+                      for index, column in enumerate(matrix_columns)
+                      if str(column.get("name", "")) == str(lab.get("name", ""))
+                  ),
+                  None,
+              )
+              if matrix_rows and col_index is not None:
+                  per_lab_pass = all(
+                      col_index < len(row.get("cells", [])) and bool(row.get("cells", [])[col_index])
+                      for row in matrix_rows
+                  )
+                  status_symbol = "✅" if per_lab_pass else "❌"
+              else:
+                  status_symbol = "✅" if status == "passed" else "❌" if status == "failed" else status
               failures = "n/a"
               validations = "n/a"
               for item in lab.get("summary", []):
