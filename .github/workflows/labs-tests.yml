@@ -115,10 +115,27 @@ jobs:
           environment = payload.get("environment", {})
           summary = {item["label"]: item["value"] for item in payload.get("summary", [])}
           setup = payload.get("setup") or {}
+          status_text = payload.get("status", "unknown").upper()
+          required_labels = {
+              "Command and Output fencing validation",
+              "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
+          }
+          if comparison_json_path.exists():
+              try:
+                  comparison_payload = json.loads(comparison_json_path.read_text(encoding="utf-8"))
+                  rows_for_status = [
+                      row
+                      for row in comparison_payload.get("validationMatrix", {}).get("rows", [])
+                      if row.get("label") in required_labels
+                  ]
+                  if rows_for_status:
+                      status_text = "PASSED" if all(bool(row.get("overallPassed")) for row in rows_for_status) else "FAILED"
+              except Exception:
+                  pass
 
           print("## Specmatic Labs Tests")
           print("")
-          print(f"- Status: **{payload.get('status', 'unknown').upper()}**")
+          print(f"- Status: **{status_text}**")
           print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
           print(f"- Labs branch requested: `{environment.get('labsBranchRequested', setup.get('labsBranch', 'n/a'))}`")
           print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
@@ -132,10 +149,6 @@ jobs:
           print("")
           matrix_rows = []
           matrix_columns = []
-          required_labels = {
-              "Command and Output fencing validation",
-              "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
-          }
           if comparison_json_path.exists():
               try:
                   comparison_payload = json.loads(comparison_json_path.read_text(encoding="utf-8"))
@@ -145,7 +158,6 @@ jobs:
               except Exception:
                   matrix_rows = []
                   matrix_columns = []
-
           print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")
           print("| --- | --- | ---: | ---: | ---: | ---: |")
           for lab in payload.get("labs", []):
