@@ -310,12 +310,23 @@ def finalize_run(
         "comparisonReportHref": "labs-comparison.html",
     }
     write_consolidated_report(consolidated)
-    generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
+    comparison_payload = generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
     archive_local_output_snapshot(completed_at)
     print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
     print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
     print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
     print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
+
+    matrix_rows = comparison_payload.get("validationMatrix", {}).get("rows", [])
+    if matrix_rows:
+        required_labels = {
+            "Command and Output fencing validation",
+            "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
+        }
+        selected_rows = [row for row in matrix_rows if row.get("label") in required_labels]
+        if selected_rows:
+            selected_rows_passed = all(bool(row.get("overallPassed")) for row in selected_rows)
+            return 0 if selected_rows_passed else 1
     return 0 if consolidated["status"] == "passed" else 1
 
 
