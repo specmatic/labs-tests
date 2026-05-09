@@ -11,11 +11,8 @@ import re
 from typing import Any
 
 from lablib.readme_expectations import (
-    EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     command_output_skip_reason,
-    command_block_language,
     is_structured_file_display_language,
-    README_TEMPLATE,
     get_lab_readme_override,
     heading_matches,
     optional_h2_titles,
@@ -30,8 +27,6 @@ from lablib.readme_schema import (
     extract_overview_video_section,
     parse_readme_document,
     parse_required_implementation_phases,
-    phase_sequence_is_valid,
-    validate_external_link,
 )
 from lablib.provenance import detect_report_provenance
 from lablib.time_display import format_report_datetime

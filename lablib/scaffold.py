@@ -15,18 +15,10 @@ from lablib.readme_expectations import (
     EXECUTABLE_COMMAND_FENCE_LANGUAGES,
     is_structured_file_display_language,
     OUTPUT_FENCE_LANGUAGE,
-    optional_h2_titles,
-    unexpected_h2_titles_for_lab,
 )
 from lablib.readme_schema import (
-    ALLOWED_PHASE_KINDS,
-    BASELINE_PHASE,
-    DEFAULT_REQUIRED_PHASES,
-    FINAL_PHASE,
-    command_fence_languages,
     expected_h2_titles_for_document,
     parse_readme_document,
-    parse_required_implementation_phases,
     phase_sequence_is_valid,
     validate_external_link,
     validate_internal_link,
