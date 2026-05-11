@@ -1342,15 +1342,6 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     }
     row_definitions = [
         {
-            "label": "Labs Heading Structure Comparison",
-            "tooltip": {
-                **build_h2_sequence_tooltip(labs, common_required_h2),
-                "fullReportHref": "labs-heading-structure-comparison.html",
-                "fullReportLabel": "Open full heading structure report",
-            },
-            "cells": [bool(lab["readme"]["h1"]) and lab["readme"]["sharedH2OrderMatches"] for lab in labs],
-        },
-        {
             "label": "README uses H3 headings for lab-specific implementation steps",
             "tooltip": {
                 "summary": ["Lab-specific walkthrough steps belong in H3 headings."],
