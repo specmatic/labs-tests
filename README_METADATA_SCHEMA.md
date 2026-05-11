@@ -2,11 +2,11 @@
 
 ## Philosophy
 
-The README is the primary source of truth for both humans learning the `lab` and `labs-tests` automating and validating the lab.
+The README is the primary source of truth for both humans learning the lab and `labs-tests` automating and validating the lab.
 
 The automation model is convention-driven.
 
-`labs-tests` should derive the following from the README structure instead of hard-coding for each lab:
+`labs-tests` should derive the following from the README structure instead of lab-name hard-coding:
 
 - phase sequence
 - runnable commands
@@ -30,8 +30,8 @@ Every lab README should have the following phase model:
 ```text
 Baseline Phase
 Task ...
-Studio Phase
 Task ...
+Studio Phase
 Studio Phase
 Final Phase
 ```
@@ -79,6 +79,25 @@ A phase is considered a Studio phase if the H2 heading is:
 ```
 
 `Studio Phase` may appear one or more times, but it must always be after `Baseline Phase` and before `Final Phase`.
+
+### Optional Studio subphases
+
+A Studio subphase is any H3 (or lower) heading containing `Studio` inside a valid phase.
+
+Examples:
+
+```markdown
+### Studio verification
+### Studio validation
+```
+
+Rules:
+
+- Studio subphases belong to the parent H2 phase.
+- Studio subphases do not affect phase ordering validation.
+- Studio subphases are optional.
+- Studio subphases may contain runnable commands and `terminaloutput` blocks.
+- Studio subphases are useful when Studio validation verifies the same state as the parent phase instead of representing an independent execution phase.
 
 ## Valid Phase Sequence
 
