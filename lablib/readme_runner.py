@@ -154,11 +154,14 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
 
 
 def load_lab_hooks(lab_name: str) -> LabHooks:
-    return load_hooks_from_path(ROOT / lab_name / "hooks.py", module_name=f"labs_tests_hooks_{slug(lab_name)}")
+    return load_hooks_from_path(
+        lab_config_path(lab_name, "py"),
+        module_name=f"labs_tests_lab_config_hooks_{slug(lab_name)}",
+    )
 
 
 def load_lab_config(lab_name: str, upstream_lab: Path) -> ReadmeLabConfig | None:
-    config_path = ROOT / "lablib" / "lab_configs" / f"{lab_name}.yaml"
+    config_path = lab_config_path(lab_name, "yaml")
     if not config_path.exists():
         return None
     payload = parse_simple_yaml(config_path.read_text(encoding="utf-8"))
@@ -193,6 +196,10 @@ def load_lab_config(lab_name: str, upstream_lab: Path) -> ReadmeLabConfig | None
         command_env=command_env,
         phases=phases,
     )
+
+
+def lab_config_path(lab_name: str, extension: str) -> Path:
+    return ROOT / "lablib" / "lab_configs" / lab_name / f"{lab_name}.{extension}"
 
 
 def load_hooks_from_path(path: Path, *, module_name: str = "labs_tests_hooks") -> LabHooks:

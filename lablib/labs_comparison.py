@@ -214,9 +214,9 @@ def discover_lab_names(root: Path | None = None) -> list[str]:
             if not_in_excluded(path.parent.name)
         }
         | {
-            path.stem
-            for path in (repo_root / "lablib" / "lab_configs").glob("*.yaml")
-            if not_in_excluded(path.stem)
+            path.parent.name
+            for path in (repo_root / "lablib" / "lab_configs").glob("*/*.yaml")
+            if path.stem == path.parent.name and not_in_excluded(path.parent.name)
         }
     )
 
