@@ -247,13 +247,16 @@ def restore_license_after_run(license_state: object | None) -> None:
 
 
 def discover_labs() -> list[str]:
+    upstream_labs = ROOT.parent / "labs"
+    if not upstream_labs.exists():
+        return []
     return sorted(
         path.name
-        for path in ROOT.iterdir()
+        for path in upstream_labs.iterdir()
         if path.is_dir()
         and not path.name.startswith(".")
         and not_in_excluded(path.name)
-        and (path / "run.py").exists()
+        and (path / "README.md").exists()
     )
 
 
