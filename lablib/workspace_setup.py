@@ -59,6 +59,7 @@ def run_setup(
     target_branch: str = "main",
     force: bool = False,
     lab_names: list[str] | None = None,
+    include_docker_setup: bool = True,
 ) -> SetupResult:
     commands: list[dict[str, Any]] = []
 

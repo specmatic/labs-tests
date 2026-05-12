@@ -13,10 +13,11 @@ if str(ROOT) not in sys.path:
 from lablib.readme_runner import build_readme_lab_spec
 from lablib.report_building import report_duration_seconds, upstream_readme_href
 from lablib.scaffold import run_lab
+from lablib.workspace_setup import run_setup, setup_failure_action_lines, setup_failure_error_lines
 from utils import (
     discover_labs,
     display_lab_status,
-    execute_shared_setup,
+    empty_setup_payload,
     filter_labs,
     finalize_run,
     initialize_output_workspace,
@@ -25,6 +26,8 @@ from utils import (
     restore_license_after_run,
     snapshot_lab_output,
     validate_license_prerequisites,
+    write_failed_run_reports,
+    write_setup_payload,
 )
 
 
@@ -71,16 +74,110 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_lab_and_collect_result(lab: str, index: int, total_labs: int, refresh_report: bool) -> dict[str, Any]:
+def setup_payload_from_result(args: argparse.Namespace, setup_result: Any) -> dict[str, Any]:
+    return {
+        "status": setup_result.status,
+        "upstreamLabsPath": setup_result.upstream_labs_path,
+        "refreshLabs": args.refresh_labs,
+        "labsBranch": args.labs_branch,
+        "manageLicense": args.manage_license,
+        "force": args.force,
+        "commands": list(setup_result.commands),
+    }
+
+
+def execute_initial_workspace_setup(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int | None]:
+    if args.refresh_report:
+        print("Refreshing reports from existing captured artifacts...")
+        return None, None
+    if args.skip_setup:
+        return None, None
+
+    print("Running initial workspace setup without Docker image pull/build...")
+    setup_result = run_setup(
+        stream_output=True,
+        refresh_labs=args.refresh_labs,
+        target_branch=args.labs_branch,
+        force=args.force,
+        lab_names=args.labs,
+        include_docker_setup=False,
+    )
+    setup_payload = setup_payload_from_result(args, setup_result)
+    write_setup_payload(setup_payload)
+    if setup_result.status == "passed":
+        return setup_payload, None
+
+    print()
+    for line in setup_failure_error_lines(setup_result.commands):
+        print(line)
+    print()
+    for line in setup_failure_action_lines(setup_result.commands):
+        print(line)
+    return setup_payload, write_failed_run_reports(setup_payload)
+
+
+def run_jit_setup_for_lab(lab: str, args: argparse.Namespace, setup_payload: dict[str, Any] | None) -> tuple[bool, dict[str, Any]]:
+    payload = setup_payload or empty_setup_payload(args)
+    if args.refresh_report or args.skip_setup:
+        return True, payload
+
+    print(f"Running setup for {lab}...")
+    setup_result = run_setup(
+        stream_output=True,
+        refresh_labs=False,
+        target_branch=args.labs_branch,
+        force=args.force,
+        lab_names=[lab],
+    )
+    payload["commands"] = [*payload.get("commands", []), *setup_result.commands]
+    if setup_result.status != "passed":
+        payload["status"] = "failed"
+        print()
+        for line in setup_failure_error_lines(setup_result.commands):
+            print(line)
+        print()
+        for line in setup_failure_action_lines(setup_result.commands):
+            print(line)
+    write_setup_payload(payload)
+    return setup_result.status == "passed", payload
+
+
+def setup_failed_lab_result(lab: str) -> dict[str, Any]:
+    report_json_path, report_html_path = snapshot_lab_output(lab)
+    return {
+        "name": lab,
+        "readmeHref": upstream_readme_href(lab),
+        "status": "failed",
+        "displayStatus": "Setup Failed",
+        "exitCode": 1,
+        "durationSeconds": 0.0,
+        "reportJsonPath": str(report_json_path),
+        "reportHtmlPath": str(report_html_path),
+        "summary": [],
+        "report": None,
+    }
+
+
+def run_lab_and_collect_result(
+    lab: str,
+    index: int,
+    total_labs: int,
+    args: argparse.Namespace,
+    setup_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     print()
     print("=" * 78)
-    print(f"{'REFRESHING REPORT FOR' if refresh_report else 'RUNNING LAB'}: {lab}")
+    print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
     print(f"Lab # {index} of {total_labs}")
     print("=" * 78)
 
+    setup_ok, setup_payload = run_jit_setup_for_lab(lab, args, setup_payload)
+    if not setup_ok:
+        return setup_failed_lab_result(lab), setup_payload
+
     spec = build_readme_lab_spec(lab)
     lab_args = SimpleNamespace(
-        refresh_report=refresh_report,
+        refresh_report=args.refresh_report,
         skip_setup=True,
         refresh_labs=False,
         labs_branch="main",
@@ -102,15 +199,20 @@ def run_lab_and_collect_result(lab: str, index: int, total_labs: int, refresh_re
         "reportHtmlPath": str(report_html_path),
         "summary": (lab_report or {}).get("summary", []),
         "report": lab_report,
-    }
+    }, setup_payload
 
 
-def run_selected_labs(labs: list[str], refresh_report: bool) -> list[dict[str, Any]]:
+def run_selected_labs(
+    labs: list[str],
+    args: argparse.Namespace,
+    setup_payload: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     lab_results: list[dict[str, Any]] = []
     total_labs = len(labs)
     for index, lab in enumerate(labs, start=1):
-        lab_results.append(run_lab_and_collect_result(lab, index, total_labs, refresh_report))
-    return lab_results
+        lab_result, setup_payload = run_lab_and_collect_result(lab, index, total_labs, args, setup_payload)
+        lab_results.append(lab_result)
+    return lab_results, setup_payload
 
 
 def main() -> int:
@@ -123,7 +225,7 @@ def main() -> int:
 
     license_state = None
     try:
-        setup_payload, early_exit = execute_shared_setup(args)
+        setup_payload, early_exit = execute_initial_workspace_setup(args)
         if early_exit is not None:
             return early_exit
 
@@ -133,7 +235,7 @@ def main() -> int:
 
         labs = filter_labs(discover_labs(), args.labs)
         print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
-        lab_results = run_selected_labs(labs, args.refresh_report)
+        lab_results, setup_payload = run_selected_labs(labs, args, setup_payload)
         return finalize_run(setup_payload, labs, lab_results)
     finally:
         restore_license_after_run(license_state)
