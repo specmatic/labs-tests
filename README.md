@@ -1,6 +1,6 @@
 # labs-tests
 
-Automation harnesses for Specmatic labs live in lab-named folders in this repo.
+Automation harnesses for Specmatic labs live in this repo.
 
 Current automation scope validates CLI/runtime behavior and generated artifacts.
 It does not automate Specmatic Studio flows, but the comparison report can indicate whether a lab README documents a Studio component.
@@ -11,10 +11,58 @@ Prerequisites:
 - Docker with the daemon running
 - sibling upstream checkout at `../labs`
 
-Current labs:
+## README-driven pilot flow
 
-- [`api-coverage`](api-coverage/)
-  README: [`api-coverage/README.md`](api-coverage/README.md)
+The README-driven pilot flow is the current migration path for removing per-lab hard-coding from labs-tests. It reads phases and commands from the upstream `../labs/<lab>/README.md`, applies minimal config from `lablib/lab_configs/<lab>/`, and runs through the common report pipeline.
+
+Pilot labs:
+
+- `api-coverage`
+- `quick-start-api-testing`
+
+Run both pilot labs:
+
+```bash
+python3 run_all_labs.py --labs api-coverage quick-start-api-testing
+```
+
+Run one pilot lab:
+
+```bash
+python3 run_all_labs.py --labs api-coverage
+```
+
+Refresh pilot reports from existing captured artifacts without rerunning Docker:
+
+```bash
+python3 run_all_labs.py --labs api-coverage quick-start-api-testing --refresh-report
+```
+
+Force the sibling `../labs` checkout back to the selected branch before running the pilot labs:
+
+```bash
+python3 run_all_labs.py --labs api-coverage quick-start-api-testing --refresh-labs --force
+```
+
+Pilot configuration lives beside its small custom hook module:
+
+- `lablib/lab_configs/api-coverage/api-coverage.yaml`
+- `lablib/lab_configs/api-coverage/api-coverage.py`
+- `lablib/lab_configs/quick-start-api-testing/quick-start-api-testing.yaml`
+- `lablib/lab_configs/quick-start-api-testing/quick-start-api-testing.py`
+
+Pilot outputs are written directly under `output/`:
+
+- `output/api-coverage-output/`
+- `output/quick-start-api-testing-output/`
+- `output/labs-output/<lab-name>-output/` snapshot copies for consolidated reports
+
+## Legacy per-lab runner flow
+
+The remaining non-pilot labs still use the older per-lab `run.py` entrypoints and `run_all.py`.
+
+Legacy labs:
+
 - [`api-resiliency-testing`](api-resiliency-testing/)
   README: [`api-resiliency-testing/README.md`](api-resiliency-testing/README.md)
 - [`api-security-schemes`](api-security-schemes/)
@@ -45,8 +93,6 @@ Current labs:
   README: [`partial-examples/README.md`](partial-examples/README.md)
 - [`workflow-in-same-spec`](workflow-in-same-spec/)
   README: [`workflow-in-same-spec/README.md`](workflow-in-same-spec/README.md)
-- [`quick-start-api-testing`](quick-start-api-testing/)
-  README: [`quick-start-api-testing/README.md`](quick-start-api-testing/README.md)
 - [`quick-start-async-contract-testing`](quick-start-async-contract-testing/)
   README: [`quick-start-async-contract-testing/README.md`](quick-start-async-contract-testing/README.md)
 - [`quick-start-contract-testing`](quick-start-contract-testing/)
@@ -72,7 +118,7 @@ To force `../labs` back to the latest `main` before refreshing Docker images:
 python3 setup.py --refresh-labs --force
 ```
 
-Run every available lab harness from the repo root and build the consolidated and comparison reports with:
+Run every legacy lab harness from the repo root and build the consolidated and comparison reports with:
 
 ```bash
 python3 run_all.py
@@ -84,11 +130,7 @@ Rebuild the consolidated and comparison reports from the existing lab snapshots 
 python3 rebuild_reports.py
 ```
 
-Refresh an individual lab report from previously captured artifacts without rerunning the lab:
-
-```bash
-python3 api-coverage/run.py --refresh-report
-```
+Refresh an individual legacy lab report from previously captured artifacts without rerunning the lab:
 
 ```bash
 python3 api-resiliency-testing/run.py --refresh-report
@@ -151,10 +193,6 @@ python3 partial-examples/run.py --refresh-report
 ```
 
 ```bash
-python3 quick-start-api-testing/run.py --refresh-report
-```
-
-```bash
 python3 quick-start-async-contract-testing/run.py --refresh-report
 ```
 
@@ -185,11 +223,11 @@ Outputs are written to:
 - `output/consolidated-report/labs-comparison.json`
 - `output/consolidated-report/labs-comparison.html`
 - `output/consolidated-report/setup-output.json`
-- `output/labs/<lab-name>-output/` for each lab run
+- `output/labs-output/<lab-name>-output/` for each lab snapshot
 
-Each lab’s `output/` directory is copied into `output/labs/<lab-name>-output/` after the run completes. The consolidated report uses those copied folders so the links remain stable even after the live lab output is cleaned up or refreshed.
+Each legacy lab’s `<lab>/output/` directory is copied into `output/labs-output/<lab-name>-output/` after the run completes. README-driven pilot labs write their live output directly to `output/<lab-name>-output/` and also copy that folder into `output/labs-output/<lab-name>-output/` for consolidated reports. The consolidated report uses those copied folders so the links remain stable even after live output is cleaned up or refreshed.
 
-`run_all.py` starts by clearing the generated `output/labs/` and `output/consolidated-report/` folders before regenerating reports, so stale files from earlier runs do not leak into a new report set. `rebuild_reports.py` does not clean the output tree; it only refreshes the consolidated and comparison reports from the existing lab snapshots.
+`run_all.py` starts by clearing the generated `output/labs-output/` and `output/consolidated-report/` folders before regenerating reports, so stale files from earlier runs do not leak into a new report set. `rebuild_reports.py` does not clean the output tree; it only refreshes the consolidated and comparison reports from the existing lab snapshots.
 
 Each individual lab run also clears its own `<lab>/output/` directory before a normal run starts. Refresh-only runs skip that cleanup so they can rebuild from the saved artifacts already on disk.
 

@@ -87,7 +87,7 @@ def setup_payload_from_result(args: argparse.Namespace, setup_result: Any) -> di
 
 def execute_initial_workspace_setup(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int | None]:
     if args.refresh_report:
-        print("Refreshing reports from existing captured artifacts...")
+        print("[reports] Refreshing reports from existing captured artifacts...")
         return None, None
     if args.skip_setup:
         return None, None

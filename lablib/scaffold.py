@@ -167,7 +167,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     spec.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.refresh_report:
-        print("Refreshing report from existing captured artifacts...")
+        print("[reports] Refreshing report from existing captured artifacts...")
         phases = rebuild_phases_from_artifacts(spec, readme_text, readme_doc, original_files)
     else:
         phases = []
@@ -206,8 +206,8 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     write_json(spec.output_dir / "report.json", report)
     write_html(spec.output_dir / "report.html", report)
     snapshot_lab_output(spec)
-    print(f"Wrote JSON report to {spec.output_dir / 'report.json'}")
-    print(f"Wrote HTML report to {spec.output_dir / 'report.html'}")
+    print(f"[reports] Wrote JSON report to {spec.output_dir / 'report.json'}")
+    print(f"[reports] Wrote HTML report to {spec.output_dir / 'report.html'}")
     return 0 if report["status"] == "passed" else 1
 
 

@@ -128,7 +128,7 @@ def write_failed_run_reports(setup_payload: dict[str, Any]) -> int:
 
 def execute_shared_setup(args: Any) -> tuple[dict[str, Any] | None, int | None]:
     if args.refresh_report:
-        print("Refreshing reports from existing captured artifacts...")
+        print("[reports] Refreshing reports from existing captured artifacts...")
         return None, None
     if args.skip_setup:
         return None, None
@@ -219,10 +219,10 @@ def finalize_run(
     write_consolidated_report(consolidated)
     comparison_payload = generate_labs_comparison(ROOT, labs, generated_at=completed_at.isoformat())
     archive_local_output_snapshot(completed_at)
-    print(f"Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
-    print(f"Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
-    print(f"Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
-    print(f"Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
+    print(f"[reports] Wrote consolidated JSON report to {CONSOLIDATED_JSON_PATH}")
+    print(f"[reports] Wrote consolidated HTML report to {CONSOLIDATED_HTML_PATH}")
+    print(f"[reports] Wrote labs comparison JSON report to {COMPARISON_JSON_PATH}")
+    print(f"[reports] Wrote labs comparison HTML report to {COMPARISON_HTML_PATH}")
 
     matrix_rows = comparison_payload.get("validationMatrix", {}).get("rows", [])
     if matrix_rows:
@@ -344,7 +344,7 @@ def preserve_existing_local_output() -> None:
         return
     snapshot_dir = archive_output_snapshot(datetime.now())
     update_latest_output_link(snapshot_dir)
-    print(f"Preserved existing local output snapshot at {snapshot_dir}")
+    print(f"[reports] Preserved existing local output snapshot at {snapshot_dir}")
 
 
 def archive_local_output_snapshot(timestamp: datetime) -> None:
@@ -352,7 +352,7 @@ def archive_local_output_snapshot(timestamp: datetime) -> None:
         return
     snapshot_dir = archive_output_snapshot(timestamp)
     update_latest_output_link(snapshot_dir)
-    print(f"Archived local output snapshot at {snapshot_dir}")
+    print(f"[reports] Archived local output snapshot at {snapshot_dir}")
 
 
 def archive_output_snapshot(timestamp: datetime) -> Path:

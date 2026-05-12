@@ -128,7 +128,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
         upstream_lab=upstream_lab,
         files=files,
         readme_path=readme_path,
-        output_dir=ROOT / lab_name / "output",
+        output_dir=ROOT / "output" / f"{lab_name}-output",
         command=plan.phases[0].command if plan.phases else ["true"],
         command_env=config.command_env if config is not None else {},
         phases=tuple(

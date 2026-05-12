@@ -141,7 +141,7 @@ def generate_labs_comparison(
         lab_dirs = [repo_root / lab_name for lab_name in sorted(selected)]
     else:
         lab_dirs = [repo_root / lab_name for lab_name in discover_lab_names(repo_root)]
-    labs = [build_lab_profile(lab_dir) for lab_dir in lab_dirs if lab_dir.exists()]
+    labs = [build_lab_profile(lab_dir) for lab_dir in lab_dirs]
     common_required_h2 = list(tuple(labs[0]["readme"]["requiredH2"]) if labs else ())
     validation_rows = build_validation_rows(labs)
     payload = {
