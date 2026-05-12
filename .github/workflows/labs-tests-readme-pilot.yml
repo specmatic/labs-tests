@@ -8,6 +8,7 @@ on:
         required: false
         default: "dynamic-labs"
         type: string
+  pull_request:
 
 permissions:
   contents: read
