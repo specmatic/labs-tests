@@ -325,6 +325,8 @@ def execute_phase(
 
     print(f"{phase.name}: starting verification...")
     phase_command = phase.command or spec.command
+    print(f"{phase.name}: parsed command from README: {' '.join(phase_command)}")
+    print(f"{phase.name}: executing README command.")
     result = run_command(
         phase_command,
         spec.upstream_lab,
@@ -715,6 +717,8 @@ def all_artifact_specs(spec: LabSpec, phase: PhaseSpec) -> tuple[ArtifactSpec, .
 def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str, str | None]) -> None:
     for alias, path in spec.files.items():
         transform = phase.file_transforms.get(alias)
+        if transform is not None:
+            print(f"{phase.name}: applying hook transform for {alias} -> {path}")
         original_content = original_files[alias]
         content = original_content if transform is None else transform(original_content or "")
         if content is None:
