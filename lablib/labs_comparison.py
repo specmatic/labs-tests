@@ -1639,12 +1639,21 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
     summary_items = []
     for lab in labs:
         comparisons = lab["testCountConsistency"].get("phases", [])
+        execution_failed = [item for item in comparisons if item.get("status") == "execution-failed"]
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
         expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-applicable"]
         not_applicable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-applicable"]
-        if mismatch_phases:
+        if execution_failed:
+            first = execution_failed[0]
+            reason = first.get("executionFailureReason") or "The phase command failed at runtime."
+            summary_items.append({
+                "lab": lab["name"],
+                "status": "execution-failed",
+                "message": f"Test execution failed in {first['phase']}. {reason}",
+            })
+        elif mismatch_phases:
             summary_items.append({"lab": lab["name"], "status": "mismatch", "message": f"Mismatches in {', '.join(mismatch_phases)}."})
         elif matched_phases:
             summary_items.append({"lab": lab["name"], "status": "match", "message": "Matching counts where data is available."})
@@ -1662,6 +1671,13 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
                 "lab": lab["name"],
                 "href": lab["href"],
                 "note": "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase.",
+                "executionFailures": [
+                    {
+                        "phase": item["phase"],
+                        "reason": item.get("executionFailureReason") or "The phase command failed at runtime.",
+                    }
+                    for item in execution_failed
+                ],
                 "rows": [
                     {
                         "phase": item["phase"],
@@ -1670,6 +1686,7 @@ def build_test_count_comparison_payload(labs: list[dict[str, Any]], generated_at
                         "ctrf": build_count_cell(item.get("ctrfCounts"), item, "ctrf"),
                         "html": build_count_cell(item.get("htmlCounts"), item, "html"),
                         "status": format_count_status(item.get("status", "not-available")),
+                        "executionFailureReason": item.get("executionFailureReason", ""),
                     }
                     for item in comparisons
                 ] or [
@@ -2885,6 +2902,15 @@ def render_test_count_comparison_html(payload: dict[str, Any]) -> str:
       color: #9a6700;
       background: #fff2cc;
     }}
+    .execution-failure-reason {{
+      border-left: 4px solid #ab2e2e;
+      background: #fae8e5;
+      padding: 10px 12px;
+      margin: 14px 0;
+    }}
+    .execution-failure-reason h3 {{
+      margin-bottom: 4px;
+    }}
     a {{
       color: #145a7a;
       text-decoration: none;
@@ -3592,6 +3618,20 @@ def extract_plain_status(status_html: str) -> str:
 
 def render_test_count_lab_section(section: dict[str, Any]) -> str:
     report_label = "MCP JSON" if str(section.get("lab")) == "mcp-auto-test" else "CTRF"
+    execution_failures = section.get("executionFailures") or []
+    execution_failure_html = ""
+    if execution_failures:
+        items = "".join(
+            f"<li><strong>{escape(str(item.get('phase', 'Phase')))}:</strong> {escape(str(item.get('reason', 'The phase command failed at runtime.')))}</li>"
+            for item in execution_failures
+        )
+        execution_failure_html = (
+            "<div class='execution-failure-reason'>"
+            "<h3>Why test count validation failed</h3>"
+            "<p>The outer test-count validation fails because one or more phase commands failed at runtime.</p>"
+            f"<ul>{items}</ul>"
+            "</div>"
+        )
     rows_html = "".join(
         "<tr>"
         f"<td>{escape(str(row['phase']))}</td>"
@@ -3607,6 +3647,7 @@ def render_test_count_lab_section(section: dict[str, Any]) -> str:
         "<section class='panel'>"
         f"<h2><a href='{escape(section['href'])}' target='_blank' rel='noopener noreferrer'>{escape(section['lab'])}</a></h2>"
         f"<p class='muted'>{escape(section.get('note', ''))}</p>"
+        f"{execution_failure_html}"
         "<table>"
         f"<thead><tr><th>Phase</th><th>README</th><th>Console</th><th>{report_label}</th><th>HTML</th><th>Status</th></tr></thead>"
         f"<tbody>{rows_html}</tbody>"
@@ -4822,6 +4863,7 @@ def build_test_count_consistency_profile(
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
 
         phase_execution_failed = phase_has_failed_command_assertion(phase)
+        execution_failure_reason = phase_execution_failure_reason(phase) if phase_execution_failed else ""
 
         if phase.get("status") == "failed" and phase_execution_failed:
             status = "execution-failed"
@@ -4836,9 +4878,11 @@ def build_test_count_consistency_profile(
         else:
             status = "mismatch"
 
-        if comparable:
+        if status == "execution-failed":
+            all_consistent = False
+        elif comparable:
             all_consistent = all_consistent and consistent
-        elif status in {"mismatch", "execution-failed"}:
+        elif status == "mismatch":
             all_consistent = False
         comparisons.append(
             {
@@ -4857,6 +4901,7 @@ def build_test_count_consistency_profile(
                 "status": status,
                 "testCountsEnabled": validates_counts,
                 "expectedSources": expected_sources,
+                "executionFailureReason": execution_failure_reason,
             }
         )
 
@@ -4893,6 +4938,33 @@ def display_test_count_phase_label(
     if selected_summary:
         return path_leaf or summary_heading or selected_summary["label"]
     return fallback_phase_name or f"Phase {phase_index + 1}"
+
+
+def phase_execution_failure_reason(phase: dict[str, Any]) -> str:
+    for assertion in phase.get("assertions", []):
+        if assertion.get("status") != "failed" or assertion.get("category") != "command":
+            continue
+        message = str(assertion.get("message") or "Command execution failed.")
+        details = {
+            str(item.get("label")): str(item.get("value"))
+            for item in assertion.get("details", [])
+            if item.get("label")
+        }
+        command = details.get("Command") or str((phase.get("command") or {}).get("display") or "")
+        actual_exit_code = details.get("Actual exit code") or str((phase.get("command") or {}).get("exitCode") or "")
+        parts = [message]
+        if command:
+            parts.append(f"Command: {command}.")
+        if actual_exit_code:
+            parts.append(f"Actual exit code: {actual_exit_code}.")
+        return " ".join(parts)
+    command = phase.get("command") or {}
+    if command:
+        return (
+            f"Command execution failed. Command: {command.get('display', '(unknown)')}. "
+            f"Actual exit code: {command.get('exitCode', '(unknown)')}."
+        )
+    return "Command execution failed."
 
 
 def select_readme_summary_for_v2_phase(readme_phase: Any, phase_spec: Any | None = None) -> dict[str, str] | None:
@@ -5254,12 +5326,17 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
     verdict_items = []
     for lab in labs:
         comparisons = lab["testCountConsistency"].get("phases", [])
+        execution_failed = [item for item in comparisons if item.get("status") == "execution-failed"]
         mismatch_phases = [item["phase"] for item in comparisons if item.get("status") == "mismatch"]
         matched_phases = [item["phase"] for item in comparisons if item.get("status") == "match"]
         unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-available"]
         expected_unavailable_phases = [item["phase"] for item in comparisons if item.get("status") == "expected-not-applicable"]
         not_applicable_phases = [item["phase"] for item in comparisons if item.get("status") == "not-applicable"]
-        if mismatch_phases:
+        if execution_failed:
+            first = execution_failed[0]
+            reason = first.get("executionFailureReason") or "The phase command failed at runtime."
+            verdict_items.append(f"{lab['name']}: test execution failed in {first['phase']}. {reason}")
+        elif mismatch_phases:
             verdict_items.append(f"{lab['name']}: mismatches in {', '.join(mismatch_phases)}.")
         elif matched_phases:
             verdict_items.append(f"{lab['name']}: matching counts where data is available.")
@@ -5272,6 +5349,18 @@ def build_test_count_consistency_details(labs: list[dict[str, Any]]) -> dict[str
         else:
             verdict_items.append(f"{lab['name']}: no phase data was available to validate.")
         table_note = "Each row compares the README summary, console output, CTRF JSON, and Specmatic HTML for one phase. Missing sources are shown as not-available. When `test_counts: false` is configured, the row is treated as not applicable."
+        if execution_failed:
+            sections.append(
+                {
+                    "type": "bullets",
+                    "title": f"{lab['name']} execution failure reason",
+                    "tone": "attention",
+                    "items": [
+                        f"{item['phase']}: {item.get('executionFailureReason') or 'The phase command failed at runtime.'}"
+                        for item in execution_failed
+                    ],
+                }
+            )
         sections.append(
             {
                 "type": "table",
