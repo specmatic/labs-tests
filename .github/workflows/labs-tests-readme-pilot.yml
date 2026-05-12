@@ -8,10 +8,6 @@ on:
         required: false
         default: "dynamic-labs"
         type: string
-  pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
