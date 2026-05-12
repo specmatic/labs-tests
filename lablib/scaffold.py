@@ -146,6 +146,13 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         action="store_true",
         help="Required with --refresh-labs when ../labs has local changes. Discards tracked and untracked changes.",
     )
+    parser.add_argument(
+        "--enterprise-image",
+        help=(
+            "Optional Specmatic Enterprise Docker image or tag override. "
+            "When set, labs that support the shared pilot image override will use this image instead of specmatic/enterprise:latest."
+        ),
+    )
     return parser
 
 
@@ -327,10 +334,15 @@ def execute_phase(
     phase_log(phase, f"Starting verification for phase: {phase.name}...")
     phase_command = phase.command or spec.command
     phase_log(phase, f"Executing README command: '{shlex.join(phase_command)}'")
+    command_env = dict(spec.command_env)
+    enterprise_image = getattr(args, "enterprise_image", None)
+    if enterprise_image:
+        command_env["SPECMATIC_ENTERPRISE_IMAGE"] = enterprise_image
+
     result = run_command(
         phase_command,
         spec.upstream_lab,
-        env=spec.command_env,
+        env=command_env,
         stream_output=True,
         stream_prefix=f"[{phase_dir_name(phase)}]",
         timeout_seconds=phase.command_timeout_seconds,

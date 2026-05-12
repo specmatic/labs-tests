@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import unittest
 
 from lablib.readme_runner import build_readme_lab_spec
@@ -50,6 +51,28 @@ class ReadmeRunnerPilotTests(unittest.TestCase):
         self.assertEqual(
             task_a.fix_summary,
             ("Changed examples/test_finance_user_11.json so decision uses $match(pattern: approved|verified).",),
+        )
+
+    def test_enterprise_image_override_is_added_to_command_env(self) -> None:
+        spec = build_readme_lab_spec("api-coverage")
+        phase = spec.phases[0]
+        args = argparse.Namespace(
+            refresh_report=False,
+            skip_setup=True,
+            refresh_labs=False,
+            labs_branch="main",
+            force=False,
+            enterprise_image="ghcr.io/specmatic/enterprise:1.2.3-rc1",
+        )
+
+        command_env = dict(spec.command_env)
+        enterprise_image = getattr(args, "enterprise_image", None)
+        if enterprise_image:
+            command_env["SPECMATIC_ENTERPRISE_IMAGE"] = enterprise_image
+
+        self.assertEqual(
+            command_env["SPECMATIC_ENTERPRISE_IMAGE"],
+            "ghcr.io/specmatic/enterprise:1.2.3-rc1",
         )
 
 

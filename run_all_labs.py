@@ -70,6 +70,12 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         help="Create or replace ../labs/license.txt from the current local/GitHub license source before running and restore it afterward. Defaults to enabled.",
     )
+    parser.add_argument(
+        "--enterprise-image",
+        help=(
+            "Optional Specmatic Enterprise Docker image or tag override for pilot labs that support the shared image substitution mechanism."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -80,6 +86,7 @@ def setup_payload_from_result(args: argparse.Namespace, setup_result: Any) -> di
         "refreshLabs": args.refresh_labs,
         "labsBranch": args.labs_branch,
         "manageLicense": args.manage_license,
+        "enterpriseImage": args.enterprise_image or "",
         "force": args.force,
         "commands": list(setup_result.commands),
     }
@@ -134,6 +141,7 @@ def run_lab_and_collect_result(
         refresh_labs=False,
         labs_branch="main",
         force=False,
+        enterprise_image=args.enterprise_image,
     )
     exit_code = run_lab(spec, lab_args)
     report_json_path, report_html_path = snapshot_lab_output(lab)
@@ -187,6 +195,8 @@ def main() -> int:
 
         labs = filter_labs(discover_labs(), args.labs)
         print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
+        if args.enterprise_image:
+            print(f"[runtime] Enterprise image override: {args.enterprise_image}")
         lab_results, setup_payload = run_selected_labs(labs, args, setup_payload)
         return finalize_run(setup_payload, labs, lab_results)
     finally:

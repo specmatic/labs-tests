@@ -90,6 +90,7 @@ def empty_setup_payload(args: Any) -> dict[str, Any]:
         "refreshLabs": args.refresh_labs,
         "labsBranch": args.labs_branch,
         "manageLicense": args.manage_license,
+        "enterpriseImage": getattr(args, "enterprise_image", "") or "",
         "force": args.force,
         "commands": [],
     }
