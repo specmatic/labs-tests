@@ -1,60 +1,10 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-import socket
-
 from lablib.scaffold import ValidationContext, assert_condition, detail
 
 
 BASELINE_PATH = "/pets/search:"
 FIXED_PATH = "/pets/find:"
-
-
-def files(upstream_lab: Path) -> dict[str, Path]:
-    return {"service_spec": upstream_lab / "specs" / "service.yaml"}
-
-
-def command_env() -> dict[str, str]:
-    return {"PETSTORE_PORT": str(allocate_free_port())}
-
-
-def phase_file_transforms(phase_id: str, phase_title: str) -> dict:
-    if phase_id == "baseline":
-        return {"service_spec": set_baseline_contract}
-    if phase_id == "final":
-        return {"service_spec": set_fixed_contract}
-    return {}
-
-
-def extra_assertions(phase_id: str, phase_title: str):
-    if phase_id == "baseline":
-        return baseline_assertions
-    if phase_id == "final":
-        return fixed_assertions
-    return None
-
-
-def fix_summary(phase_id: str, phase_title: str) -> tuple[str, ...]:
-    if phase_id == "final":
-        return (
-            "Changed the contract path from GET /pets/search to GET /pets/find in specs/service.yaml.",
-            "Re-ran the same Specmatic test command against the running provider to confirm both operations are covered.",
-        )
-    return ()
-
-
-def allocate_free_port() -> int:
-    configured = os.getenv("PETSTORE_PORT")
-    if configured:
-        return int(configured)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind(("127.0.0.1", 0))
-        except PermissionError:
-            return 18080
-        sock.listen(1)
-        return int(sock.getsockname()[1])
 
 
 def baseline_assertions(context: ValidationContext) -> list[dict]:

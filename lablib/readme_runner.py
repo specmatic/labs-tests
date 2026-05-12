@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib.util
+import os
 from pathlib import Path
 import re
 import shlex
+import socket
 from types import ModuleType
 from typing import Any, Callable
 
 from lablib.readme_expectations import command_output_skip_reason
-from lablib.readme_schema import CodeBlock, Heading, extract_code_blocks, extract_headings, parse_readme_document
+from lablib.readme_schema import CodeBlock, Heading, extract_code_blocks, extract_headings, parse_readme_document, parse_simple_yaml
 from lablib.scaffold import ArtifactSpec, LabSpec, PhaseSpec, clear_docker_owned_build_dir, docker_compose_down
 
 
@@ -94,6 +96,26 @@ class LabHooks:
     def fix_summary(self, phase_id: str, phase_title: str) -> tuple[str, ...]:
         return tuple(call_hook(self.module, "fix_summary", (), phase_id, phase_title))
 
+    def function(self, name: str) -> Any:
+        if self.module is None or not hasattr(self.module, name):
+            raise RuntimeError(f"Hook function {name} was not found.")
+        return getattr(self.module, name)
+
+
+@dataclass(frozen=True)
+class ReadmePhaseConfig:
+    file_transforms: dict[str, str]
+    extra_assertions: str | None
+    fix_summary: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ReadmeLabConfig:
+    files: dict[str, Path]
+    common_artifact_specs: tuple[ArtifactSpec, ...]
+    command_env: dict[str, str]
+    phases: dict[str, ReadmePhaseConfig]
+
 
 def parse_lab_execution_plan(upstream_lab_path: Path) -> ReadmeExecutionPlan:
     readme_path = upstream_lab_path / "README.md"
@@ -112,10 +134,11 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
     upstream_lab = UPSTREAM_LABS / lab_name
     plan = parse_lab_execution_plan(upstream_lab)
     hooks = load_lab_hooks(lab_name)
+    config = load_lab_config(lab_name, upstream_lab, hooks)
     readme_path = plan.readme_path
-    specmatic_yaml = upstream_lab / "specmatic.yaml"
-    default_file = specmatic_yaml if specmatic_yaml.exists() else readme_path
-    files = {"default": default_file, **hooks.files(upstream_lab)}
+    files = config.files if config is not None else hooks.files(upstream_lab)
+    if not files:
+        files = {"readme": readme_path}
     return LabSpec(
         name=lab_name,
         description=f"README-driven automation for {lab_name}.",
@@ -125,7 +148,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
         readme_path=readme_path,
         output_dir=ROOT / lab_name / "output",
         command=plan.phases[0].command if plan.phases else ["true"],
-        command_env=hooks.command_env(),
+        command_env=config.command_env if config is not None else hooks.command_env(),
         phases=tuple(
             PhaseSpec(
                 name=phase.title,
@@ -134,13 +157,15 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
                 readme_phase_id=phase.id,
                 command=phase.command,
                 output_dir_name=phase.output_dir_name,
-                file_transforms=hooks.phase_file_transforms(phase.id, phase.title),
-                extra_assertions=hooks.extra_assertions(phase.id, phase.title),
-                fix_summary=hooks.fix_summary(phase.id, phase.title),
+                file_transforms=phase_file_transforms_from_config(config, hooks, phase.id, phase.title),
+                extra_assertions=extra_assertions_from_config(config, hooks, phase.id, phase.title),
+                fix_summary=fix_summary_from_config(config, hooks, phase.id, phase.title),
             )
             for phase in plan.phases
         ),
-        common_artifact_specs=default_specmatic_artifacts() + hooks.common_artifact_specs(),
+        common_artifact_specs=default_specmatic_artifacts() + (
+            config.common_artifact_specs if config is not None else hooks.common_artifact_specs()
+        ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
     )
@@ -148,6 +173,44 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
 
 def load_lab_hooks(lab_name: str) -> LabHooks:
     return load_hooks_from_path(ROOT / lab_name / "hooks.py", module_name=f"labs_tests_hooks_{slug(lab_name)}")
+
+
+def load_lab_config(lab_name: str, upstream_lab: Path, hooks: LabHooks) -> ReadmeLabConfig | None:
+    config_path = ROOT / "lablib" / "lab_configs" / f"{lab_name}.yaml"
+    if not config_path.exists():
+        return None
+    payload = parse_simple_yaml(config_path.read_text(encoding="utf-8"))
+    file_map = {
+        str(alias): str(relative_path)
+        for alias, relative_path in (payload.get("files") or {}).items()
+    }
+    common_artifact_specs = tuple(
+        artifact_spec_from_config(item)
+        for item in (payload.get("common_artifact_specs") or [])
+    )
+    command_env = resolve_command_env(payload.get("command_env") or {}, hooks)
+    phase_payload = payload.get("phases") or {}
+    phases = {
+        str(phase_id): ReadmePhaseConfig(
+            file_transforms={
+                str(alias): str(hook_name)
+                for alias, hook_name in ((phase_config or {}).get("file_transforms") or {}).items()
+            },
+            extra_assertions=(
+                str((phase_config or {}).get("extra_assertions"))
+                if (phase_config or {}).get("extra_assertions")
+                else None
+            ),
+            fix_summary=tuple(str(item) for item in ((phase_config or {}).get("fix_summary") or [])),
+        )
+        for phase_id, phase_config in phase_payload.items()
+    }
+    return ReadmeLabConfig(
+        files={alias: upstream_lab / relative_path for alias, relative_path in file_map.items()},
+        common_artifact_specs=common_artifact_specs,
+        command_env=command_env,
+        phases=phases,
+    )
 
 
 def load_hooks_from_path(path: Path, *, module_name: str = "labs_tests_hooks") -> LabHooks:
@@ -172,6 +235,75 @@ def call_hook(module: ModuleType | None, name: str, default: Any, *args: Any) ->
         return hook(*args)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Hook {module.__name__}.{name} failed: {exc}") from exc
+
+
+def artifact_spec_from_config(payload: dict[str, Any]) -> ArtifactSpec:
+    return ArtifactSpec(
+        label=str(payload["label"]),
+        source_relpath=str(payload["source_relpath"]),
+        target_relpath=str(payload["target_relpath"]),
+        kind=str(payload["kind"]),
+        expected_top_level_keys=tuple(str(item) for item in (payload.get("expected_top_level_keys") or [])),
+        expected_markers=tuple(str(item) for item in (payload.get("expected_markers") or [])),
+    )
+
+
+def resolve_command_env(payload: dict[str, Any], hooks: LabHooks) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for name, value in payload.items():
+        if isinstance(value, dict):
+            hook_name = value.get("hook")
+            if not hook_name:
+                raise RuntimeError(f"Command env entry {name} is missing a hook name.")
+            hook = SHARED_VALUE_HOOKS.get(str(hook_name))
+            if hook is None:
+                raise RuntimeError(f"Unknown shared value hook: {hook_name}")
+            resolved[str(name)] = str(hook(value))
+        else:
+            resolved[str(name)] = str(value)
+    return resolved
+
+
+def phase_file_transforms_from_config(
+    config: ReadmeLabConfig | None,
+    hooks: LabHooks,
+    phase_id: str,
+    phase_title: str,
+) -> dict[str, Callable[[str], str]]:
+    if config is None:
+        return hooks.phase_file_transforms(phase_id, phase_title)
+    phase = config.phases.get(phase_id)
+    if phase is None:
+        return {}
+    return {alias: hooks.function(hook_name) for alias, hook_name in phase.file_transforms.items()}
+
+
+def extra_assertions_from_config(
+    config: ReadmeLabConfig | None,
+    hooks: LabHooks,
+    phase_id: str,
+    phase_title: str,
+) -> Callable[[Any], list[dict[str, Any]]] | None:
+    if config is None:
+        return hooks.extra_assertions(phase_id, phase_title)
+    phase = config.phases.get(phase_id)
+    if phase is None or phase.extra_assertions is None:
+        return None
+    return hooks.function(phase.extra_assertions)
+
+
+def fix_summary_from_config(
+    config: ReadmeLabConfig | None,
+    hooks: LabHooks,
+    phase_id: str,
+    phase_title: str,
+) -> tuple[str, ...]:
+    if config is None:
+        return hooks.fix_summary(phase_id, phase_title)
+    phase = config.phases.get(phase_id)
+    if phase is None:
+        return ()
+    return phase.fix_summary
 
 
 def extract_readme_phase_sections(readme_text: str) -> tuple[ReadmePhaseSection, ...]:
@@ -328,6 +460,27 @@ def phase_output_dir_name(section: ReadmePhaseSection) -> str:
 def slug(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return normalized or "phase"
+
+
+def allocate_free_port_value(payload: dict[str, Any]) -> str:
+    env_var = str(payload.get("env_var", "")).strip()
+    if env_var:
+        configured = os.getenv(env_var)
+        if configured:
+            return configured
+    default = str(payload.get("default", "18080"))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", 0))
+        except PermissionError:
+            return default
+        sock.listen(1)
+        return str(int(sock.getsockname()[1]))
+
+
+SHARED_VALUE_HOOKS: dict[str, Callable[[dict[str, Any]], str]] = {
+    "allocate_free_port": allocate_free_port_value,
+}
 
 
 def default_specmatic_artifacts() -> tuple[ArtifactSpec, ...]:

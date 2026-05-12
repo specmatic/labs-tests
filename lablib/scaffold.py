@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 from typing import Any, Callable
 
@@ -166,13 +167,13 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     spec.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.refresh_report:
-        print("Refreshing the report from existing captured artifacts...")
+        print("Refreshing report from existing captured artifacts...")
         phases = rebuild_phases_from_artifacts(spec, readme_text, readme_doc, original_files)
     else:
         phases = []
         try:
             if not args.skip_setup:
-                print("Running workspace setup before lab execution...")
+                print("Running lab setup before execution...")
                 setup_result = run_setup(
                     stream_output=True,
                     refresh_labs=args.refresh_labs,
@@ -185,7 +186,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 
             run_best_effort_runtime_cleanup(spec, "before lab execution")
             for phase in spec.phases:
-                print(f"Preparing {phase.name.lower()} lab state...")
+                print(f"Preparing lab state for phase: {phase.name}...")
                 apply_phase_files(spec, phase, original_files)
                 phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
                 phases.append(phase_result)
@@ -323,10 +324,9 @@ def execute_phase(
     if spec.clear_reports is not None:
         spec.clear_reports(spec)
 
-    print(f"{phase.name}: starting verification...")
+    print(f"Starting verification for phase: {phase.name}...")
     phase_command = phase.command or spec.command
-    print(f"{phase.name}: parsed command from README: {' '.join(phase_command)}")
-    print(f"{phase.name}: executing README command.")
+    print(f"Executing README command: '{shlex.join(phase_command)}'")
     result = run_command(
         phase_command,
         spec.upstream_lab,
@@ -718,7 +718,7 @@ def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str,
     for alias, path in spec.files.items():
         transform = phase.file_transforms.get(alias)
         if transform is not None:
-            print(f"{phase.name}: applying hook transform for {alias} -> {path}")
+            print(f"Applying hook transform for phase '{phase.name}': '{alias}' -> '{path}'")
         original_content = original_files[alias]
         content = original_content if transform is None else transform(original_content or "")
         if content is None:

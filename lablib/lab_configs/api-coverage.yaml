@@ -1,0 +1,19 @@
+files:
+  service_spec: specs/service.yaml
+command_env:
+  PETSTORE_PORT:
+    hook: allocate_free_port
+    env_var: PETSTORE_PORT
+    default: 18080
+phases:
+  baseline:
+    file_transforms:
+      service_spec: set_baseline_contract
+    extra_assertions: baseline_assertions
+  final:
+    file_transforms:
+      service_spec: set_fixed_contract
+    extra_assertions: fixed_assertions
+    fix_summary:
+      - Changed the contract path from GET /pets/search to GET /pets/find in specs/service.yaml.
+      - Re-ran the same Specmatic test command against the running provider to confirm both operations are covered.
