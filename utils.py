@@ -70,7 +70,7 @@ def validate_license_prerequisites(args: Any) -> int | None:
         print("")
         print("Fix the license setup issue above and rerun the labs.")
         print(f"Setup details: {SETUP_OUTPUT_PATH}")
-        return 1
+        return write_failed_run_reports(setup_payload)
     return None
 
 
