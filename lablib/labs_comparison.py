@@ -28,6 +28,7 @@ from lablib.readme_schema import (
     parse_readme_document,
     parse_required_implementation_phases,
 )
+from lablib.readme_runner import build_readme_lab_spec
 from lablib.provenance import detect_report_provenance
 from lablib.time_display import format_report_datetime
 
@@ -136,10 +137,11 @@ def generate_labs_comparison(
 ) -> dict[str, Any]:
     repo_root = root or ROOT
     selected = set(discover_report_lab_names(repo_root) if lab_names is None else lab_names)
-    run_files = sorted(repo_root.glob("*/run.py"))
     if selected:
-        run_files = [path for path in run_files if path.parent.name in selected]
-    labs = [build_lab_profile(path.parent) for path in run_files]
+        lab_dirs = [repo_root / lab_name for lab_name in sorted(selected)]
+    else:
+        lab_dirs = [repo_root / lab_name for lab_name in discover_lab_names(repo_root)]
+    labs = [build_lab_profile(lab_dir) for lab_dir in lab_dirs if lab_dir.exists()]
     common_required_h2 = list(tuple(labs[0]["readme"]["requiredH2"]) if labs else ())
     validation_rows = build_validation_rows(labs)
     payload = {
@@ -200,17 +202,32 @@ def discover_report_lab_names(root: Path | None = None) -> list[str]:
     )
     if discovered:
         return discovered
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
+    return discover_lab_names(repo_root)
 
 
 def discover_lab_names(root: Path | None = None) -> list[str]:
     repo_root = root or ROOT
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
+    return sorted(
+        {
+            path.parent.name
+            for path in repo_root.glob("*/run.py")
+            if not_in_excluded(path.parent.name)
+        }
+        | {
+            path.stem
+            for path in (repo_root / "lablib" / "lab_configs").glob("*.yaml")
+            if not_in_excluded(path.stem)
+        }
+    )
 
 
 def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
-    module = load_lab_module(lab_dir / "run.py")
-    spec = module.build_lab_spec()
+    run_file = lab_dir / "run.py"
+    if run_file.exists():
+        module = load_lab_module(run_file)
+        spec = module.build_lab_spec()
+    else:
+        spec = build_readme_lab_spec(lab_dir.name)
     common_artifacts = [artifact_profile(artifact) for artifact in spec.common_artifact_specs]
     phase_artifacts = []
     for phase in spec.phases:

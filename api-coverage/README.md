@@ -9,37 +9,19 @@ validate the optional Specmatic Studio follow-up flow.
 Run it with:
 
 ```bash
-python3 api-coverage/run.py
+python3 run_all_labs.py --labs api-coverage
 ```
 
 To first force the sibling `../labs` checkout back to the latest `main`:
 
 ```bash
-python3 api-coverage/run.py --refresh-labs --force
-```
-
-Or from inside this folder:
-
-```bash
-python3 run.py
+python3 run_all_labs.py --labs api-coverage --refresh-labs --force
 ```
 
 To rebuild `report.json` and `report.html` from the existing captured artifacts without rerunning Docker:
 
 ```bash
-python3 api-coverage/run.py --refresh-report
-```
-
-Or from inside this folder:
-
-```bash
-python3 run.py --refresh-report
-```
-
-From inside this folder, the destructive refresh form is:
-
-```bash
-python3 run.py --refresh-labs --force
+python3 run_all_labs.py --labs api-coverage --refresh-report
 ```
 
 To run the shared setup stage independently from the repo root:
@@ -57,13 +39,13 @@ python3 setup.py --refresh-labs --force
 To run every available lab harness and build a consolidated report from the repo root:
 
 ```bash
-python3 run_all.py
+python3 run_all_labs.py
 ```
 
 To refresh all available lab reports and the consolidated report from previously captured artifacts:
 
 ```bash
-python3 run_all.py --refresh-report
+python3 run_all_labs.py --refresh-report
 ```
 
 Outputs are written to:

@@ -219,12 +219,12 @@ def clean_lab_output_dir(spec: LabSpec) -> None:
 def run_best_effort_runtime_cleanup(spec: LabSpec, when: str) -> None:
     if spec.post_phase_cleanup is None:
         return
-    print(f"Running runtime cleanup {when}...", flush=True)
+    print(f"[cleanup] Running runtime cleanup {when}...", flush=True)
     try:
         spec.post_phase_cleanup(spec)
     except Exception as exc:
         print(
-            f"[warning] Runtime cleanup {when} failed for {spec.name}: {exc}. "
+            f"[cleanup] [warning] Runtime cleanup {when} failed for {spec.name}: {exc}. "
             "Impact: stale containers, networks, or volumes may affect later phases or labs. "
             "Action required: inspect the Docker state and rerun the lab if needed.",
             flush=True,
@@ -780,7 +780,7 @@ def build_missing_artifact_phase_result(
                     detail("Reason", str(error)),
                     detail(
                         "How to fix",
-                        f"Rerun `python3 {spec.name}/run.py` without `--refresh-report` to regenerate the missing artifacts, then rerun `python3 rebuild_reports.py` or `python3 run_all.py --refresh-report`.",
+                        f"Rerun `python3 run_all_labs.py --labs {spec.name}` without `--refresh-report` to regenerate the missing artifacts, then rerun `python3 run_all_labs.py --labs {spec.name} --refresh-report`.",
                     ),
                     detail("Phase output folder", target_dir),
                 ],

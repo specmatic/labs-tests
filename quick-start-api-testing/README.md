@@ -9,25 +9,19 @@ validate the optional Specmatic Studio flow.
 Run it with:
 
 ```bash
-python3 quick-start-api-testing/run.py
-```
-
-Or from inside this folder:
-
-```bash
-python3 run.py
+python3 run_all_labs.py --labs quick-start-api-testing
 ```
 
 To rebuild `report.json` and `report.html` from the existing captured artifacts without rerunning Docker:
 
 ```bash
-python3 quick-start-api-testing/run.py --refresh-report
+python3 run_all_labs.py --labs quick-start-api-testing --refresh-report
 ```
 
 To first force the sibling `../labs` checkout back to the latest `main`:
 
 ```bash
-python3 quick-start-api-testing/run.py --refresh-labs --force
+python3 run_all_labs.py --labs quick-start-api-testing --refresh-labs --force
 ```
 
 Outputs are written to:

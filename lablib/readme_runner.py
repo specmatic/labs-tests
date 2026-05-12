@@ -78,24 +78,6 @@ class ReadmePhaseSection:
 class LabHooks:
     module: ModuleType | None = None
 
-    def files(self, upstream_lab: Path) -> dict[str, Path]:
-        return call_hook(self.module, "files", {}, upstream_lab)
-
-    def common_artifact_specs(self) -> tuple[ArtifactSpec, ...]:
-        return tuple(call_hook(self.module, "common_artifact_specs", ()))
-
-    def command_env(self) -> dict[str, str]:
-        return call_hook(self.module, "command_env", {})
-
-    def phase_file_transforms(self, phase_id: str, phase_title: str) -> dict[str, Callable[[str], str]]:
-        return call_hook(self.module, "phase_file_transforms", {}, phase_id, phase_title)
-
-    def extra_assertions(self, phase_id: str, phase_title: str) -> Callable[[Any], list[dict[str, Any]]] | None:
-        return call_hook(self.module, "extra_assertions", None, phase_id, phase_title)
-
-    def fix_summary(self, phase_id: str, phase_title: str) -> tuple[str, ...]:
-        return tuple(call_hook(self.module, "fix_summary", (), phase_id, phase_title))
-
     def function(self, name: str) -> Any:
         if self.module is None or not hasattr(self.module, name):
             raise RuntimeError(f"Hook function {name} was not found.")
@@ -134,9 +116,9 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
     upstream_lab = UPSTREAM_LABS / lab_name
     plan = parse_lab_execution_plan(upstream_lab)
     hooks = load_lab_hooks(lab_name)
-    config = load_lab_config(lab_name, upstream_lab, hooks)
+    config = load_lab_config(lab_name, upstream_lab)
     readme_path = plan.readme_path
-    files = config.files if config is not None else hooks.files(upstream_lab)
+    files = config.files if config is not None else {}
     if not files:
         files = {"readme": readme_path}
     return LabSpec(
@@ -148,7 +130,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
         readme_path=readme_path,
         output_dir=ROOT / lab_name / "output",
         command=plan.phases[0].command if plan.phases else ["true"],
-        command_env=config.command_env if config is not None else hooks.command_env(),
+        command_env=config.command_env if config is not None else {},
         phases=tuple(
             PhaseSpec(
                 name=phase.title,
@@ -164,7 +146,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
             for phase in plan.phases
         ),
         common_artifact_specs=default_specmatic_artifacts() + (
-            config.common_artifact_specs if config is not None else hooks.common_artifact_specs()
+            config.common_artifact_specs if config is not None else ()
         ),
         clear_reports=clear_previous_reports,
         post_phase_cleanup=teardown_compose,
@@ -175,7 +157,7 @@ def load_lab_hooks(lab_name: str) -> LabHooks:
     return load_hooks_from_path(ROOT / lab_name / "hooks.py", module_name=f"labs_tests_hooks_{slug(lab_name)}")
 
 
-def load_lab_config(lab_name: str, upstream_lab: Path, hooks: LabHooks) -> ReadmeLabConfig | None:
+def load_lab_config(lab_name: str, upstream_lab: Path) -> ReadmeLabConfig | None:
     config_path = ROOT / "lablib" / "lab_configs" / f"{lab_name}.yaml"
     if not config_path.exists():
         return None
@@ -188,7 +170,7 @@ def load_lab_config(lab_name: str, upstream_lab: Path, hooks: LabHooks) -> Readm
         artifact_spec_from_config(item)
         for item in (payload.get("common_artifact_specs") or [])
     )
-    command_env = resolve_command_env(payload.get("command_env") or {}, hooks)
+    command_env = resolve_command_env(payload.get("command_env") or {})
     phase_payload = payload.get("phases") or {}
     phases = {
         str(phase_id): ReadmePhaseConfig(
@@ -227,16 +209,6 @@ def load_hooks_from_path(path: Path, *, module_name: str = "labs_tests_hooks") -
     return LabHooks(module)
 
 
-def call_hook(module: ModuleType | None, name: str, default: Any, *args: Any) -> Any:
-    if module is None or not hasattr(module, name):
-        return default
-    hook = getattr(module, name)
-    try:
-        return hook(*args)
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Hook {module.__name__}.{name} failed: {exc}") from exc
-
-
 def artifact_spec_from_config(payload: dict[str, Any]) -> ArtifactSpec:
     return ArtifactSpec(
         label=str(payload["label"]),
@@ -248,7 +220,7 @@ def artifact_spec_from_config(payload: dict[str, Any]) -> ArtifactSpec:
     )
 
 
-def resolve_command_env(payload: dict[str, Any], hooks: LabHooks) -> dict[str, str]:
+def resolve_command_env(payload: dict[str, Any]) -> dict[str, str]:
     resolved: dict[str, str] = {}
     for name, value in payload.items():
         if isinstance(value, dict):
@@ -271,7 +243,7 @@ def phase_file_transforms_from_config(
     phase_title: str,
 ) -> dict[str, Callable[[str], str]]:
     if config is None:
-        return hooks.phase_file_transforms(phase_id, phase_title)
+        return {}
     phase = config.phases.get(phase_id)
     if phase is None:
         return {}
@@ -285,7 +257,7 @@ def extra_assertions_from_config(
     phase_title: str,
 ) -> Callable[[Any], list[dict[str, Any]]] | None:
     if config is None:
-        return hooks.extra_assertions(phase_id, phase_title)
+        return None
     phase = config.phases.get(phase_id)
     if phase is None or phase.extra_assertions is None:
         return None
@@ -299,7 +271,7 @@ def fix_summary_from_config(
     phase_title: str,
 ) -> tuple[str, ...]:
     if config is None:
-        return hooks.fix_summary(phase_id, phase_title)
+        return ()
     phase = config.phases.get(phase_id)
     if phase is None:
         return ()

@@ -99,7 +99,6 @@ def execute_initial_workspace_setup(args: argparse.Namespace) -> tuple[dict[str,
         target_branch=args.labs_branch,
         force=args.force,
         lab_names=args.labs,
-        include_docker_setup=False,
     )
     setup_payload = setup_payload_from_result(args, setup_result)
     write_setup_payload(setup_payload)
