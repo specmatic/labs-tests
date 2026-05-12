@@ -4874,7 +4874,7 @@ def display_test_count_phase_label(
     if readme_phase_name:
         return readme_phase_name
     if selected_summary:
-        return selected_summary["label"]
+        return path_leaf or summary_heading or selected_summary["label"]
     return fallback_phase_name or f"Phase {phase_index + 1}"
 
 
