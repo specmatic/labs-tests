@@ -133,7 +133,7 @@ def execute_shared_setup(args: Any) -> tuple[dict[str, Any] | None, int | None]:
     if args.skip_setup:
         return None, None
 
-    print("Running shared workspace setup...")
+    print("Running shared setup for the sibling labs repository...")
     setup_result = run_setup(
         stream_output=True,
         refresh_labs=args.refresh_labs,

@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-setup",
         action="store_true",
-        help="Skip the shared workspace setup stage.",
+        help="Skip the shared sibling labs repository setup stage.",
     )
     parser.add_argument(
         "--refresh-labs",
