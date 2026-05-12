@@ -17,7 +17,6 @@ from lablib.workspace_setup import run_setup, setup_failure_action_lines, setup_
 from utils import (
     discover_labs,
     display_lab_status,
-    empty_setup_payload,
     filter_labs,
     finalize_run,
     initialize_output_workspace,
@@ -116,48 +115,6 @@ def execute_initial_workspace_setup(args: argparse.Namespace) -> tuple[dict[str,
     return setup_payload, write_failed_run_reports(setup_payload)
 
 
-def run_jit_setup_for_lab(lab: str, args: argparse.Namespace, setup_payload: dict[str, Any] | None) -> tuple[bool, dict[str, Any]]:
-    payload = setup_payload or empty_setup_payload(args)
-    if args.refresh_report or args.skip_setup:
-        return True, payload
-
-    print(f"Running setup for {lab}...")
-    setup_result = run_setup(
-        stream_output=True,
-        refresh_labs=False,
-        target_branch=args.labs_branch,
-        force=args.force,
-        lab_names=[lab],
-    )
-    payload["commands"] = [*payload.get("commands", []), *setup_result.commands]
-    if setup_result.status != "passed":
-        payload["status"] = "failed"
-        print()
-        for line in setup_failure_error_lines(setup_result.commands):
-            print(line)
-        print()
-        for line in setup_failure_action_lines(setup_result.commands):
-            print(line)
-    write_setup_payload(payload)
-    return setup_result.status == "passed", payload
-
-
-def setup_failed_lab_result(lab: str) -> dict[str, Any]:
-    report_json_path, report_html_path = snapshot_lab_output(lab)
-    return {
-        "name": lab,
-        "readmeHref": upstream_readme_href(lab),
-        "status": "failed",
-        "displayStatus": "Setup Failed",
-        "exitCode": 1,
-        "durationSeconds": 0.0,
-        "reportJsonPath": str(report_json_path),
-        "reportHtmlPath": str(report_html_path),
-        "summary": [],
-        "report": None,
-    }
-
-
 def run_lab_and_collect_result(
     lab: str,
     index: int,
@@ -170,10 +127,6 @@ def run_lab_and_collect_result(
     print(f"{'REFRESHING REPORT FOR' if args.refresh_report else 'RUNNING LAB'}: {lab}")
     print(f"Lab # {index} of {total_labs}")
     print("=" * 78)
-
-    setup_ok, setup_payload = run_jit_setup_for_lab(lab, args, setup_payload)
-    if not setup_ok:
-        return setup_failed_lab_result(lab), setup_payload
 
     spec = build_readme_lab_spec(lab)
     lab_args = SimpleNamespace(

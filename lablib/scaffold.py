@@ -186,7 +186,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 
             run_best_effort_runtime_cleanup(spec, "before lab execution")
             for phase in spec.phases:
-                print(f"Preparing lab state for phase: {phase.name}...")
+                phase_log(phase, f"Preparing lab state for phase: {phase.name}...")
                 apply_phase_files(spec, phase, original_files)
                 phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
                 phases.append(phase_result)
@@ -324,9 +324,9 @@ def execute_phase(
     if spec.clear_reports is not None:
         spec.clear_reports(spec)
 
-    print(f"Starting verification for phase: {phase.name}...")
+    phase_log(phase, f"Starting verification for phase: {phase.name}...")
     phase_command = phase.command or spec.command
-    print(f"Executing README command: '{shlex.join(phase_command)}'")
+    phase_log(phase, f"Executing README command: '{shlex.join(phase_command)}'")
     result = run_command(
         phase_command,
         spec.upstream_lab,
@@ -718,7 +718,7 @@ def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str,
     for alias, path in spec.files.items():
         transform = phase.file_transforms.get(alias)
         if transform is not None:
-            print(f"Applying hook transform for phase '{phase.name}': '{alias}' -> '{path}'")
+            phase_log(phase, f"Applying hook transform for phase '{phase.name}': '{alias}' -> '{path}'")
         original_content = original_files[alias]
         content = original_content if transform is None else transform(original_content or "")
         if content is None:
@@ -820,6 +820,10 @@ def phase_dir_name(phase: PhaseSpec) -> str:
     if phase.output_dir_name:
         return phase.output_dir_name
     return "baseline" if "baseline" in phase.name.lower() else "fixed"
+
+
+def phase_log(phase: PhaseSpec, message: str) -> None:
+    print(f"[{phase_dir_name(phase)}] {message}", flush=True)
 
 
 def write_text(path: Path, content: str) -> None:
