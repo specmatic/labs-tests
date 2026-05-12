@@ -1,0 +1,200 @@
+name: Specmatic Labs README-Driven Pilot Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      labs_branch:
+        description: "Optional branch of specmatic/labs to refresh before running. Defaults to dynamic-labs."
+        required: false
+        default: "dynamic-labs"
+        type: string
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  run-readme-pilot-labs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      SPECMATIC_LICENSE_KEY: ${{ secrets.SPECMATIC_LICENSE_KEY }}
+      PILOT_LABS: api-coverage quick-start-api-testing
+
+    steps:
+      - name: Check out labs-tests
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 3
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Run README-driven pilot labs
+        id: run_labs
+        shell: bash
+        env:
+          EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
+        timeout-minutes: 60
+        run: |
+          set +e
+          echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
+          echo "[config] effective labs branch: '${EFFECTIVE_LABS_BRANCH}'"
+          echo "[config] manage license.txt: 'true'"
+          echo "[config] selected README-driven pilot labs: '${PILOT_LABS}'"
+          start_time=$(date +%s)
+          read -r -a selected_labs <<< "${PILOT_LABS}"
+          run_command=(python3 -u run_all_labs.py --refresh-labs --force --labs-branch "${EFFECTIVE_LABS_BRANCH}" --labs "${selected_labs[@]}")
+          echo "[config] executing: ${run_command[*]}"
+          "${run_command[@]}" &
+          run_pid=$!
+
+          while kill -0 "$run_pid" 2>/dev/null; do
+            now=$(date +%s)
+            elapsed=$((now - start_time))
+            minutes=$((elapsed / 60))
+            seconds=$((elapsed % 60))
+            echo "[heartbeat] run_all_labs.py still running after ${minutes}m ${seconds}s"
+            sleep 60
+          done
+
+          wait "$run_pid"
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build GitHub summary
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          report_candidates = [
+              Path("output/consolidated-report/consolidated-report.json"),
+              Path("output/consolidated-report.json"),
+          ]
+          report_path = next((path for path in report_candidates if path.exists()), None)
+          comparison_path = Path("output/consolidated-report/labs-comparison.html")
+          comparison_json_path = Path("output/consolidated-report/labs-comparison.json")
+
+          if report_path is None:
+              print("## Specmatic Labs README-Driven Pilot Tests")
+              print("")
+              print("[error] The consolidated report was not generated.")
+              print("")
+              print("Impact: the GitHub Actions job summary cannot show lab results without the consolidated JSON payload.")
+              print("")
+              print("[Action required]")
+              print("")
+              print("Inspect the run_all_labs.py logs above and confirm that output/consolidated-report/consolidated-report.json is created before the summary step runs.")
+              raise SystemExit(0)
+
+          payload = json.loads(report_path.read_text(encoding="utf-8"))
+          environment = payload.get("environment", {})
+          summary = {item["label"]: item["value"] for item in payload.get("summary", [])}
+          setup = payload.get("setup") or {}
+          status_text = payload.get("status", "unknown").upper()
+          required_labels = {
+              "Command and Output fencing validation",
+              "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
+          }
+          if comparison_json_path.exists():
+              try:
+                  comparison_payload = json.loads(comparison_json_path.read_text(encoding="utf-8"))
+                  rows_for_status = [
+                      row
+                      for row in comparison_payload.get("validationMatrix", {}).get("rows", [])
+                      if row.get("label") in required_labels
+                  ]
+                  if rows_for_status:
+                      status_text = "PASSED" if all(bool(row.get("overallPassed")) for row in rows_for_status) else "FAILED"
+              except Exception:
+                  pass
+
+          print("## Specmatic Labs README-Driven Pilot Tests")
+          print("")
+          print(f"- Status: **{status_text}**")
+          print("- Pilot labs: `api-coverage quick-start-api-testing`")
+          print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
+          print(f"- Labs branch requested: `{environment.get('labsBranchRequested', setup.get('labsBranch', 'n/a'))}`")
+          print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
+          print(f"- Setup: `{setup.get('status', 'n/a')}`")
+          print(f"- Labs discovered: `{summary.get('Labs discovered', 0)}`")
+          print(f"- Labs passed: `{summary.get('Labs passed', 0)}`")
+          print(f"- Labs failed: `{summary.get('Labs failed', 0)}`")
+          print(f"- Consolidated report JSON: `{report_path.as_posix()}`")
+          print(f"- Comparison report HTML: `{comparison_path.as_posix()}`" if comparison_path.exists() else "- Comparison report HTML: `not generated`")
+          print("- Reports artifact: `specmatic-labs-readme-pilot-reports`")
+          print("")
+          matrix_rows = []
+          matrix_columns = []
+          if comparison_json_path.exists():
+              try:
+                  comparison_payload = json.loads(comparison_json_path.read_text(encoding="utf-8"))
+                  matrix = comparison_payload.get("validationMatrix", {})
+                  matrix_rows = [row for row in matrix.get("rows", []) if row.get("label") in required_labels]
+                  matrix_columns = list(matrix.get("columns", []))
+              except Exception:
+                  matrix_rows = []
+                  matrix_columns = []
+          print("| Lab | Status | Time (s) | Exit Code | Failures | Total tests |")
+          print("| --- | --- | ---: | ---: | ---: | ---: |")
+          for lab in payload.get("labs", []):
+              status = lab.get("status", "unknown")
+              col_index = next(
+                  (
+                      index
+                      for index, column in enumerate(matrix_columns)
+                      if str(column.get("name", "")) == str(lab.get("name", ""))
+                  ),
+                  None,
+              )
+              if matrix_rows and col_index is not None:
+                  per_lab_pass = all(
+                      col_index < len(row.get("cells", [])) and bool(row.get("cells", [])[col_index])
+                      for row in matrix_rows
+                  )
+                  status_symbol = "✅" if per_lab_pass else "❌"
+              else:
+                  status_symbol = "✅" if status == "passed" else "❌" if status == "failed" else status
+              failures = "n/a"
+              validations = "n/a"
+              for item in lab.get("summary", []):
+                  if item.get("label") == "Failures":
+                      failures = item.get("value", "n/a")
+                  if item.get("label") == "Validations":
+                      validations = item.get("value", "n/a")
+              print(
+                  f"| {lab.get('name', 'unknown')} | {status_symbol} | "
+                  f"{lab.get('durationSeconds', 'n/a')} | {lab.get('exitCode', 'n/a')} | "
+                  f"{failures} | {validations} |"
+              )
+          PY
+
+      - name: Upload generated reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: specmatic-labs-readme-pilot-reports
+          if-no-files-found: error
+          path: output/
+
+      - name: Fail workflow when any pilot lab fails
+        if: steps.run_labs.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "One or more README-driven pilot lab harnesses failed. See the consolidated summary and uploaded reports artifact."
+          exit 1
