@@ -9,6 +9,9 @@ on:
         default: "dynamic-labs"
         type: string
   pull_request:
+  push:
+    branches:
+      - auto-labs-tests
 
 permissions:
   contents: read
