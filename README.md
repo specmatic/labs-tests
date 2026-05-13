@@ -349,15 +349,37 @@ The comparison report will then show those phases as `Expected`, and the README 
 GitHub Actions workflow:
 
 - `.github/workflows/labs-tests.yml`
-- runs `python3 run_all.py --refresh-labs --force --labs-branch dynamic-labs` by default
+- runs `python3 run_all.py --refresh-labs --force --labs-branch main` by default
 - accepts an optional space-separated `labs` workflow input to run only selected labs
-- accepts an optional `labs_branch` workflow input; until the `dynamic-labs` work is merged, the default branch is `dynamic-labs`
+- accepts an optional `labs_branch` workflow input; the default branch is `main`
 - always creates or replaces `../labs/license.txt` before the GitHub workflow run and restores or removes it afterward
 - emits a 60-second heartbeat while the suite is still running, so quiet phases remain visibly active in Actions
-- uses a 40-minute timeout for the workflow job and the main lab execution step
+- uses a 60-minute timeout for the workflow job and the main lab execution step
 - publishes a GitHub job summary based on `output/consolidated-report/consolidated-report.json`
 - includes the consolidated report path and comparison report path in the GitHub job summary so workflow runs can be checked quickly
 - uploads `output/` plus every lab-local `*/output/` folder as the `specmatic-labs-reports` artifact
+
+Cross-repo trigger from `specmatic/labs`:
+
+- `specmatic/labs` now owns a bridge workflow at `.github/workflows/trigger-labs-tests.yml`
+- on every push to `labs/main`, it dispatches `specmatic/labs-tests` workflow `.github/workflows/labs-tests.yml` on `labs-tests/main` with `labs_branch=main`
+- the same bridge workflow also supports manual `workflow_dispatch` runs, so you can choose:
+  - which `labs` branch should be tested
+  - which `labs-tests` branch should run the workflow
+  - an optional space-separated `labs` filter
+- after dispatching, the bridge workflow waits for the matching `labs-tests` run to finish
+- the bridge workflow downloads the `specmatic-labs-reports` artifact from that downstream run
+- the bridge workflow renders a compact downstream result summary in the `labs` workflow summary and fails if the downstream `labs-tests` run fails
+- the bridge workflow requires a repository secret in `specmatic/labs`:
+  - `SPECMATIC_GITHUB_TOKEN`
+  - this token must be allowed to dispatch workflows in `specmatic/labs-tests`
+
+Manual branch-to-branch runs:
+
+- from `specmatic/labs-tests`, use the GitHub Actions `Run workflow` branch selector for the `labs-tests` branch and provide `labs_branch` as needed
+- from `specmatic/labs`, use `.github/workflows/trigger-labs-tests.yml` and provide both:
+  - `labs_branch`
+  - `labs_tests_branch`
 
 License lifecycle:
 
