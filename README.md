@@ -362,14 +362,19 @@ GitHub Actions workflow:
 Cross-repo trigger from `specmatic/labs`:
 
 - `specmatic/labs` now owns a bridge workflow at `.github/workflows/trigger-labs-tests.yml`
-- on every push to `labs/main`, it dispatches `specmatic/labs-tests` workflow `.github/workflows/labs-tests.yml` on `labs-tests/main` with `labs_branch=main`
+- on every push to `labs/main`, it dispatches both `specmatic/labs-tests` workflows on `labs-tests/main`:
+  - `.github/workflows/labs-tests.yml`
+  - `.github/workflows/labs-tests-readme-pilot.yml`
+- both downstream workflows receive `labs_branch=main`
 - the same bridge workflow also supports manual `workflow_dispatch` runs, so you can choose:
   - which `labs` branch should be tested
   - which `labs-tests` branch should run the workflow
-  - an optional space-separated `labs` filter
-- after dispatching, the bridge workflow waits for the matching `labs-tests` run to finish
-- the bridge workflow downloads the `specmatic-labs-reports` artifact from that downstream run
-- the bridge workflow renders a compact downstream result summary in the `labs` workflow summary and fails if the downstream `labs-tests` run fails
+  - an optional space-separated `labs` filter for the main/full `labs-tests` workflow
+- after dispatching, the bridge workflow waits for each matching downstream run to finish
+- the bridge workflow downloads the corresponding artifact from each downstream run:
+  - `specmatic-labs-reports`
+  - `specmatic-labs-readme-pilot-reports`
+- the bridge workflow renders a compact downstream result summary in the `labs` workflow summary for each workflow and fails if either downstream workflow fails
 - the bridge workflow requires a repository secret in `specmatic/labs`:
   - `SPECMATIC_GITHUB_TOKEN`
   - this token must be allowed to dispatch workflows in `specmatic/labs-tests`
