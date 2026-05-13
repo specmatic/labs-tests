@@ -46,6 +46,9 @@ The current preferred architecture is:
   - real file transforms
   - implementation assertions
   - rare reusable wrappers
+- README-driven pilot lab config lives under:
+  - `lablib/lab_configs/<lab-name>/<lab-name>.yaml`
+  - `lablib/lab_configs/<lab-name>/<lab-name>.py`
 
 Do not move complex implementation behavior into README metadata.
 
@@ -55,18 +58,26 @@ Do not move complex implementation behavior into README metadata.
 
 Use `lablib/readme_runner.py` as the preferred execution path.
 
-For a migrated lab:
+For a README-driven pilot or migrated lab:
 
-- `run.py` should be a thin wrapper only
+- run through the root `run_all_labs.py`
+- do not add or preserve a per-lab `run.py` wrapper
 - the README should drive phases, commands, and expected counts
 - declarative details should move into shared config
 - only true behavior should remain in hooks
+
+Legacy, non-migrated labs still run through `run_all.py` and their existing
+per-lab `run.py` files until they are migrated.
 
 ### 2. Use central lab config for declarative data
 
 For migrated labs, prefer shared config files under:
 
-- `lablib/lab_configs/<lab-name>.yaml`
+- `lablib/lab_configs/<lab-name>/<lab-name>.yaml`
+- `lablib/lab_configs/<lab-name>/<lab-name>.py`
+
+Use YAML for declarative wiring and the Python module for named transforms,
+assertions, or shared helper hooks that cannot be expressed cleanly as data.
 
 Good config candidates:
 
@@ -102,8 +113,9 @@ Treat `README_METADATA_SCHEMA.md` as the human-readable contract.
 
 For pilot labs:
 
-- keep `run.py` as a thin compatibility wrapper if discovery/reporting still expects it
-- move declarative content out of `run.py` and preferably out of `hooks.py`
+- run only through the root README-driven runner
+- do not keep pilot-local `run.py`, `hooks.py`, or local test README files
+- keep pilot config and hook code under `lablib/lab_configs/<lab-name>/`
 - keep only transforms/assertions in hooks where possible
 - verify that existing results do not change:
   - test counts
@@ -138,6 +150,7 @@ Bad hook examples:
 - restating phase names already present in README
 - hardcoding counts already present in README output blocks
 - encoding artifact lists that can live in shared config
+- duplicating command discovery that the README parser already performs
 
 When a hook remains, document why it remains.
 
@@ -154,6 +167,23 @@ Keep shared validations centralized wherever possible:
 Use standalone comparison reports for major shared validations.
 
 Avoid duplicated validations where a shared README-driven validation already covers the same behavior.
+
+Execution failures must fail the outer validation. If a phase has `Test
+Execution Failed`, derive the reason from runtime report data, especially the
+failed command assertion, actual exit code, expected exit code, and command.
+Do not infer this reason from README metadata.
+
+For README count validation:
+
+- runnable command blocks should be fenced as `shell`
+- expected output blocks should be fenced as `terminaloutput`
+- do not treat `shell` blocks as expected terminal output
+
+For README-driven pilot output:
+
+- live lab output belongs under `output/<lab-name>-output/`
+- report snapshots may be copied to `output/labs-output/<lab-name>-output/`
+- legacy labs may continue using their existing output layout until migrated
 
 ## Docker rules
 
@@ -179,6 +209,7 @@ Preferred direction:
 
 For pilot labs, the current pattern is:
 
+- `run_all_labs.py --enterprise-image <image-or-tag>`
 - `SPECMATIC_ENTERPRISE_IMAGE`
 - compose file uses:
   - `${SPECMATIC_ENTERPRISE_IMAGE:-specmatic/enterprise:latest}`
@@ -188,6 +219,28 @@ When adding this to more labs:
 - keep the default unchanged
 - make the override opt-in
 - wire it through shared CLI/runtime handling
+- pass the runtime command environment explicitly from `run_lab`
+- do not read runner CLI arguments inside lower-level phase execution helpers
+
+## GitHub Actions rules
+
+Keep legacy and README-driven pilot automation separate:
+
+- `labs-tests.yml` runs the legacy `run_all.py` flow
+- `labs-tests-readme-pilot.yml` runs `run_all_labs.py`
+- the README-driven pilot workflow currently targets:
+  - `api-coverage`
+  - `quick-start-api-testing`
+
+For branch testing, a temporary branch-specific `push` trigger can be added to
+the pilot workflow. Remove it before merge unless the team intentionally wants
+that branch to stay as a CI trigger.
+
+If `run_all_labs.py` exits before producing the consolidated report, the
+workflow may create a minimal failed report so the job summary remains useful.
+The actual runtime failure should still be captured in:
+
+- `output/consolidated-report/run-all-labs.log`
 
 ## Team consistency rules
 
@@ -221,7 +274,7 @@ Do not leave the old path and the new path both as primary implementations.
 2. Confirm phase extraction from the README.
 3. Move declarative details into shared config.
 4. Keep only true transforms/assertions in hooks.
-5. Keep `run.py` thin or compatibility-only.
+5. Remove pilot-local wrappers or docs once the root runner owns the flow.
 6. Verify comparison/report parity with the old implementation.
 7. Add or update focused tests for the migrated shape.
 8. Add cleanup tasks for any removed metadata or duplicated logic.
