@@ -178,6 +178,10 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
         phases = rebuild_phases_from_artifacts(spec, readme_text, readme_doc, original_files)
     else:
         phases = []
+        command_env = dict(spec.command_env)
+        enterprise_image = getattr(args, "enterprise_image", None)
+        if enterprise_image:
+            command_env["SPECMATIC_ENTERPRISE_IMAGE"] = enterprise_image
         try:
             if not args.skip_setup:
                 print("Running lab setup before execution...")
@@ -195,7 +199,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
             for phase in spec.phases:
                 phase_log(phase, f"Preparing lab state for phase: {phase.name}...")
                 apply_phase_files(spec, phase, original_files)
-                phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
+                phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files, command_env)
                 phases.append(phase_result)
         finally:
             restore_original_files(spec, original_files)
@@ -323,6 +327,7 @@ def execute_phase(
     readme_text: str,
     readme_doc: Any,
     original_files: dict[str, str | None],
+    command_env: dict[str, str],
 ) -> dict[str, Any]:
     target_dir = spec.output_dir / phase_dir_name(phase)
     if target_dir.exists():
@@ -334,10 +339,6 @@ def execute_phase(
     phase_log(phase, f"Starting verification for phase: {phase.name}...")
     phase_command = phase.command or spec.command
     phase_log(phase, f"Executing README command: '{shlex.join(phase_command)}'")
-    command_env = dict(spec.command_env)
-    enterprise_image = getattr(args, "enterprise_image", None)
-    if enterprise_image:
-        command_env["SPECMATIC_ENTERPRISE_IMAGE"] = enterprise_image
 
     result = run_command(
         phase_command,
