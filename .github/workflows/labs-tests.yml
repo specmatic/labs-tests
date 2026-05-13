@@ -8,9 +8,9 @@ on:
         required: false
         type: string
       labs_branch:
-        description: "Optional branch of specmatic/labs to refresh before running. Defaults to dynamic-labs."
+        description: "Optional branch of specmatic/labs to refresh before running. Defaults to auto-labs-tests."
         required: false
-        default: "dynamic-labs"
+        default: "auto-labs-tests"
         type: string
   pull_request:
   push:
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         env:
           WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
-          EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'dynamic-labs' }}
+          EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'auto-labs-tests' }}
         timeout-minutes: 60
         run: |
           set +e
