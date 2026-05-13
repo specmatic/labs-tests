@@ -53,6 +53,7 @@ jobs:
           echo "[config] effective labs branch: '${EFFECTIVE_LABS_BRANCH}'"
           echo "[config] manage license.txt: 'true'"
           echo "[config] selected README-driven pilot labs: '${PILOT_LABS}'"
+          mkdir -p output/consolidated-report
           start_time=$(date +%s)
           read -r -a selected_labs <<< "${PILOT_LABS}"
           run_command=(python3 -u run_all_labs.py --refresh-labs --force --labs-branch "${EFFECTIVE_LABS_BRANCH}" --labs "${selected_labs[@]}")
@@ -72,6 +73,57 @@ jobs:
           wait "$run_pid"
           exit_code=$?
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          if [[ ! -f output/consolidated-report/consolidated-report.json ]]; then
+            echo "[reports] run_all_labs.py did not generate consolidated-report.json; writing fallback failed report for workflow summary"
+            RUN_ALL_LABS_EXIT_CODE="$exit_code" python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          output_dir = Path("output/consolidated-report")
+          output_dir.mkdir(parents=True, exist_ok=True)
+          exit_code = os.environ.get("RUN_ALL_LABS_EXIT_CODE", "unknown")
+          generated_at = datetime.now(timezone.utc).isoformat()
+          payload = {
+              "generatedAt": generated_at,
+              "status": "failed",
+              "summary": [
+                  {"label": "Labs discovered", "value": 0},
+                  {"label": "Labs passed", "value": 0},
+                  {"label": "Labs failed", "value": 0},
+              ],
+              "setup": {
+                  "status": "failed",
+                  "upstreamLabsPath": "../labs",
+                  "refreshLabs": True,
+                  "labsBranch": os.environ.get("EFFECTIVE_LABS_BRANCH", "auto-labs-tests"),
+                  "manageLicense": True,
+                  "force": True,
+                  "commands": [
+                      {
+                          "summary": "run_all_labs.py did not generate a consolidated report",
+                          "detail": (
+                              "The runner exited before output/consolidated-report/consolidated-report.json was created. "
+                              "Inspect the Run README-driven pilot labs step logs for the original failure."
+                          ),
+                          "exitCode": 1,
+                      }
+                  ],
+              },
+              "labs": [],
+          }
+          (output_dir / "consolidated-report.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          (output_dir / "consolidated-report.html").write_text(
+              "<!doctype html><html><body><h1>Specmatic Labs README-Driven Pilot Tests</h1>"
+              "<p>run_all_labs.py did not generate a consolidated report.</p>"
+              f"<p>Exit code: {exit_code}</p>"
+              "<p>Inspect the workflow logs for the original failure.</p>"
+              "</body></html>\n",
+              encoding="utf-8",
+          )
+          PY
+          fi
           exit 0
 
       - name: Build GitHub summary
