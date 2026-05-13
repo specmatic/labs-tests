@@ -1,16 +1,12 @@
-name: Specmatic Labs Tests
+name: Specmatic Labs README-Driven Pilot Tests
 run-name: >-
-  Specmatic Labs Tests |
-  labs=${{ inputs.labs || 'all' }} |
-  labs-branch=${{ inputs.labs_branch || 'main' }}
+  Specmatic Labs README-Driven Pilot Tests |
+  labs=pilot |
+  labs-branch=${{ inputs.labs_branch || 'auto-labs-tests' }}
 
 on:
   workflow_dispatch:
     inputs:
-      labs:
-        description: "Optional space-separated list of labs to run, for example: api-coverage external-examples"
-        required: false
-        type: string
       labs_branch:
         description: "Optional branch of specmatic/labs to refresh before running. Defaults to auto-labs-tests."
         required: false
@@ -19,19 +15,20 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - auto-labs-tests
 
 permissions:
   contents: read
 
 jobs:
-  run-labs:
+  run-readme-pilot-labs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     env:
       SPECMATIC_LICENSE_KEY: ${{ secrets.SPECMATIC_LICENSE_KEY }}
-      
+      PILOT_LABS: api-coverage quick-start-api-testing
+
     steps:
       - name: Check out labs-tests
         uses: actions/checkout@v6
@@ -48,29 +45,25 @@ jobs:
           docker --version
           docker compose version
 
-      - name: Run all lab harnesses
+      - name: Run README-driven pilot labs
         id: run_labs
         shell: bash
         env:
-          WORKFLOW_LABS_INPUT: ${{ github.event.inputs.labs || '' }}
           EFFECTIVE_LABS_BRANCH: ${{ github.event.inputs.labs_branch || 'auto-labs-tests' }}
         timeout-minutes: 60
         run: |
           set +e
+          set -o pipefail
           echo "[config] workflow event: ${GITHUB_EVENT_NAME}"
           echo "[config] effective labs branch: '${EFFECTIVE_LABS_BRANCH}'"
           echo "[config] manage license.txt: 'true'"
-          echo "[config] selected labs input: '${WORKFLOW_LABS_INPUT}'"
+          echo "[config] selected README-driven pilot labs: '${PILOT_LABS}'"
+          mkdir -p output/consolidated-report
           start_time=$(date +%s)
-          run_command=(python3 -u run_all.py --refresh-labs --force --labs-branch "${EFFECTIVE_LABS_BRANCH}")
+          read -r -a selected_labs <<< "${PILOT_LABS}"
+          run_command=(python3 -u run_all_labs.py --refresh-labs --force --labs-branch "${EFFECTIVE_LABS_BRANCH}" --labs "${selected_labs[@]}")
           echo "[config] executing: ${run_command[*]}"
-          if [[ -n "${WORKFLOW_LABS_INPUT}" ]]; then
-            # Space-separated lab names from workflow_dispatch are appended as individual args.
-            read -r -a selected_labs <<< "${WORKFLOW_LABS_INPUT}"
-            run_command+=(--labs "${selected_labs[@]}")
-            echo "[config] labs filter: ${selected_labs[*]}"
-          fi
-          "${run_command[@]}" &
+          "${run_command[@]}" 2>&1 | tee output/consolidated-report/run-all-labs.log &
           run_pid=$!
 
           while kill -0 "$run_pid" 2>/dev/null; do
@@ -78,13 +71,71 @@ jobs:
             elapsed=$((now - start_time))
             minutes=$((elapsed / 60))
             seconds=$((elapsed % 60))
-            echo "[heartbeat] run_all.py still running after ${minutes}m ${seconds}s"
+            echo "[heartbeat] run_all_labs.py still running after ${minutes}m ${seconds}s"
             sleep 60
           done
 
           wait "$run_pid"
           exit_code=$?
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          if [[ ! -f output/consolidated-report/consolidated-report.json ]]; then
+            echo "[reports] run_all_labs.py did not generate consolidated-report.json; writing fallback failed report for workflow summary"
+            RUN_ALL_LABS_EXIT_CODE="$exit_code" python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          output_dir = Path("output/consolidated-report")
+          output_dir.mkdir(parents=True, exist_ok=True)
+          exit_code = os.environ.get("RUN_ALL_LABS_EXIT_CODE", "unknown")
+          log_path = output_dir / "run-all-labs.log"
+          log_tail = ""
+          if log_path.exists():
+              log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+              log_tail = "\n".join(log_lines[-80:])
+          generated_at = datetime.now(timezone.utc).isoformat()
+          payload = {
+              "generatedAt": generated_at,
+              "status": "failed",
+              "summary": [
+                  {"label": "Labs discovered", "value": 0},
+                  {"label": "Labs passed", "value": 0},
+                  {"label": "Labs failed", "value": 0},
+              ],
+              "setup": {
+                  "status": "failed",
+                  "upstreamLabsPath": "../labs",
+                  "refreshLabs": True,
+                  "labsBranch": os.environ.get("EFFECTIVE_LABS_BRANCH", "auto-labs-tests"),
+                  "manageLicense": True,
+                  "force": True,
+                  "commands": [
+                      {
+                          "summary": "run_all_labs.py did not generate a consolidated report",
+                          "detail": (
+                              "The runner exited before output/consolidated-report/consolidated-report.json was created. "
+                              "Inspect output/consolidated-report/run-all-labs.log or the Run README-driven pilot labs step logs for the original failure."
+                          ),
+                          "exitCode": 1,
+                          "stdout": log_tail,
+                      }
+                  ],
+              },
+              "labs": [],
+          }
+          (output_dir / "consolidated-report.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          (output_dir / "consolidated-report.html").write_text(
+              "<!doctype html><html><body><h1>Specmatic Labs README-Driven Pilot Tests</h1>"
+              "<p>run_all_labs.py did not generate a consolidated report.</p>"
+              f"<p>Exit code: {exit_code}</p>"
+              "<p>Inspect output/consolidated-report/run-all-labs.log for the original failure.</p>"
+              f"<pre>{log_tail}</pre>"
+              "</body></html>\n",
+              encoding="utf-8",
+          )
+          PY
+          fi
           exit 0
 
       - name: Build GitHub summary
@@ -104,7 +155,7 @@ jobs:
           comparison_json_path = Path("output/consolidated-report/labs-comparison.json")
 
           if report_path is None:
-              print("## Specmatic Labs Tests")
+              print("## Specmatic Labs README-Driven Pilot Tests")
               print("")
               print("[error] The consolidated report was not generated.")
               print("")
@@ -112,7 +163,7 @@ jobs:
               print("")
               print("[Action required]")
               print("")
-              print("Inspect the run_all.py logs above and confirm that output/consolidated-report/consolidated-report.json is created before the summary step runs.")
+              print("Inspect the run_all_labs.py logs above and confirm that output/consolidated-report/consolidated-report.json is created before the summary step runs.")
               raise SystemExit(0)
 
           payload = json.loads(report_path.read_text(encoding="utf-8"))
@@ -137,9 +188,10 @@ jobs:
               except Exception:
                   pass
 
-          print("## Specmatic Labs Tests")
+          print("## Specmatic Labs README-Driven Pilot Tests")
           print("")
           print(f"- Status: **{status_text}**")
+          print("- Pilot labs: `api-coverage quick-start-api-testing`")
           print(f"- Specmatic: `{environment.get('specmaticVersion', 'n/a')}`")
           print(f"- Labs branch requested: `{environment.get('labsBranchRequested', setup.get('labsBranch', 'n/a'))}`")
           print(f"- Labs git ref: `{environment.get('labsGitRef', 'n/a')}`")
@@ -149,7 +201,7 @@ jobs:
           print(f"- Labs failed: `{summary.get('Labs failed', 0)}`")
           print(f"- Consolidated report JSON: `{report_path.as_posix()}`")
           print(f"- Comparison report HTML: `{comparison_path.as_posix()}`" if comparison_path.exists() else "- Comparison report HTML: `not generated`")
-          print("- Reports artifact: `specmatic-labs-reports`")
+          print("- Reports artifact: `specmatic-labs-readme-pilot-reports`")
           print("")
           matrix_rows = []
           matrix_columns = []
@@ -200,13 +252,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: specmatic-labs-reports
+          name: specmatic-labs-readme-pilot-reports
           if-no-files-found: error
           path: output/
 
-      - name: Fail workflow when any lab fails
+      - name: Fail workflow when any pilot lab fails
         if: steps.run_labs.outputs.exit_code != '0'
         shell: bash
         run: |
-          echo "One or more lab harnesses failed. See the consolidated summary and uploaded reports artifact."
+          echo "One or more README-driven pilot lab harnesses failed. See the consolidated summary and uploaded reports artifact."
           exit 1

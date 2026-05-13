@@ -4,3 +4,8 @@ output/
 */output/
 temp/
 .idea
+main.py
+.venv/
+*.toml
+.DS_Store
+.python-version

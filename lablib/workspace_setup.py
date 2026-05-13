@@ -61,13 +61,12 @@ def run_setup(
     lab_names: list[str] | None = None,
 ) -> SetupResult:
     commands: list[dict[str, Any]] = []
-    selected_labs = set(lab_names or LAB_NAMES)
 
     if not UPSTREAM_LABS.exists():
         clone_result = execute(
             ["git", "clone", "https://github.com/specmatic/labs.git", str(UPSTREAM_LABS)],
             ROOT,
-            "setup:clone",
+            "setup:labs:clone",
             stream_output=stream_output,
         )
         commands.append(command_to_dict(clone_result, "Clone upstream labs repository"))
@@ -78,7 +77,7 @@ def run_setup(
             dirty_state = execute(
                 ["git", "status", "--short"],
                 UPSTREAM_LABS,
-                "setup:git",
+                "setup:labs:git",
                 stream_output=stream_output,
             )
             commands.append(command_to_dict(dirty_state, "Inspect local changes in upstream labs repository"))
@@ -104,7 +103,7 @@ def run_setup(
                     execute(
                         ["git", "status", "--short"],
                         UPSTREAM_LABS,
-                        "setup:git",
+                        "setup:labs:git",
                         stream_output=stream_output,
                     ),
                     "Inspect local changes in upstream labs repository",
@@ -115,43 +114,22 @@ def run_setup(
                     execute(
                         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                         UPSTREAM_LABS,
-                        "setup:git",
+                        "setup:labs:git",
                         stream_output=stream_output,
                     ),
                     "Inspect current branch in upstream labs repository",
                 )
             )
 
-    for lab_name in LAB_NAMES:
-        if lab_name not in selected_labs:
-            continue
-        upstream_lab_path = UPSTREAM_LABS / lab_name
-        compose_file = upstream_lab_path / "docker-compose.yaml"
-        if not compose_file.exists():
-            continue
-
-        commands.append(
-            command_to_dict(
-                execute(
-                    ["docker", "compose", "pull", "--ignore-buildable"],
-                    upstream_lab_path,
-                    "setup:docker",
-                    stream_output=stream_output,
-                ),
-                f"Pull referenced Docker images for {lab_name}",
-            )
+    commands.append(
+        note_to_dict(
+            "Skip shared Docker setup for upstream labs",
+            (
+                "No shared Docker pull/build step was run during setup. "
+                "Each selected lab is expected to run its own docker compose or docker build flow during execution."
+            ),
         )
-        commands.append(
-            command_to_dict(
-                execute(
-                    ["docker", "compose", "build", "--pull"],
-                    upstream_lab_path,
-                    "setup:docker",
-                    stream_output=stream_output,
-                ),
-                f"Refresh buildable Docker images for {lab_name}",
-            )
-        )
+    )
 
     status = "passed" if all(item["exitCode"] == 0 for item in commands) else "failed"
     return SetupResult(
@@ -316,7 +294,7 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
                 execute(
                     ["git", "fetch", "origin", f"refs/heads/{branch}:refs/remotes/origin/{branch}"],
                     UPSTREAM_LABS,
-                    "setup:git",
+                    "setup:labs:git",
                     stream_output=stream_output,
                 ),
                 f"Fetch latest upstream refs for {branch}",
@@ -324,50 +302,50 @@ def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[di
         )
     commands.extend([
         command_to_dict(
-            execute(
-                ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
+                execute(
+                    ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
+                    UPSTREAM_LABS,
+                    "setup:labs:git",
+                    stream_output=stream_output,
+                ),
+                f"Switch upstream labs repository to origin/{target_branch}",
             ),
-            f"Switch upstream labs repository to origin/{target_branch}",
-        ),
         command_to_dict(
-            execute(
-                ["git", "reset", "--hard", f"origin/{target_branch}"],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
+                execute(
+                    ["git", "reset", "--hard", f"origin/{target_branch}"],
+                    UPSTREAM_LABS,
+                    "setup:labs:git",
+                    stream_output=stream_output,
+                ),
+                f"Reset upstream labs repository to origin/{target_branch}",
             ),
-            f"Reset upstream labs repository to origin/{target_branch}",
-        ),
         command_to_dict(
-            execute(
-                ["git", "clean", "-fd"],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
+                execute(
+                    ["git", "clean", "-fd"],
+                    UPSTREAM_LABS,
+                    "setup:labs:git",
+                    stream_output=stream_output,
+                ),
+                "Remove untracked files in upstream labs repository",
             ),
-            "Remove untracked files in upstream labs repository",
-        ),
         command_to_dict(
-            execute(
-                ["git", "pull", "--ff-only", "origin", target_branch],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
+                execute(
+                    ["git", "pull", "--ff-only", "origin", target_branch],
+                    UPSTREAM_LABS,
+                    "setup:labs:git",
+                    stream_output=stream_output,
+                ),
+                f"Pull latest upstream labs changes from {target_branch}",
             ),
-            f"Pull latest upstream labs changes from {target_branch}",
-        ),
         command_to_dict(
-            execute(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                UPSTREAM_LABS,
-                "setup:git",
-                stream_output=stream_output,
+                execute(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    UPSTREAM_LABS,
+                    "setup:labs:git",
+                    stream_output=stream_output,
+                ),
+                "Verify selected upstream labs branch after refresh",
             ),
-            "Verify selected upstream labs branch after refresh",
-        ),
     ])
     return commands
 

@@ -19,6 +19,12 @@ FINAL_PHASE = "final"
 DEFAULT_REQUIRED_PHASES = (BASELINE_PHASE, FINAL_PHASE)
 OPTIONAL_PHASE_KINDS = ("intermediate", "studio", "inspection", "cleanup_verification")
 ALLOWED_PHASE_KINDS = DEFAULT_REQUIRED_PHASES + OPTIONAL_PHASE_KINDS
+PHASE_TITLE_PREFIXES = {
+    "baseline": ("baseline",),
+    "final": ("final", "fixed", "re-run", "rerun"),
+    "intermediate": ("intermediate", "task "),
+    "studio": ("studio",),
+}
 
 
 def parse_required_implementation_phases(metadata: dict[str, Any]) -> list[str]:
@@ -174,16 +180,51 @@ def extract_headings(text: str) -> list[Heading]:
 
 
 def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) -> list[ReadmePhase]:
-    """Extract phases by matching H3 titles against phase IDs from global config."""
+    """Extract phases by matching phase-like headings against phase IDs."""
     implementation_h2 = next((heading for heading in headings if heading.level == 2 and heading.title == "Lab Implementation Phases"), None)
     if implementation_h2 is None:
-        return []
-    implementation_end = next((heading.start for heading in headings if heading.level == 2 and heading.start > implementation_h2.start), len(text))
+        return extract_phases_from_heading_range(text, headings, phase_ids, 0, len(text), None)
+    implementation_end = next(
+        (
+            heading.start
+            for heading in headings
+            if heading.level == 2
+            and heading.start > implementation_h2.start
+            and heading.title in {"Pass Criteria", "Troubleshooting", "Cleanup", "What you learned", "Next step"}
+        ),
+        len(text),
+    )
+    return extract_phases_from_heading_range(
+        text,
+        headings,
+        phase_ids,
+        implementation_h2.start,
+        implementation_end,
+        implementation_h2.level + 1,
+    )
 
-    phase_headings = [
+
+def extract_phases_from_heading_range(
+    text: str,
+    headings: list[Heading],
+    phase_ids: list[str],
+    start: int,
+    end: int,
+    phase_heading_level: int | None,
+) -> list[ReadmePhase]:
+    matching_headings = [
         heading
         for heading in headings
-        if heading.level == 3 and implementation_h2.start < heading.start < implementation_end
+        if heading.start > start
+        and heading.start < end
+        and match_title_to_phase_id(heading.title, phase_ids) is not None
+    ]
+    if phase_heading_level is None and matching_headings:
+        phase_heading_level = min(heading.level for heading in matching_headings)
+    phase_headings = [
+        heading
+        for heading in matching_headings
+        if heading.level == phase_heading_level
     ]
     phases: list[ReadmePhase] = []
     for index, heading in enumerate(phase_headings):
@@ -193,7 +234,7 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
         if phase_id:  # Only include if it matches a known phase
             next_heading = phase_headings[index + 1] if index + 1 < len(phase_headings) else None
             section_start = heading.start
-            section_end = next_heading.start if next_heading is not None else implementation_end
+            section_end = next_heading.start if next_heading is not None else end
             section_text = text[section_start:section_end].strip()
 
             phases.append(
@@ -211,10 +252,11 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
 
 
 def match_title_to_phase_id(title: str, phase_ids: list[str]) -> str | None:
-    """Match H3 title to phase ID (case-insensitive substring match)."""
-    title_lower = title.lower()
+    """Match phase-like heading titles to phase IDs."""
+    title_lower = re.sub(r"^\d+[.)]\s*", "", title.strip().lower())
     for phase_id in phase_ids:
-        if phase_id in title_lower:
+        prefixes = PHASE_TITLE_PREFIXES.get(phase_id)
+        if prefixes and title_lower.startswith(prefixes):
             return phase_id
     return None
 

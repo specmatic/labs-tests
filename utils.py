@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timezone
 from html import escape
 import json
 import os
 from pathlib import Path
 import shlex
-import sys
 import shutil
+import sys
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from lablib.command_runner import run_command
 from lablib.labs_comparison import COMPARISON_HTML_PATH, COMPARISON_JSON_PATH, generate_labs_comparison
 from lablib.provenance import build_run_metadata
-from lablib.report_building import build_consolidated_payload, report_duration_seconds, upstream_labs_git_ref, upstream_readme_href
+from lablib.report_building import build_consolidated_payload, upstream_labs_git_ref, upstream_readme_href
 from lablib.time_display import format_report_datetime
 from lablib.workspace_setup import (
     license_failure_dict,
@@ -30,6 +24,11 @@ from lablib.workspace_setup import (
     setup_failure_action_lines,
     setup_failure_error_lines,
 )
+
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 OUTPUT_DIR = ROOT / "output"
@@ -54,50 +53,7 @@ def not_in_excluded(var: str) -> bool:
     return var not in EXCLUDED_LABS
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run all available lab harnesses and build the consolidated and comparison reports."
-    )
-    parser.add_argument(
-        "--refresh-report",
-        action="store_true",
-        help="Rebuild each lab report and the consolidated report from existing captured artifacts without rerunning labs.",
-    )
-    parser.add_argument(
-        "--skip-setup",
-        action="store_true",
-        help="Skip the shared sibling labs repository setup stage.",
-    )
-    parser.add_argument(
-        "--refresh-labs",
-        action="store_true",
-        help="Destructively reset ../labs to the latest state on the selected branch before running.",
-    )
-    parser.add_argument(
-        "--labs-branch",
-        default="main",
-        help="Branch of ../labs to use with --refresh-labs. Defaults to main.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Required with --refresh-labs when ../labs has local changes. Discards tracked and untracked changes.",
-    )
-    parser.add_argument(
-        "--labs",
-        nargs="+",
-        help="Optional subset of lab folder names to run and include in the consolidated reports.",
-    )
-    parser.add_argument(
-        "--manage-license",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help="Create or replace ../labs/license.txt from the current local/GitHub license source before running and restore it afterward. Defaults to enabled.",
-    )
-    return parser.parse_args()
-
-
-def validate_license_prerequisites(args: argparse.Namespace) -> int | None:
+def validate_license_prerequisites(args: Any) -> int | None:
     if args.refresh_report or not args.manage_license:
         return None
     try:
@@ -114,15 +70,12 @@ def validate_license_prerequisites(args: argparse.Namespace) -> int | None:
         print("")
         print("Fix the license setup issue above and rerun the labs.")
         print(f"Setup details: {SETUP_OUTPUT_PATH}")
-        return 1
+        return write_failed_run_reports(setup_payload)
     return None
 
 
 def initialize_output_workspace() -> None:
     preserve_existing_local_output()
-    # `run_all.py` owns the destructive cleanup so one end-to-end run always starts
-    # from a clean generated-output tree. `rebuild_reports.py` deliberately skips this
-    # so the existing lab snapshots remain available for report regeneration.
     clean_output_tree()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     LABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -130,19 +83,20 @@ def initialize_output_workspace() -> None:
     write_run_metadata()
 
 
-def empty_setup_payload(args: argparse.Namespace) -> dict[str, Any]:
+def empty_setup_payload(args: Any) -> dict[str, Any]:
     return {
         "status": "passed",
         "upstreamLabsPath": str(ROOT.parent / "labs"),
         "refreshLabs": args.refresh_labs,
         "labsBranch": args.labs_branch,
         "manageLicense": args.manage_license,
+        "enterpriseImage": getattr(args, "enterprise_image", "") or "",
         "force": args.force,
         "commands": [],
     }
 
 
-def failed_setup_payload(args: argparse.Namespace, commands: list[dict[str, Any]]) -> dict[str, Any]:
+def failed_setup_payload(args: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
     payload = empty_setup_payload(args)
     payload["status"] = "failed"
     payload["commands"] = commands
@@ -173,7 +127,7 @@ def write_failed_run_reports(setup_payload: dict[str, Any]) -> int:
     return 1
 
 
-def execute_shared_setup(args: argparse.Namespace) -> tuple[dict[str, Any] | None, int | None]:
+def execute_shared_setup(args: Any) -> tuple[dict[str, Any] | None, int | None]:
     if args.refresh_report:
         print("[reports] Refreshing reports from existing captured artifacts...")
         return None, None
@@ -212,7 +166,7 @@ def execute_shared_setup(args: argparse.Namespace) -> tuple[dict[str, Any] | Non
 
 
 def prepare_license_for_run(
-    args: argparse.Namespace,
+    args: Any,
     setup_payload: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, object | None, int | None]:
     if args.refresh_report:
@@ -246,52 +200,6 @@ def prepare_license_for_run(
     payload["commands"] = [*payload.get("commands", []), license_setup_dict(license_state)]
     write_setup_payload(payload)
     return payload, license_state, None
-
-
-def discover_selected_labs(args: argparse.Namespace) -> list[str]:
-    labs = filter_labs(discover_labs(), args.labs)
-    print(f"Discovered labs: {', '.join(labs) if labs else 'none'}")
-    return labs
-
-
-def run_lab_and_collect_result(lab: str, index: int, total_labs: int, refresh_report: bool) -> dict[str, Any]:
-    print()
-    print("=" * 78)
-    print(f"{'REFRESHING REPORT FOR' if refresh_report else 'RUNNING LAB'}: {lab}")
-    print(f"Lab # {index} of {total_labs}")
-    print("=" * 78)
-    lab_command = ["python3", f"{lab}/run.py", "--refresh-report"] if refresh_report else ["python3", f"{lab}/run.py", "--skip-setup"]
-    result = run_command(
-        lab_command,
-        ROOT,
-        stream_output=True,
-        stream_prefix=f"[all:{lab}]",
-    )
-    report_json_path, report_html_path = snapshot_lab_output(lab)
-    copy_lab_snapshot(lab)
-    lab_report = load_json(report_json_path) if report_json_path.exists() else None
-    duration_seconds = round(report_duration_seconds(lab_report), 2) if lab_report else round(result.duration_seconds, 2)
-    status = (lab_report or {}).get("status", "failed")
-    return {
-        "name": lab,
-        "readmeHref": upstream_readme_href(lab),
-        "status": status,
-        "displayStatus": display_lab_status(status, lab_report),
-        "exitCode": result.exit_code,
-        "durationSeconds": duration_seconds,
-        "reportJsonPath": str(report_json_path),
-        "reportHtmlPath": str(report_html_path),
-        "summary": (lab_report or {}).get("summary", []),
-        "report": lab_report,
-    }
-
-
-def run_selected_labs(labs: list[str], refresh_report: bool) -> list[dict[str, Any]]:
-    lab_results: list[dict[str, Any]] = []
-    total_labs = len(labs)
-    for index, lab in enumerate(labs, start=1):
-        lab_results.append(run_lab_and_collect_result(lab, index, total_labs, refresh_report))
-    return lab_results
 
 
 def finalize_run(
@@ -339,39 +247,17 @@ def restore_license_after_run(license_state: object | None) -> None:
     restore_upstream_labs_license(license_state)
 
 
-def main() -> int:
-    args = parse_args()
-    preflight_result = validate_license_prerequisites(args)
-    if preflight_result is not None:
-        return preflight_result
-
-    initialize_output_workspace()
-
-    license_state = None
-    try:
-        setup_payload, early_exit = execute_shared_setup(args)
-        if early_exit is not None:
-            return early_exit
-
-        setup_payload, license_state, early_exit = prepare_license_for_run(args, setup_payload)
-        if early_exit is not None:
-            return early_exit
-
-        labs = discover_selected_labs(args)
-        lab_results = run_selected_labs(labs, args.refresh_report)
-        return finalize_run(setup_payload, labs, lab_results)
-    finally:
-        restore_license_after_run(license_state)
-
-
 def discover_labs() -> list[str]:
+    upstream_labs = ROOT.parent / "labs"
+    if not upstream_labs.exists():
+        return []
     return sorted(
         path.name
-        for path in ROOT.iterdir()
+        for path in upstream_labs.iterdir()
         if path.is_dir()
         and not path.name.startswith(".")
         and not_in_excluded(path.name)
-        and (path / "run.py").exists()
+        and (path / "README.md").exists()
     )
 
 
@@ -527,31 +413,6 @@ def snapshot_lab_output(lab: str) -> tuple[Path, Path]:
     return target_dir / "report.json", target_dir / "report.html"
 
 
-def copy_lab_snapshot(lab: str) -> None:
-    source_dir = ROOT / lab / "output"
-    target_dir = LABS_OUTPUT_DIR / f"{lab}-output"
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    if source_dir.exists():
-        shutil.copytree(source_dir, target_dir)
-        rewrite_snapshot_back_link(target_dir / "report.html")
-
-
-def rewrite_snapshot_back_link(report_path: Path) -> None:
-    if not report_path.exists():
-        return
-    text = report_path.read_text(encoding="utf-8")
-    source_hrefs = (
-        "../../output/consolidated-report/consolidated-report.html",
-        "../../output/consolidated-report/report.html",
-    )
-    target_href = os.path.relpath(CONSOLIDATED_HTML_PATH, start=report_path.parent)
-    for source_href in source_hrefs:
-        if source_href in text:
-            report_path.write_text(text.replace(source_href, target_href), encoding="utf-8")
-            return
-
-
 def clean_output_tree() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for path in (
@@ -572,19 +433,6 @@ def clean_output_tree() -> None:
     for legacy_dir in OUTPUT_DIR.iterdir():
         if legacy_dir.is_dir() and legacy_dir.name.endswith("-output"):
             shutil.rmtree(legacy_dir)
-
-
-def detect_shared_specmatic_version(lab_results: list[dict[str, Any]]) -> str:
-    versions = [
-        extract_specmatic_version(Path(lab["reportJsonPath"]))
-        for lab in lab_results
-        if lab.get("reportJsonPath")
-    ]
-    versions = [version for version in versions if version != "n/a"]
-    if not versions:
-        return "n/a"
-    unique_versions = sorted(set(versions))
-    return unique_versions[0] if len(unique_versions) == 1 else " / ".join(unique_versions)
 
 
 def render_consolidated_html(payload: dict[str, Any]) -> str:
@@ -785,7 +633,3 @@ def render_totals_row(payload: dict[str, Any]) -> str:
 
 def relative_link(base_dir: Path, target: Path) -> str:
     return os.path.relpath(target, start=base_dir)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 from typing import Any, Callable
 
@@ -145,6 +146,13 @@ def add_standard_lab_args(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         action="store_true",
         help="Required with --refresh-labs when ../labs has local changes. Discards tracked and untracked changes.",
     )
+    parser.add_argument(
+        "--enterprise-image",
+        help=(
+            "Optional Specmatic Enterprise Docker image or tag override. "
+            "When set, labs that support the shared pilot image override will use this image instead of specmatic/enterprise:latest."
+        ),
+    )
     return parser
 
 
@@ -166,13 +174,17 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     spec.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.refresh_report:
-        print("Refreshing the report from existing captured artifacts...")
+        print("[reports] Refreshing report from existing captured artifacts...")
         phases = rebuild_phases_from_artifacts(spec, readme_text, readme_doc, original_files)
     else:
         phases = []
+        command_env = dict(spec.command_env)
+        enterprise_image = getattr(args, "enterprise_image", None)
+        if enterprise_image:
+            command_env["SPECMATIC_ENTERPRISE_IMAGE"] = enterprise_image
         try:
             if not args.skip_setup:
-                print("Running workspace setup before lab execution...")
+                print("Running lab setup before execution...")
                 setup_result = run_setup(
                     stream_output=True,
                     refresh_labs=args.refresh_labs,
@@ -185,9 +197,9 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 
             run_best_effort_runtime_cleanup(spec, "before lab execution")
             for phase in spec.phases:
-                print(f"Preparing {phase.name.lower()} lab state...")
+                phase_log(phase, f"Preparing lab state for phase: {phase.name}...")
                 apply_phase_files(spec, phase, original_files)
-                phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
+                phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files, command_env)
                 phases.append(phase_result)
         finally:
             restore_original_files(spec, original_files)
@@ -205,8 +217,8 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
     write_json(spec.output_dir / "report.json", report)
     write_html(spec.output_dir / "report.html", report)
     snapshot_lab_output(spec)
-    print(f"Wrote JSON report to {spec.output_dir / 'report.json'}")
-    print(f"Wrote HTML report to {spec.output_dir / 'report.html'}")
+    print(f"[reports] Wrote JSON report to {spec.output_dir / 'report.json'}")
+    print(f"[reports] Wrote HTML report to {spec.output_dir / 'report.html'}")
     return 0 if report["status"] == "passed" else 1
 
 
@@ -218,12 +230,12 @@ def clean_lab_output_dir(spec: LabSpec) -> None:
 def run_best_effort_runtime_cleanup(spec: LabSpec, when: str) -> None:
     if spec.post_phase_cleanup is None:
         return
-    print(f"Running runtime cleanup {when}...", flush=True)
+    print(f"[cleanup] Running runtime cleanup {when}...", flush=True)
     try:
         spec.post_phase_cleanup(spec)
     except Exception as exc:
         print(
-            f"[warning] Runtime cleanup {when} failed for {spec.name}: {exc}. "
+            f"[cleanup] [warning] Runtime cleanup {when} failed for {spec.name}: {exc}. "
             "Impact: stale containers, networks, or volumes may affect later phases or labs. "
             "Action required: inspect the Docker state and rerun the lab if needed.",
             flush=True,
@@ -315,6 +327,7 @@ def execute_phase(
     readme_text: str,
     readme_doc: Any,
     original_files: dict[str, str | None],
+    command_env: dict[str, str],
 ) -> dict[str, Any]:
     target_dir = spec.output_dir / phase_dir_name(phase)
     if target_dir.exists():
@@ -323,12 +336,14 @@ def execute_phase(
     if spec.clear_reports is not None:
         spec.clear_reports(spec)
 
-    print(f"{phase.name}: starting verification...")
+    phase_log(phase, f"Starting verification for phase: {phase.name}...")
     phase_command = phase.command or spec.command
+    phase_log(phase, f"Executing README command: '{shlex.join(phase_command)}'")
+
     result = run_command(
         phase_command,
         spec.upstream_lab,
-        env=spec.command_env,
+        env=command_env,
         stream_output=True,
         stream_prefix=f"[{phase_dir_name(phase)}]",
         timeout_seconds=phase.command_timeout_seconds,
@@ -715,6 +730,8 @@ def all_artifact_specs(spec: LabSpec, phase: PhaseSpec) -> tuple[ArtifactSpec, .
 def apply_phase_files(spec: LabSpec, phase: PhaseSpec, original_files: dict[str, str | None]) -> None:
     for alias, path in spec.files.items():
         transform = phase.file_transforms.get(alias)
+        if transform is not None:
+            phase_log(phase, f"Applying hook transform for phase '{phase.name}': '{alias}' -> '{path}'")
         original_content = original_files[alias]
         content = original_content if transform is None else transform(original_content or "")
         if content is None:
@@ -776,7 +793,7 @@ def build_missing_artifact_phase_result(
                     detail("Reason", str(error)),
                     detail(
                         "How to fix",
-                        f"Rerun `python3 {spec.name}/run.py` without `--refresh-report` to regenerate the missing artifacts, then rerun `python3 rebuild_reports.py` or `python3 run_all.py --refresh-report`.",
+                        f"Rerun `python3 run_all_labs.py --labs {spec.name}` without `--refresh-report` to regenerate the missing artifacts, then rerun `python3 run_all_labs.py --labs {spec.name} --refresh-report`.",
                     ),
                     detail("Phase output folder", target_dir),
                 ],
@@ -816,6 +833,10 @@ def phase_dir_name(phase: PhaseSpec) -> str:
     if phase.output_dir_name:
         return phase.output_dir_name
     return "baseline" if "baseline" in phase.name.lower() else "fixed"
+
+
+def phase_log(phase: PhaseSpec, message: str) -> None:
+    print(f"[{phase_dir_name(phase)}] {message}", flush=True)
 
 
 def write_text(path: Path, content: str) -> None:

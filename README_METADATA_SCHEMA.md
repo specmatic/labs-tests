@@ -1,70 +1,221 @@
 # README Metadata Schema
 
-This file documents the YAML front matter options currently recognized by `labs-tests` for lab `README.md` files.
+## Philosophy
 
-The goal is to keep this small, accurate, and aligned with the code that parses and validates lab READMEs today.
+The README is the primary source of truth for both humans learning the lab and `labs-tests` automating and validating the lab.
 
-## Top-level schema
+The automation model is convention-driven.
 
-Use this optional metadata block at the top of a README when you need to override defaults:
+`labs-tests` should derive the following from the README structure instead of lab-name hard-coding:
 
-```md
+- phase sequence
+- runnable commands
+- expected console output
+- implementation phases
+- validation phases
+- cleanup commands
+
+Metadata should only be used for:
+
+- optional capabilities
+- small overrides
+- disabling validations that are not applicable for a specific lab
+
+If a behavior can be derived from the README structure, commands, or fenced blocks, it should not be duplicated in metadata.
+
+## Canonical README Structure
+
+Every lab README should have the following phase model:
+
+```text
+Baseline Phase
+Task ...
+Task ...
+Studio Phase
+Studio Phase
+Final Phase
+```
+
+Notes:
+
+- `Baseline Phase` and `Final Phase` are mandatory.
+- `Task ...` phases are optional.
+- `Studio Phase` is optional.
+- `Studio Phase` may appear multiple times.
+- `Studio Phase` may appear anywhere between `Baseline Phase` and `Final Phase`.
+- Additional non-phase sections may exist before, between, or after phases.
+
+## Phase Model
+
+`labs-tests` derives execution phases from H2 headings.
+
+### Mandatory phases
+
+```markdown
+## Baseline Phase
+## Final Phase
+```
+
+### Optional implementation phases
+
+A phase is considered an implementation phase if:
+
+- the heading level is H2
+- the heading text starts with `Task `
+
+Examples:
+
+```markdown
+## Task A: Fix matcher
+## Task B: Add dynamic validation
+```
+
+### Optional Studio phases
+
+A phase is considered a Studio phase if the H2 heading is:
+
+```markdown
+## Studio Phase
+```
+
+`Studio Phase` may appear one or more times, but it must always be after `Baseline Phase` and before `Final Phase`.
+
+### Optional Studio subphases
+
+A Studio subphase is any H3 (or lower) heading containing `Studio` inside a valid phase.
+
+Examples:
+
+```markdown
+### Studio verification
+### Studio validation
+```
+
+Rules:
+
+- Studio subphases belong to the parent H2 phase.
+- Studio subphases do not affect phase ordering validation.
+- Studio subphases are optional.
+- Studio subphases may contain runnable commands and `terminaloutput` blocks.
+- Studio subphases are useful when Studio validation verifies the same state as the parent phase instead of representing an independent execution phase.
+
+## Valid Phase Sequence
+
+Rules:
+
+- `Baseline Phase` must exist.
+- `Final Phase` must exist.
+- `Baseline Phase` must appear before `Final Phase`.
+- No `Task ...` phase may appear before `Baseline Phase`.
+- No `Task ...` phase may appear after `Final Phase`.
+- No `Studio Phase` may appear before `Baseline Phase`.
+- No `Studio Phase` may appear after `Final Phase`.
+- Multiple `Task ...` phases are allowed.
+- Multiple `Studio Phase` sections are allowed.
+- Non-phase sections may appear anywhere and should not be treated as executable phases.
+
+`labs-tests` should fail README hygiene validation if phase ordering is invalid.
+
+## Runnable Commands
+
+Any fenced `shell` block inside a phase is a runnable command.
+
+A phase may contain one or more runnable commands.
+
+A runnable command may or may not have a following `terminaloutput` block.
+
+Examples:
+
+```markdown
+Run:
+
+```shell
+docker compose up api-test --build --abort-on-container-exit
+```
+
+Expected output:
+
+```terminaloutput
+Tests run: 4, Successes: 4, Failures: 0, Errors: 0
+```
+
+Clean up:
+
+```shell
+docker compose down -v
+```
+```
+
+Rules:
+
+- Every fenced `shell` block inside a phase should be considered executable.
+- The command and its expected output do not need to be adjacent.
+- There may be explanatory content or setup steps between a command and its expected output.
+- Cleanup commands such as `docker compose down -v` are also runnable commands.
+- A command without a following `terminaloutput` block should still be executed.
+- A phase should pass only when all runnable commands and relevant validations for that phase pass.
+
+## Expected Output Validation
+
+Expected output must use fenced `terminaloutput` blocks.
+
+Example:
+
+```markdown
+Expected output:
+
+```terminaloutput
+Tests run: 4, Successes: 4, Failures: 0, Errors: 0
+```
+```
+
+Rules:
+
+- `terminaloutput` blocks are validation expectations.
+- A phase may contain zero, one, or many `terminaloutput` blocks.
+- `labs-tests` should validate command output against the relevant `terminaloutput` blocks in the same phase.
+- A `terminaloutput` block should not be required after every `shell` command.
+
+## Metadata
+
+Metadata should remain minimal.
+
+Metadata exists only to indicate:
+
+- optional capabilities not present in the lab
+- small lab-specific overrides that cannot be derived automatically
+
+Metadata should not duplicate:
+
+- commands
+- phase names
+- expected outputs
+- implementation steps
+- validation logic already inferable from the README
+
+## Metadata Format
+
+Metadata is embedded as an HTML comment near the top of the README.
+
+Example:
+
+```markdown
 <!--
 reports:
-  ctrf: true/false
-  html: true/false
+  ctrf: false
+  html: false
+
 test_counts: false
 -->
 ```
 
-These are the current top-level metadata keys and possible values used by `labs-tests`. Add them only when needed.
+## Supported Metadata
 
-## Current metadata usage in active labs-tests labs
+### reports
 
-These are the labs in the current `labs-tests` harness set whose README metadata actively changes validation or comparison behavior.
+Disable report validation if the lab does not generate reports.
 
-| Lab | Metadata used | What it changes |
-|---|---|---|
-| `external-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
-| `external-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `partial-examples` | `reports.ctrf: false` | CTRF is not required for this lab. |
-| `partial-examples` | `reports.html: false` | Specmatic HTML report is not required for this lab. |
-| `backward-compatibility-testing` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
-| `continuous-integration` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
-| `data-adapters` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
-| `quick-start-mock` | `test_counts: false` | Test-count comparison is disabled and shown as not applicable. |
-
-Labs in the sibling `labs` repo that still carry metadata but are not part of the active `labs-tests` harness set should not be treated as active examples for this file.
-
-## Usage Rules
-
-Use README metadata only when the default behavior needs to be overridden.
-
-That means:
-- do not restate defaults in a lab README
-- do not add metadata just for completeness
-- if a lab follows the default behavior, omit the key entirely
-
-Examples:
-- good: `reports.ctrf: false`
-- good: `test_counts: false`
-- avoid: `reports.ctrf: true` when `true` is already the default
-
-## Where it lives
-
-Place the metadata in YAML front matter at the top of the lab README:
-
-```yaml
-# No metadata needed when the lab uses all defaults
-```
-
-## Supported global options
-
-### `reports`
-
-Controls which report sources are expected for comparison and artifact validation.
-
-Example override:
+Example:
 
 ```yaml
 reports:
@@ -72,34 +223,17 @@ reports:
   html: false
 ```
 
-Supported keys recognized by the current code:
-- `ctrf`
-- `html`
-
-Preferred value type:
-- boolean
-
-Recommended usage:
+Defaults:
 
 ```yaml
 reports:
-  ctrf: false
-  html: false
+  ctrf: true
+  html: true
 ```
 
-Notes:
-- Only set `reports.*` when you need to override the default.
-- The active labs currently override only `ctrf` and `html`.
+### test_counts
 
-### `test_counts`
-
-Default:
-
-```yaml
-test_counts: true
-```
-
-Use this only when test-count comparison should be disabled for the lab.
+Disable test count validation if the lab does not produce deterministic test counts.
 
 Example:
 
@@ -107,7 +241,43 @@ Example:
 test_counts: false
 ```
 
-Purpose:
-- Disables README / console / CTRF / HTML test-count comparison for the lab.
-- Causes the test-count report to render those sources as `Not Applicable`.
-- Keeps the comparison row visible as `Expected` instead of treating missing counts as a failure.
+Default:
+
+```yaml
+test_counts: true
+```
+
+### artifacts
+
+Optional override for custom artifact validation.
+
+Example:
+
+```yaml
+artifacts:
+  - build/custom-report/index.html
+```
+
+### license
+
+Optional override if the lab does not require enterprise license validation.
+
+Example:
+
+```yaml
+license:
+  required: false
+```
+
+Default:
+
+```yaml
+license:
+  required: true
+```
+
+## Guiding Principle
+
+README first.
+
+Metadata only for exceptions.
