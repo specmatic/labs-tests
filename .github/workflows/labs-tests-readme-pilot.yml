@@ -1,4 +1,8 @@
 name: Specmatic Labs README-Driven Pilot Tests
+run-name: >-
+  Specmatic Labs README-Driven Pilot Tests |
+  labs=pilot |
+  labs-branch=${{ inputs.labs_branch || 'auto-labs-tests' }}
 
 on:
   workflow_dispatch:
