@@ -4,7 +4,6 @@ from collections import Counter
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from html import escape
-import importlib.util
 import json
 from pathlib import Path
 import re
@@ -13,12 +12,12 @@ from typing import Any
 from lablib.readme_expectations import (
     command_output_skip_reason,
     is_structured_file_display_language,
-    get_lab_readme_override,
     heading_matches,
     optional_h2_titles,
     title_present,
     unexpected_h2_titles_for_lab,
 )
+from lablib.readme_runner import build_readme_lab_spec
 from lablib.readme_schema import (
     BASELINE_PHASE,
     FINAL_PHASE,
@@ -136,10 +135,7 @@ def generate_labs_comparison(
 ) -> dict[str, Any]:
     repo_root = root or ROOT
     selected = set(discover_report_lab_names(repo_root) if lab_names is None else lab_names)
-    run_files = sorted(repo_root.glob("*/run.py"))
-    if selected:
-        run_files = [path for path in run_files if path.parent.name in selected]
-    labs = [build_lab_profile(path.parent) for path in run_files]
+    labs = [build_lab_profile(repo_root / lab_name) for lab_name in sorted(selected)]
     common_required_h2 = list(tuple(labs[0]["readme"]["requiredH2"]) if labs else ())
     validation_rows = build_validation_rows(labs)
     payload = {
@@ -200,17 +196,11 @@ def discover_report_lab_names(root: Path | None = None) -> list[str]:
     )
     if discovered:
         return discovered
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
-
-
-def discover_lab_names(root: Path | None = None) -> list[str]:
-    repo_root = root or ROOT
-    return sorted(path.parent.name for path in repo_root.glob("*/run.py") if not_in_excluded(path.parent.name))
+    return []
 
 
 def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
-    module = load_lab_module(lab_dir / "run.py")
-    spec = module.build_lab_spec()
+    spec = build_readme_lab_spec(lab_dir.name)
     common_artifacts = [artifact_profile(artifact) for artifact in spec.common_artifact_specs]
     phase_artifacts = []
     for phase in spec.phases:
@@ -269,7 +259,6 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
         expected_failure_mismatch=effective_efm,
         expected_failure_mismatch_reason=effective_efm_reason,
     )
-    override = get_lab_readme_override(spec.name)
     required_h2 = list(expected_h2_titles_for_document(readme_doc))
     unexpected_h2 = unexpected_h2_titles_for_lab(spec.name, h2_headings)
     shared_h2_matches = h2_headings == required_h2
@@ -349,7 +338,7 @@ def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
             ],
             "requiredH2": required_h2,
             "optionalH2": list(optional_h2_titles()),
-            "additionalH2": list(override.allowed_additional_h2_titles),
+            "additionalH2": [],
             "actualH2": h2_headings,
             "actualH3": h3_headings,
             "hasPrerequisites": title_present(h2_headings, "Prerequisites"),
@@ -612,18 +601,6 @@ def build_license_profile(spec: Any, snapshot: dict[str, Any] | None) -> dict[st
         "message": f"All executed phases used `{unique_modes[0]}` license mode.",
         "rows": rows,
     }
-
-
-def load_lab_module(run_file: Path) -> Any:
-    module_name = f"labs_tests_{run_file.parent.name.replace('-', '_')}"
-    spec = importlib.util.spec_from_file_location(module_name, run_file)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load module from {run_file}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def artifact_profile(artifact: Any) -> dict[str, Any]:
     if is_dataclass(artifact):
         data = asdict(artifact)
@@ -4812,11 +4789,17 @@ def build_test_count_consistency_profile(
         expected_source_count = sum(1 for enabled in expected_sources.values() if enabled)
         comparable = validates_counts and len(present_counts) >= 2
         consistent = comparable and len({tuple(sorted(item.items())) for item in present_counts}) == 1
+        counts_absent_everywhere = no_test_counts_available(readme_counts, console_counts, ctrf_counts, html_counts)
+        runtime_counts_without_readme = counts_present_without_readme(readme_counts, console_counts, ctrf_counts, html_counts)
 
         phase_execution_failed = phase_has_failed_command_assertion(phase)
 
         if phase.get("status") == "failed" and phase_execution_failed:
             status = "execution-failed"
+        elif validates_counts and counts_absent_everywhere:
+            status = "match"
+        elif validates_counts and runtime_counts_without_readme:
+            status = "mismatch"
         elif consistent:
             status = "match"
         elif not validates_counts:
@@ -4860,6 +4843,26 @@ def build_test_count_consistency_profile(
         "expectedFailureMismatchReason": expected_failure_mismatch_reason,
         "phases": comparisons,
     }
+
+
+def no_test_counts_available(
+    readme_counts: dict[str, int] | None,
+    console_counts: dict[str, int] | None,
+    ctrf_counts: dict[str, int] | None,
+    html_counts: dict[str, int] | None,
+) -> bool:
+    return all(counts is None for counts in (readme_counts, console_counts, ctrf_counts, html_counts))
+
+
+def counts_present_without_readme(
+    readme_counts: dict[str, int] | None,
+    console_counts: dict[str, int] | None,
+    ctrf_counts: dict[str, int] | None,
+    html_counts: dict[str, int] | None,
+) -> bool:
+    if readme_counts is not None:
+        return False
+    return any(counts is not None for counts in (console_counts, ctrf_counts, html_counts))
 
 
 def display_test_count_phase_label(

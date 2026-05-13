@@ -12,28 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
 LAB_NAMES = [
     "api-coverage",
-    "api-resiliency-testing",
-    "api-security-schemes",
-    "async-event-flow",
-    "backward-compatibility-testing",
-    "continuous-integration",
-    "data-adapters",
-    "dictionary",
-    "external-examples",
-    "filters",
-    "kafka-avro",
-    "kafka-sqs-retry-dlq",
-    "mcp-auto-test",
-    "overlays",
-    "partial-examples",
-    "workflow-in-same-spec",
-    "quick-start-api-testing",
-    "quick-start-async-contract-testing",
-    "quick-start-contract-testing",
-    "quick-start-mock",
-    "schema-resiliency-testing",
-    "schema-design",
-    "response-templating",
 ]
 
 
@@ -42,14 +20,6 @@ class SetupResult:
     status: str
     upstream_labs_path: str
     commands: list[dict[str, Any]]
-
-
-@dataclass
-class LicenseFileState:
-    path: Path
-    existed: bool
-    original_content: str | None
-    applied_source: str
 
 
 def run_setup(
@@ -121,37 +91,12 @@ def run_setup(
                     "Inspect current branch in upstream labs repository",
                 )
             )
-
-    for lab_name in LAB_NAMES:
-        if lab_name not in selected_labs:
-            continue
-        upstream_lab_path = UPSTREAM_LABS / lab_name
-        compose_file = upstream_lab_path / "docker-compose.yaml"
-        if not compose_file.exists():
-            continue
-
-        commands.append(
-            command_to_dict(
-                execute(
-                    ["docker", "compose", "pull", "--ignore-buildable"],
-                    upstream_lab_path,
-                    "setup:docker",
-                    stream_output=stream_output,
-                ),
-                f"Pull referenced Docker images for {lab_name}",
-            )
+    commands.append(
+        note_to_dict(
+            "Skip shared Docker setup for upstream labs",
+            "Each lab is responsible for its own docker compose or docker build flow during phase execution.",
         )
-        commands.append(
-            command_to_dict(
-                execute(
-                    ["docker", "compose", "build", "--pull"],
-                    upstream_lab_path,
-                    "setup:docker",
-                    stream_output=stream_output,
-                ),
-                f"Refresh buildable Docker images for {lab_name}",
-            )
-        )
+    )
 
     status = "passed" if all(item["exitCode"] == 0 for item in commands) else "failed"
     return SetupResult(
@@ -159,91 +104,6 @@ def run_setup(
         upstream_labs_path=str(UPSTREAM_LABS),
         commands=commands,
     )
-
-
-def prepare_upstream_labs_license() -> LicenseFileState:
-    if not UPSTREAM_LABS.exists():
-        raise RuntimeError(
-            f"Upstream labs repository was not found at {UPSTREAM_LABS}. "
-            "Action required: run with setup enabled or clone the sibling labs repository first."
-        )
-    license_path = UPSTREAM_LABS / "license.txt"
-    existed = license_path.exists()
-    original_content = license_path.read_text(encoding="utf-8") if existed else None
-    content, source = resolve_license_txt_content()
-    license_path.write_text(content, encoding="utf-8")
-    return LicenseFileState(
-        path=license_path,
-        existed=existed,
-        original_content=original_content,
-        applied_source=source,
-    )
-
-
-def restore_upstream_labs_license(state: LicenseFileState | None) -> None:
-    if state is None:
-        return
-    if state.existed and state.original_content is not None:
-        state.path.write_text(state.original_content, encoding="utf-8")
-        return
-    if state.path.exists():
-        state.path.unlink()
-
-
-def license_setup_dict(state: LicenseFileState) -> dict[str, Any]:
-    return note_to_dict(
-        "Prepare upstream labs license.txt",
-        (
-            f"Wrote {state.path} using {state.applied_source}. "
-            + ("An existing license.txt will be restored after the run." if state.original_content is not None else "No previous license.txt existed; the file will be removed after the run.")
-        ),
-    )
-
-
-def license_failure_dict(message: str) -> dict[str, Any]:
-    return info_to_dict("Prepare upstream labs license.txt", message)
-
-
-def resolve_license_txt_content() -> tuple[str, str]:
-    if os.getenv("GITHUB_ACTIONS") or os.getenv("GITHUB_RUN_ID"):
-        license_text = (os.getenv("SPECMATIC_LICENSE_KEY") or "").strip()
-        if not license_text:
-            raise RuntimeError(
-                "SPECMATIC_LICENSE_KEY is not available in the GitHub Actions environment. "
-                "Action required: configure the repository secret and rerun the workflow."
-            )
-        return license_text + ("\n" if not license_text.endswith("\n") else ""), "GitHub Actions secret SPECMATIC_LICENSE_KEY"
-
-    temp_dir = ROOT / "temp"
-    candidates = sorted(
-        path
-        for path in temp_dir.iterdir()
-        if path.is_file()
-        and path.name.lower().startswith("license-labs-test")
-        and path.name.lower().endswith(".txt")
-    ) if temp_dir.exists() else []
-    if not candidates:
-        raise RuntimeError(
-            f"Could not find a local labs-test license file in {ROOT / 'temp'} matching 'License-labs-test*.txt' (case-insensitive). "
-            "Action required: add exactly one file such as temp/License-labs-test.txt or temp/License-labs-test-Local.txt and rerun."
-        )
-    if len(candidates) > 1:
-        candidate_list = ", ".join(path.name for path in candidates)
-        raise RuntimeError(
-            f"Found multiple local labs-test license files in {ROOT / 'temp'}: {candidate_list}. "
-            "Action required: keep only one file matching 'License-labs-test*.txt' (case-insensitive) and rerun."
-        )
-    license_path = candidates[0]
-    license_text = license_path.read_text(encoding="utf-8")
-    if not license_text.strip():
-        raise RuntimeError(
-            f"Local labs-test license file {license_path} is empty. "
-            "Action required: put the full license text into that file and rerun."
-        )
-    normalized = license_text if license_text.endswith("\n") else license_text + "\n"
-    return normalized, f"local labs-test license file at {license_path}"
-
-
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
     for command in reversed(commands):
         if command.get("exitCode", 0) == 0:
@@ -297,16 +157,6 @@ def setup_failure_action(commands: list[dict[str, Any]]) -> str:
         if text.strip():
             return "Inspect output/consolidated-report/setup-output.json for the full command log and rerun after fixing the issue."
     return "Inspect output/consolidated-report/setup-output.json for details."
-
-
-def setup_failure_error_lines(commands: list[dict[str, Any]]) -> list[str]:
-    return [f"[error] {summarize_setup_failure(commands)}"]
-
-
-def setup_failure_action_lines(commands: list[dict[str, Any]]) -> list[str]:
-    return ["[Action required]", "", setup_failure_action(commands)]
-
-
 def refresh_upstream_labs(*, stream_output: bool, target_branch: str) -> list[dict[str, Any]]:
     branches_to_fetch = [target_branch] if target_branch == "main" else [target_branch, "main"]
     commands: list[dict[str, Any]] = []

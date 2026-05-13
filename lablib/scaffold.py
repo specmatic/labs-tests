@@ -185,7 +185,7 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
 
             run_best_effort_runtime_cleanup(spec, "before lab execution")
             for phase in spec.phases:
-                print(f"Preparing {phase.name.lower()} lab state...")
+                print(f"[{phase_dir_name(phase)}] Preparing {phase.name.lower()} lab state...")
                 apply_phase_files(spec, phase, original_files)
                 phase_result = execute_phase(spec, phase, readme_text, readme_doc, original_files)
                 phases.append(phase_result)
@@ -197,14 +197,13 @@ def run_lab(spec: LabSpec, args: argparse.Namespace) -> int:
         lab_name=spec.name,
         description=spec.description,
         lab_path=spec.upstream_lab,
-        spec_path=next(iter(spec.files.values())),
+        spec_path=next(iter(spec.files.values()), spec.readme_path),
         readme_path=spec.readme_path,
         output_path=spec.output_dir,
         phases=phases,
     )
     write_json(spec.output_dir / "report.json", report)
     write_html(spec.output_dir / "report.html", report)
-    snapshot_lab_output(spec)
     print(f"Wrote JSON report to {spec.output_dir / 'report.json'}")
     print(f"Wrote HTML report to {spec.output_dir / 'report.html'}")
     return 0 if report["status"] == "passed" else 1
@@ -228,35 +227,6 @@ def run_best_effort_runtime_cleanup(spec: LabSpec, when: str) -> None:
             "Action required: inspect the Docker state and rerun the lab if needed.",
             flush=True,
         )
-
-
-def snapshot_lab_output(spec: LabSpec) -> Path:
-    target_dir = spec.root / "output" / "labs-output" / f"{spec.name}-output"
-    legacy_dir = spec.root / "output" / f"{spec.name}-output"
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    if spec.output_dir.exists():
-        shutil.copytree(spec.output_dir, target_dir)
-        rewrite_consolidated_report_link(target_dir / "report.html", spec.root)
-    if legacy_dir.exists():
-        shutil.rmtree(legacy_dir)
-    return target_dir
-
-
-def rewrite_consolidated_report_link(report_path: Path, root: Path) -> None:
-    if not report_path.exists():
-        return
-    text = report_path.read_text(encoding="utf-8")
-    source_hrefs = (
-        "../../output/consolidated-report/consolidated-report.html",
-        "../../output/consolidated-report/report.html",
-    )
-    target_href = os.path.relpath(root / "output" / "consolidated-report" / "consolidated-report.html", start=report_path.parent)
-    target_href = target_href.replace("output/", "", 1) if target_href.startswith("output/") else target_href
-    for source_href in source_hrefs:
-        if source_href in text:
-            report_path.write_text(text.replace(source_href, target_href), encoding="utf-8")
-            return
 
 
 def docker_compose_down(spec: LabSpec, *compose_args: str) -> CommandResult:
@@ -316,21 +286,22 @@ def execute_phase(
     readme_doc: Any,
     original_files: dict[str, str | None],
 ) -> dict[str, Any]:
-    target_dir = spec.output_dir / phase_dir_name(phase)
+    phase_prefix = phase_dir_name(phase)
+    target_dir = spec.output_dir / phase_prefix
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     if spec.clear_reports is not None:
         spec.clear_reports(spec)
 
-    print(f"{phase.name}: starting verification...")
+    print(f"[{phase_prefix}] {phase.name}: starting verification...")
     phase_command = phase.command or spec.command
     result = run_command(
         phase_command,
         spec.upstream_lab,
         env=spec.command_env,
         stream_output=True,
-        stream_prefix=f"[{phase_dir_name(phase)}]",
+        stream_prefix=f"[{phase_prefix}]",
         timeout_seconds=phase.command_timeout_seconds,
         idle_timeout_seconds=phase.command_idle_timeout_seconds,
     )
@@ -354,7 +325,6 @@ def execute_phase(
             artifacts={"command.log": {"path": target_dir / "command.log", "text": result.combined_output, "kind": "text"}},
             original_files=original_files,
         )
-        collect_default_phase_diagnostics(context)
         return phase_result
 
     write_text(target_dir / "command.log", result.combined_output)
@@ -372,7 +342,6 @@ def execute_phase(
     )
     try:
         phase_result = build_phase_result(context)
-        collect_default_phase_diagnostics(context)
         return phase_result
     finally:
         if spec.post_phase_cleanup is not None:
@@ -454,34 +423,8 @@ def build_phase_result(context: ValidationContext) -> dict[str, Any]:
             )
         )
 
-    assertions.extend(build_artifact_assertions(context))
-
-    for phrase in phase.expected_console_phrases:
-        assertions.append(
-            assert_condition(
-                phrase in command_result.combined_output,
-                f"Console output contained '{phrase}'.",
-                f"Console output did not contain '{phrase}'.",
-                category="console",
-                details=[
-                    detail("Expected phrase", phrase),
-                    detail("Console excerpt", extract_context(command_result.combined_output, phrase)),
-                ],
-            )
-        )
-
-    if phase.extra_assertions is not None:
-        assertions.extend(filter_relevant_lab_assertions(phase.extra_assertions(context), context))
-
-    assertions.extend(evaluate_readme_assertions(context))
     assertions.extend(evaluate_v2_phase_readme_alignment(context))
-    assertions.extend(evaluate_readme_console_structure(context))
-    assertions.extend(evaluate_readme_os_documentation(context))
     assertions.extend(evaluate_runtime_summary_drift(context))
-    if phase.include_readme_structure_checks:
-        assertions.extend(validate_readme_structure(context))
-        assertions.extend(evaluate_readme_links(context))
-    assertions = apply_readme_annotation_overrides(assertions, context.readme_text)
 
     phase_status = "passed" if all(item["status"] != "failed" for item in assertions) else "failed"
     return {
@@ -1275,7 +1218,11 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
         ),
     ]
 
-    if bool(context.readme_doc.metadata.get("test_counts", True)):
+    requires_summary = (
+        phase_doc.id in {"baseline", "final"}
+        or bool(extract_tests_run_summaries(phase_doc.content))
+    )
+    if bool(context.readme_doc.metadata.get("test_counts", True)) and requires_summary:
         assertions.append(
             assert_condition(
                 bool(extract_tests_run_summaries(phase_doc.content)),

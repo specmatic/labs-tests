@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 import re
 
 
@@ -63,31 +62,22 @@ def command_output_skip_reason(command: str) -> str | None:
         return "terminaloutput is not required for git index setup commands"
     return None
 
-def load_h2_sequence() -> tuple[str, ...]:
-    sequence_file = Path(__file__).with_name("readme_h2_sequence.yaml")
-    lines = sequence_file.read_text(encoding="utf-8").splitlines()
-    items: list[str] = []
-    inside_sequence = False
-    for raw_line in lines:
-        line = raw_line.rstrip()
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped == "shared_h2_sequence:":
-            inside_sequence = True
-            continue
-        if inside_sequence:
-            if stripped.startswith("- "):
-                items.append(stripped[2:].strip())
-                continue
-            if not raw_line.startswith(" "):
-                break
-    if not items:
-        raise ValueError(f"No shared_h2_sequence entries found in {sequence_file}")
-    return tuple(items)
-
-
-CANONICAL_README_H2_SEQUENCE = load_h2_sequence()
+CANONICAL_README_H2_SEQUENCE = (
+    "Objective",
+    "Why this lab matters",
+    "Time required to complete this lab",
+    "Prerequisites",
+    "Architecture",
+    "Files in this lab",
+    "Lab Rules",
+    "Specmatic references",
+    "Lab Implementation Phases",
+    "Pass Criteria",
+    "Troubleshooting",
+    "Cleanup",
+    "What you learned",
+    "Next step",
+)
 
 
 @dataclass(frozen=True)
@@ -141,22 +131,6 @@ class ReadmeTemplate:
     implementation_h3_rule: SectionRule
     studio_h3_rule: SectionRule
     optional_h2: tuple[SectionRule, ...] = ()
-
-
-@dataclass(frozen=True)
-class LabReadmeOverride:
-    """
-    Per-lab schema adjustments.
-
-    These are for real structural differences we want to model centrally rather
-    than hiding in ad hoc ignore annotations.
-    """
-
-    allowed_manual_h3_titles: tuple[str, ...] = ()
-    allowed_additional_h2_titles: tuple[str, ...] = ()
-    allowed_additional_h3_titles: tuple[str, ...] = ()
-    studio_steps_are_manual_only: bool = False
-    notes: tuple[str, ...] = ()
 
 
 def command_blocks_have_any_language(command_blocks, allowed_languages) -> bool:
@@ -240,23 +214,6 @@ README_TEMPLATE = ReadmeTemplate(
     ),
     optional_h2=(),
 )
-
-
-LAB_README_OVERRIDES: dict[str, LabReadmeOverride] = {
-    "filters": LabReadmeOverride(
-        allowed_manual_h3_titles=(
-            "Start Studio",
-            "Run tests in Studio",
-        ),
-        studio_steps_are_manual_only=True,
-        notes=(
-            "The upstream README currently documents a Studio path after the baseline CLI run.",
-            "labs-tests should report that Studio path as manual/not-yet-automated guidance rather than a runtime failure.",
-        ),
-    ),
-}
-
-
 def normalize_heading_title(value: str) -> str:
     normalized = re.sub(r"\s+", " ", value.replace("`", "")).strip().lower()
     return normalized.rstrip(":")
@@ -264,10 +221,6 @@ def normalize_heading_title(value: str) -> str:
 
 def heading_matches(actual: str, expected: str) -> bool:
     return normalize_heading_title(actual) == normalize_heading_title(expected)
-
-
-def get_lab_readme_override(lab_name: str) -> LabReadmeOverride:
-    return LAB_README_OVERRIDES.get(lab_name, LabReadmeOverride())
 
 
 def canonical_h2_titles() -> tuple[str, ...]:
@@ -279,8 +232,8 @@ def optional_h2_titles() -> tuple[str, ...]:
 
 
 def allowed_h2_titles_for_lab(lab_name: str) -> tuple[str, ...]:
-    override = get_lab_readme_override(lab_name)
-    return (*CANONICAL_README_H2_SEQUENCE, *optional_h2_titles(), *override.allowed_additional_h2_titles)
+    del lab_name
+    return (*CANONICAL_README_H2_SEQUENCE, *optional_h2_titles())
 
 
 def unexpected_h2_titles_for_lab(lab_name: str, actual_h2_titles: list[str] | tuple[str, ...]) -> list[str]:

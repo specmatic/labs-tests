@@ -186,9 +186,13 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
         if heading.level == 3 and implementation_h2.start < heading.start < implementation_end
     ]
     phases: list[ReadmePhase] = []
+    task_index = 0
     for index, heading in enumerate(phase_headings):
         # Match H3 title to phase ID (case-insensitive substring match)
         phase_id = match_title_to_phase_id(heading.title, phase_ids)
+        if phase_id is None and heading.title.lower().startswith("task "):
+            task_index += 1
+            phase_id = f"task-{task_index}"
 
         if phase_id:  # Only include if it matches a known phase
             next_heading = phase_headings[index + 1] if index + 1 < len(phase_headings) else None
