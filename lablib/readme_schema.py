@@ -183,7 +183,7 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
     """Extract phases by matching phase-like headings against phase IDs."""
     implementation_h2 = next((heading for heading in headings if heading.level == 2 and heading.title == "Lab Implementation Phases"), None)
     if implementation_h2 is None:
-        return extract_phases_from_heading_range(text, headings, phase_ids, 0, len(text))
+        return extract_phases_from_heading_range(text, headings, phase_ids, 0, len(text), None)
     implementation_end = next(
         (
             heading.start
@@ -194,7 +194,14 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
         ),
         len(text),
     )
-    return extract_phases_from_heading_range(text, headings, phase_ids, implementation_h2.start, implementation_end)
+    return extract_phases_from_heading_range(
+        text,
+        headings,
+        phase_ids,
+        implementation_h2.start,
+        implementation_end,
+        implementation_h2.level + 1,
+    )
 
 
 def extract_phases_from_heading_range(
@@ -203,13 +210,21 @@ def extract_phases_from_heading_range(
     phase_ids: list[str],
     start: int,
     end: int,
+    phase_heading_level: int | None,
 ) -> list[ReadmePhase]:
-    phase_headings = [
+    matching_headings = [
         heading
         for heading in headings
         if heading.start > start
         and heading.start < end
         and match_title_to_phase_id(heading.title, phase_ids) is not None
+    ]
+    if phase_heading_level is None and matching_headings:
+        phase_heading_level = min(heading.level for heading in matching_headings)
+    phase_headings = [
+        heading
+        for heading in matching_headings
+        if heading.level == phase_heading_level
     ]
     phases: list[ReadmePhase] = []
     for index, heading in enumerate(phase_headings):
