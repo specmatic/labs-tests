@@ -103,7 +103,7 @@ def main() -> int:
     print(f"Selected {len(selected_labs)} lab(s) to run.", flush=True)
 
     if not args.refresh_report:
-        clear_selected_outputs(selected_labs)
+        clear_output_root()
 
     for index, lab_name in enumerate(selected_labs, start=1):
         print("", flush=True)
@@ -168,10 +168,8 @@ def write_consolidated_payload(setup_payload: dict | None, lab_results: list[dic
     write_json(CONSOLIDATED_OUTPUT_DIR / "consolidated-report.json", payload)
 
 
-def clear_selected_outputs(selected_labs: list[str]) -> None:
-    for lab_name in selected_labs:
-        remove_path_if_exists(LABS_OUTPUT_DIR / f"{lab_name}-output")
-    remove_path_if_exists(CONSOLIDATED_OUTPUT_DIR)
+def clear_output_root() -> None:
+    remove_path_if_exists(ROOT / "output")
 
 
 def remove_path_if_exists(path: Path) -> None:
