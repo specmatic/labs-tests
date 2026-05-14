@@ -16,6 +16,8 @@ from lablib.readme_schema import parse_simple_yaml
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
 LAB_DISCOVERY_CONFIG = ROOT / "labs-discovery.yaml"
+TEMP_LICENSE_PATH = ROOT / "temp" / "license.txt"
+UPSTREAM_LICENSE_PATH = UPSTREAM_LABS / "license.txt"
 
 
 @dataclass
@@ -30,6 +32,14 @@ class UpstreamLabSnapshot:
     lab_name: str
     original_path: Path
     snapshot_path: Path
+
+
+@dataclass
+class UpstreamLicenseSnapshot:
+    original_path: Path
+    backup_path: Path | None
+    temp_license_path: Path
+    applied_temp_license: bool
 
 
 def run_setup(
@@ -180,6 +190,41 @@ def cleanup_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
     snapshot_root = snapshot.snapshot_path.parent
     if snapshot_root.exists():
         force_remove_tree(snapshot_root, ignore_errors=True)
+
+
+def prepare_upstream_license_for_run() -> UpstreamLicenseSnapshot:
+    backup_root = Path(tempfile.mkdtemp(prefix="labs-tests-license-"))
+    backup_path: Path | None = None
+    if UPSTREAM_LICENSE_PATH.exists():
+        backup_path = backup_root / "license.txt"
+        shutil.copy2(UPSTREAM_LICENSE_PATH, backup_path)
+
+    applied_temp_license = False
+    if TEMP_LICENSE_PATH.exists():
+        UPSTREAM_LICENSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TEMP_LICENSE_PATH, UPSTREAM_LICENSE_PATH)
+        applied_temp_license = True
+
+    return UpstreamLicenseSnapshot(
+        original_path=UPSTREAM_LICENSE_PATH,
+        backup_path=backup_path,
+        temp_license_path=TEMP_LICENSE_PATH,
+        applied_temp_license=applied_temp_license,
+    )
+
+
+def restore_upstream_license_after_run(snapshot: UpstreamLicenseSnapshot) -> None:
+    try:
+        if snapshot.backup_path is not None and snapshot.backup_path.exists():
+            snapshot.original_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(snapshot.backup_path, snapshot.original_path)
+            return
+        if snapshot.applied_temp_license and snapshot.original_path.exists():
+            snapshot.original_path.unlink()
+    finally:
+        backup_root = snapshot.backup_path.parent if snapshot.backup_path is not None else None
+        if backup_root is not None and backup_root.exists():
+            force_remove_tree(backup_root, ignore_errors=True)
 
 
 def force_remove_tree(path: Path, *, ignore_errors: bool = False) -> None:

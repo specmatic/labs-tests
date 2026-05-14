@@ -22,7 +22,9 @@ from lablib.workspace_setup import (
     create_upstream_lab_snapshot,
     discover_available_labs,
     load_ignored_lab_names,
+    prepare_upstream_license_for_run,
     restore_upstream_lab_snapshot,
+    restore_upstream_license_after_run,
     run_setup,
 )
 
@@ -102,57 +104,68 @@ def main() -> int:
     )
     print(f"Selected {len(selected_labs)} lab(s) to run.", flush=True)
 
-    if not args.refresh_report:
-        clear_output_root()
-
-    for index, lab_name in enumerate(selected_labs, start=1):
-        print("", flush=True)
-        print("-" * 80, flush=True)
-        print(f"Running lab {index} of {len(selected_labs)}: {lab_name}", flush=True)
-        print("-" * 80, flush=True)
-        print("", flush=True)
-        snapshot = create_upstream_lab_snapshot(lab_name)
-        try:
-            try:
-                lab_spec = build_readme_lab_spec(lab_name)
-            except Exception as exc:
-                write_lab_construction_failure_report(lab_name, exc)
+    license_snapshot = None
+    try:
+        if not args.refresh_report:
+            clear_output_root()
+            license_snapshot = prepare_upstream_license_for_run()
+            if license_snapshot.applied_temp_license:
                 print(
-                    f"[warning] Failed to build README-driven lab '{lab_name}': {exc}. "
-                    "Impact: this lab is marked failed in the generated report, but the run will continue.",
+                    f"Using temporary license for this run from {license_snapshot.temp_license_path}.",
                     flush=True,
                 )
-                overall_exit = 1
-                continue
-            lab_args = argparse.Namespace(
-                refresh_report=args.refresh_report,
-                skip_setup=True,
-                refresh_labs=args.refresh_labs,
-                labs_branch=args.labs_branch,
-                force=args.force,
-            )
-            exit_code = run_lab(lab_spec, lab_args)
-            overall_exit = max(overall_exit, exit_code)
-        finally:
+
+        for index, lab_name in enumerate(selected_labs, start=1):
+            print("", flush=True)
+            print("-" * 80, flush=True)
+            print(f"Running lab {index} of {len(selected_labs)}: {lab_name}", flush=True)
+            print("-" * 80, flush=True)
+            print("", flush=True)
+            snapshot = create_upstream_lab_snapshot(lab_name)
             try:
-                restore_upstream_lab_snapshot(snapshot)
-            except Exception as exc:
-                if GITHUB_ACTIONS:
+                try:
+                    lab_spec = build_readme_lab_spec(lab_name)
+                except Exception as exc:
+                    write_lab_construction_failure_report(lab_name, exc)
                     print(
-                        f"[warning] Failed to restore sibling lab '{lab_name}' after execution: {exc}. "
-                        "Impact: this run may leave modified files in the GitHub Actions workspace, "
-                        "but the workflow started from a clean checkout so the job will continue.",
+                        f"[warning] Failed to build README-driven lab '{lab_name}': {exc}. "
+                        "Impact: this lab is marked failed in the generated report, but the run will continue.",
                         flush=True,
                     )
-                else:
-                    raise
+                    overall_exit = 1
+                    continue
+                lab_args = argparse.Namespace(
+                    refresh_report=args.refresh_report,
+                    skip_setup=True,
+                    refresh_labs=args.refresh_labs,
+                    labs_branch=args.labs_branch,
+                    force=args.force,
+                )
+                exit_code = run_lab(lab_spec, lab_args)
+                overall_exit = max(overall_exit, exit_code)
             finally:
-                cleanup_upstream_lab_snapshot(snapshot)
+                try:
+                    restore_upstream_lab_snapshot(snapshot)
+                except Exception as exc:
+                    if GITHUB_ACTIONS:
+                        print(
+                            f"[warning] Failed to restore sibling lab '{lab_name}' after execution: {exc}. "
+                            "Impact: this run may leave modified files in the GitHub Actions workspace, "
+                            "but the workflow started from a clean checkout so the job will continue.",
+                            flush=True,
+                        )
+                    else:
+                        raise
+                finally:
+                    cleanup_upstream_lab_snapshot(snapshot)
 
-    lab_results = load_lab_results_from_snapshots(selected_labs)
-    write_consolidated_payload(setup_payload, lab_results, args.labs_branch)
-    generate_labs_comparison(root=ROOT, lab_names=selected_labs)
-    return overall_exit
+        lab_results = load_lab_results_from_snapshots(selected_labs)
+        write_consolidated_payload(setup_payload, lab_results, args.labs_branch)
+        generate_labs_comparison(root=ROOT, lab_names=selected_labs)
+        return overall_exit
+    finally:
+        if license_snapshot is not None:
+            restore_upstream_license_after_run(license_snapshot)
 
 
 def write_consolidated_payload(setup_payload: dict | None, lab_results: list[dict], labs_branch: str) -> None:
