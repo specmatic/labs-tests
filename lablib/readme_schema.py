@@ -115,7 +115,10 @@ def parse_readme_document(text: str) -> ReadmeDocument:
     h1_title = next((heading.title for heading in headings if heading.level == 1), "")
     h2_titles = [heading.title for heading in headings if heading.level == 2]
     phase_ids = metadata.get("phases") or metadata.get("required_phases") or list(ALLOWED_PHASE_KINDS)
-    phases = extract_v2_phases(body_text, headings, phase_ids)
+    phases = merge_phases(
+        extract_v2_phases(body_text, headings, phase_ids),
+        extract_fallback_phases(body_text, headings, phase_ids),
+    )
     links = extract_markdown_links(body_text)
 
     # Extract overview video URL from "What you will learn" > "### Overview Video" section
@@ -212,6 +215,73 @@ def extract_v2_phases(text: str, headings: list[Heading], phase_ids: list[str]) 
                 )
             )
     return phases
+
+
+def extract_fallback_phases(text: str, headings: list[Heading], phase_ids: list[str]) -> list[ReadmePhase]:
+    candidate_headings = [heading for heading in headings if heading.level in {2, 3}]
+    phases: list[ReadmePhase] = []
+    task_index = 0
+    fallback_index = 0
+
+    for index, heading in enumerate(candidate_headings):
+        if not is_fallback_phase_heading(heading):
+            continue
+        section_end = section_end_for_heading(candidate_headings, heading, index, len(text))
+        section_text = text[heading.start:section_end].strip()
+        code_blocks = extract_code_blocks(section_text)
+        if not any(block.is_command for block in code_blocks):
+            continue
+
+        phase_id = match_title_to_phase_id(heading.title, phase_ids)
+        if phase_id is None and heading.title.lower().startswith("task "):
+            task_index += 1
+            phase_id = f"task-{task_index}"
+        if phase_id is None:
+            fallback_index += 1
+            phase_id = f"ad-hoc-{fallback_index}"
+
+        phases.append(
+            ReadmePhase(
+                id=phase_id,
+                title=heading.title,
+                heading=heading,
+                metadata={},
+                content=section_text,
+                code_blocks=code_blocks,
+                links=extract_markdown_links(section_text),
+            )
+        )
+
+    return phases
+
+
+def is_fallback_phase_heading(heading: Heading) -> bool:
+    title = heading.title.strip().lower()
+    if "baseline" in title or "final" in title or title.startswith("task "):
+        return True
+    if heading.level == 2 and re.match(r"^\d+\.\s+", heading.title.strip()):
+        return True
+    return False
+
+
+def merge_phases(primary: list[ReadmePhase], fallback: list[ReadmePhase]) -> list[ReadmePhase]:
+    seen_starts = {phase.heading.start for phase in primary}
+    merged = list(primary)
+    merged.extend(phase for phase in fallback if phase.heading.start not in seen_starts)
+    merged.sort(key=lambda phase: phase.heading.start)
+    return merged
+
+
+def section_end_for_heading(
+    headings: list[Heading],
+    heading: Heading,
+    index: int,
+    text_length: int,
+) -> int:
+    for next_heading in headings[index + 1 :]:
+        if next_heading.level <= heading.level:
+            return next_heading.start
+    return text_length
 
 
 def match_title_to_phase_id(title: str, phase_ids: list[str]) -> str | None:
@@ -427,7 +497,11 @@ def phase_sequence_is_valid(
         return False, f"The last lab phase must be the {FINAL_PHASE} phase."
 
     # Check for unsupported phase kinds
-    invalid = [phase.id for phase in phases if phase.id not in ALLOWED_PHASE_KINDS]
+    invalid = [
+        phase.id
+        for phase in phases
+        if phase.id not in ALLOWED_PHASE_KINDS and not phase.id.startswith("task-")
+    ]
     if invalid:
         return False, f"Found unsupported phase kinds: {', '.join(invalid)}."
 

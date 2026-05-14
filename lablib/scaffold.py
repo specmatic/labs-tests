@@ -1159,7 +1159,7 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
     for index, block in enumerate(phase_doc.code_blocks):
         if not block.is_command:
             continue
-        skipped_reason = command_output_skip_reason(block.body)
+        skipped_reason = command_output_skip_reason(block.body) or alternative_command_skip_reason(phase_doc, block)
         if skipped_reason:
             skipped_command_blocks.append(f"line {block.line} ({skipped_reason})")
             continue
@@ -1234,7 +1234,54 @@ def evaluate_v2_phase_readme_alignment(context: ValidationContext) -> list[dict[
             )
         )
 
+    assertions.extend(evaluate_phase_sequence_alignment(context))
     return assertions
+
+
+def alternative_command_skip_reason(phase_doc: Any, block: Any) -> str | None:
+    if not is_alternative_run_command(phase_doc.content, block.line):
+        return None
+    return "terminaloutput is optional for alternative run commands"
+
+
+def is_alternative_run_command(phase_text: str, block_line: int) -> bool:
+    lines = phase_text.splitlines()
+    search_index = max(0, block_line - 2)
+    lowest_index = max(0, search_index - 8)
+    for index in range(search_index, lowest_index - 1, -1):
+        raw = lines[index].strip()
+        if not raw:
+            continue
+        if raw.startswith("```"):
+            continue
+        normalized = raw.lower().rstrip(":")
+        if "alternative" in normalized and "command" in normalized:
+            return True
+        if raw.startswith("#"):
+            break
+    return False
+
+
+def evaluate_phase_sequence_alignment(context: ValidationContext) -> list[dict[str, Any]]:
+    first_phase = context.lab.phases[0] if context.lab.phases else None
+    if first_phase is None or context.phase.readme_phase_id != first_phase.readme_phase_id:
+        return []
+
+    document = context.readme_doc
+    phase_ids = document.metadata.get("phases", [])
+    sequence_ok, sequence_message = phase_sequence_is_valid(document.phases, phase_ids)
+    return [
+        assert_condition(
+            sequence_ok,
+            "README implementation phases follow the expected baseline -> task(s) -> final sequence.",
+            f"README implementation phase sequence is invalid. {sequence_message}",
+            category="readme",
+            code="readme.phase.sequence",
+            details=[
+                detail("Detected phase ids", " -> ".join(phase.id for phase in document.phases) or "(none)"),
+            ],
+        )
+    ]
 
 
 def evaluate_readme_links(context: ValidationContext) -> list[dict[str, Any]]:

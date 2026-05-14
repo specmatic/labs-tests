@@ -15,6 +15,9 @@ from lablib.report_building import (
 from lablib.reporting import write_json
 from lablib.scaffold import run_lab
 from lablib.workspace_setup import (
+    cleanup_upstream_lab_snapshot,
+    create_upstream_lab_snapshot,
+    restore_upstream_lab_snapshot,
     run_setup,
 )
 
@@ -76,16 +79,21 @@ def main() -> int:
 
     for lab_name in selected_labs:
         print(f"Running README-driven lab: {lab_name}")
-        lab_spec = build_readme_lab_spec(lab_name)
-        lab_args = argparse.Namespace(
-            refresh_report=args.refresh_report,
-            skip_setup=True,
-            refresh_labs=args.refresh_labs,
-            labs_branch=args.labs_branch,
-            force=args.force,
-        )
-        exit_code = run_lab(lab_spec, lab_args)
-        overall_exit = max(overall_exit, exit_code)
+        snapshot = create_upstream_lab_snapshot(lab_name)
+        try:
+            lab_spec = build_readme_lab_spec(lab_name)
+            lab_args = argparse.Namespace(
+                refresh_report=args.refresh_report,
+                skip_setup=True,
+                refresh_labs=args.refresh_labs,
+                labs_branch=args.labs_branch,
+                force=args.force,
+            )
+            exit_code = run_lab(lab_spec, lab_args)
+            overall_exit = max(overall_exit, exit_code)
+        finally:
+            restore_upstream_lab_snapshot(snapshot)
+            cleanup_upstream_lab_snapshot(snapshot)
 
     lab_results = load_lab_results_from_snapshots(selected_labs)
     write_consolidated_payload(setup_payload, lab_results, args.labs_branch)

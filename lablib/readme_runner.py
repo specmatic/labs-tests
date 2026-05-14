@@ -88,7 +88,7 @@ def slugify_phase_title(title: str) -> str:
 
 
 def phase_output_dir_name(phase_doc: ReadmePhase) -> str:
-    if phase_doc.id and phase_doc.id.startswith("task-"):
+    if phase_doc.id and (phase_doc.id.startswith("task-") or phase_doc.id.startswith("ad-hoc-")):
         return slugify_phase_title(phase_doc.title)
     return phase_doc.id or slugify_phase_title(phase_doc.title)
 
@@ -120,7 +120,7 @@ def build_phase_specs(document: ReadmeDocument) -> tuple[PhaseSpec, ...]:
             phases.append(phase_spec)
     if not phases:
         raise ValueError(
-            "README does not contain any executable implementation phases under 'Lab Implementation Phases'."
+            "README does not contain any executable shell-command phases under a recognizable heading."
         )
     return tuple(phases)
 

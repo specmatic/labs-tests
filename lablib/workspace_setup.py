@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
+import stat
+import tempfile
 from typing import Any
 
 from lablib.command_runner import CommandResult, run_command
@@ -20,6 +23,13 @@ class SetupResult:
     status: str
     upstream_labs_path: str
     commands: list[dict[str, Any]]
+
+
+@dataclass
+class UpstreamLabSnapshot:
+    lab_name: str
+    original_path: Path
+    snapshot_path: Path
 
 
 def run_setup(
@@ -104,6 +114,57 @@ def run_setup(
         upstream_labs_path=str(UPSTREAM_LABS),
         commands=commands,
     )
+
+
+def create_upstream_lab_snapshot(lab_name: str) -> UpstreamLabSnapshot:
+    original_path = UPSTREAM_LABS / lab_name
+    if not original_path.exists():
+        raise FileNotFoundError(
+            f"Upstream lab directory was not found: {original_path}. "
+            "Action required: ensure the sibling labs repository contains this lab before running."
+        )
+    snapshot_root = Path(tempfile.mkdtemp(prefix="labs-tests-snapshot-"))
+    snapshot_path = snapshot_root / lab_name
+    shutil.copytree(original_path, snapshot_path)
+    return UpstreamLabSnapshot(
+        lab_name=lab_name,
+        original_path=original_path,
+        snapshot_path=snapshot_path,
+    )
+
+
+def restore_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
+    if snapshot.original_path.exists():
+        make_tree_writable(snapshot.original_path)
+        shutil.rmtree(snapshot.original_path)
+    shutil.copytree(snapshot.snapshot_path, snapshot.original_path)
+
+
+def cleanup_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
+    snapshot_root = snapshot.snapshot_path.parent
+    if snapshot_root.exists():
+        make_tree_writable(snapshot_root)
+        shutil.rmtree(snapshot_root, ignore_errors=True)
+
+
+def make_tree_writable(path: Path) -> None:
+    if not path.exists():
+        return
+    for current_root, dirnames, filenames in os.walk(path):
+        current_path = Path(current_root)
+        make_path_writable(current_path)
+        for dirname in dirnames:
+            make_path_writable(current_path / dirname)
+        for filename in filenames:
+            make_path_writable(current_path / filename)
+
+
+def make_path_writable(path: Path) -> None:
+    try:
+        current_mode = path.stat().st_mode
+        path.chmod(current_mode | stat.S_IWUSR)
+    except FileNotFoundError:
+        return
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
     for command in reversed(commands):
         if command.get("exitCode", 0) == 0:

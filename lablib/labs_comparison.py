@@ -36,8 +36,6 @@ OUTPUT_DIR = ROOT / "output"
 COMPARISON_OUTPUT_DIR = OUTPUT_DIR / "consolidated-report"
 COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.json"
 COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-comparison.html"
-HEADINGS_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.json"
-HEADINGS_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.html"
 TEST_COUNT_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.json"
 TEST_COUNT_COMPARISON_HTML_PATH = COMPARISON_OUTPUT_DIR / "labs-test-counts-comparison.html"
 FENCING_COMPARISON_JSON_PATH = COMPARISON_OUTPUT_DIR / "labs-command-output-fencing-comparison.json"
@@ -70,7 +68,6 @@ TERMINAL_OUTPUT_FENCE_LANGUAGE = "terminaloutput"
 IGNORED_ARTIFACT_LABELS = {"html", "coverage_report.json", "stub_usage_report.json"}
 REPORT_ARTIFACT_LABELS = {"ctrf-report.json", "specmatic-report.html"}
 CORE_VALIDATION_LABELS = {
-    "Labs Heading Structure Comparison",
     "Command and Output fencing validation",
     "Test counts match across the README, console output, CTRF JSON, and Specmatic HTML",
     "Generated report artifacts align with README expectations",
@@ -151,7 +148,6 @@ def generate_labs_comparison(
             "consolidatedReportHref": "consolidated-report.html",
         },
     }
-    headings_payload = build_heading_comparison_payload(labs, common_required_h2, generated_at or datetime.now().astimezone().isoformat())
     test_count_payload = build_test_count_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     fencing_payload = build_fencing_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
     artifact_payload = build_artifact_comparison_payload(labs, generated_at or datetime.now().astimezone().isoformat())
@@ -162,13 +158,13 @@ def generate_labs_comparison(
         LEGACY_COMPARISON_HTML_PATH,
         COMPARISON_OUTPUT_DIR / "labs-other-comparison.json",
         COMPARISON_OUTPUT_DIR / "labs-other-comparison.html",
+        COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.json",
+        COMPARISON_OUTPUT_DIR / "labs-heading-structure-comparison.html",
     ):
         if legacy_path.exists():
             legacy_path.unlink()
     COMPARISON_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     COMPARISON_HTML_PATH.write_text(render_comparison_html(payload), encoding="utf-8")
-    HEADINGS_COMPARISON_JSON_PATH.write_text(json.dumps(headings_payload, indent=2) + "\n", encoding="utf-8")
-    HEADINGS_COMPARISON_HTML_PATH.write_text(render_heading_comparison_html(headings_payload), encoding="utf-8")
     TEST_COUNT_COMPARISON_JSON_PATH.write_text(json.dumps(test_count_payload, indent=2) + "\n", encoding="utf-8")
     TEST_COUNT_COMPARISON_HTML_PATH.write_text(render_test_count_comparison_html(test_count_payload), encoding="utf-8")
     FENCING_COMPARISON_JSON_PATH.write_text(json.dumps(fencing_payload, indent=2) + "\n", encoding="utf-8")
@@ -886,7 +882,7 @@ def analyze_readme_os_documentation(readme_text: str, headings: list[dict[str, A
                         "commandFence": block["rawLanguage"] or "(none)",
                     }
                 )
-            skipped_reason = command_output_skip_reason(block["preview"] or "")
+            skipped_reason = command_output_skip_reason(block["preview"] or "") or alternative_command_skip_reason_in_readme(readme_text, block["line"])
             next_block = code_blocks[index + 1] if index + 1 < len(code_blocks) else None
             next_heading = heading_before_line(headings, next_block["line"]) if next_block is not None else None
             if skipped_reason:
@@ -1318,15 +1314,6 @@ def build_validation_rows(labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for lab in labs
     }
     row_definitions = [
-        {
-            "label": "Labs Heading Structure Comparison",
-            "tooltip": {
-                **build_h2_sequence_tooltip(labs, common_required_h2),
-                "fullReportHref": "labs-heading-structure-comparison.html",
-                "fullReportLabel": "Open full heading structure report",
-            },
-            "cells": [bool(lab["readme"]["h1"]) and lab["readme"]["sharedH2OrderMatches"] for lab in labs],
-        },
         {
             "label": "README uses H3 headings for lab-specific implementation steps",
             "tooltip": {
@@ -5041,6 +5028,30 @@ def extract_phase_command_log_summary(phase_path: Path | None) -> str | None:
     if not command_log.exists():
         return None
     return extract_tests_run_summary(command_log.read_text(encoding="utf-8", errors="ignore"))
+
+
+def alternative_command_skip_reason_in_readme(readme_text: str, block_line: int) -> str | None:
+    if not is_alternative_command_in_readme(readme_text, block_line):
+        return None
+    return "terminaloutput is optional for alternative run commands"
+
+
+def is_alternative_command_in_readme(readme_text: str, block_line: int) -> bool:
+    lines = readme_text.splitlines()
+    search_index = max(0, block_line - 2)
+    lowest_index = max(0, search_index - 8)
+    for index in range(search_index, lowest_index - 1, -1):
+        raw = lines[index].strip()
+        if not raw:
+            continue
+        if raw.startswith("```"):
+            continue
+        normalized = raw.lower().rstrip(":")
+        if "alternative" in normalized and "command" in normalized:
+            return True
+        if raw.startswith("#"):
+            break
+    return False
 
 
 def phase_artifact_root(snapshot_root: Any, phase: dict[str, Any]) -> Path | None:
