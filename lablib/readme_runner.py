@@ -24,6 +24,9 @@ NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 COMPOSE_UP_RE = re.compile(
     r"^(?P<prefix>\s*(?:docker compose|docker-compose)(?:\s+--profile\s+\S+)*)\s+up\b(?P<suffix>.*)$"
 )
+DOCKER_RUN_VOLUME_RE = re.compile(
+    r'(?P<prefix>(?:^|\s)(?:-v|--volume)\s+)(?P<spec>"[^"]+"|\'[^\']+\'|[^\s]+)'
+)
 
 
 def upstream_lab_path(lab_name: str) -> Path:
@@ -38,9 +41,9 @@ def load_readme_document(readme_path: Path) -> ReadmeDocument:
     return parse_readme_document(readme_path.read_text(encoding="utf-8"))
 
 
-def executable_shell_blocks(phase_doc: ReadmePhase) -> list[str]:
+def executable_shell_blocks(phase_doc: ReadmePhase, lab_path: Path) -> list[str]:
     return [
-        execution_command_body(block.body.strip())
+        execution_command_body(block.body.strip(), lab_path)
         for block in phase_doc.command_blocks
         if (block.raw_language or "").lower() == "shell"
         and block.body.strip()
@@ -67,7 +70,8 @@ def tracked_command_exit_code(body: str) -> bool:
     return command_execution_skip_reason(body) is None
 
 
-def execution_command_body(body: str) -> str:
+def execution_command_body(body: str, lab_path: Path) -> str:
+    body = normalize_docker_run_bind_mounts(body, lab_path)
     if is_background_startup_compose_command(body):
         return detached_compose_command(body)
     return body
@@ -145,10 +149,10 @@ def phase_output_dir_name(phase_doc: ReadmePhase) -> str:
     return phase_doc.id or slugify_phase_title(phase_doc.title)
 
 
-def build_phase_spec(phase_doc: ReadmePhase) -> PhaseSpec | None:
+def build_phase_spec(phase_doc: ReadmePhase, lab_path: Path) -> PhaseSpec | None:
     if phase_doc.id == "studio":
         return None
-    command_bodies = executable_shell_blocks(phase_doc)
+    command_bodies = executable_shell_blocks(phase_doc, lab_path)
     if not command_bodies:
         return None
 
@@ -166,10 +170,10 @@ def build_phase_spec(phase_doc: ReadmePhase) -> PhaseSpec | None:
     )
 
 
-def build_phase_specs(document: ReadmeDocument) -> tuple[PhaseSpec, ...]:
+def build_phase_specs(document: ReadmeDocument, lab_path: Path) -> tuple[PhaseSpec, ...]:
     phases: list[PhaseSpec] = []
     for phase_doc in document.phases:
-        phase_spec = build_phase_spec(phase_doc)
+        phase_spec = build_phase_spec(phase_doc, lab_path)
         if phase_spec is not None:
             phases.append(phase_spec)
     if not phases:
@@ -183,7 +187,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
     upstream_lab = upstream_lab_path(lab_name)
     readme_path = readme_path_for_lab(lab_name)
     document = load_readme_document(readme_path)
-    phases = build_phase_specs(document)
+    phases = build_phase_specs(document, upstream_lab)
     runtime_cleanup = readme_lab_runtime_cleanup if (upstream_lab / "docker-compose.yaml").exists() else None
 
     return LabSpec(
@@ -221,3 +225,30 @@ def readme_lab_runtime_cleanup(spec: LabSpec) -> None:
     build_dir = spec.upstream_lab / "build"
     if build_dir.exists():
         shutil.rmtree(build_dir, ignore_errors=True)
+
+
+def normalize_docker_run_bind_mounts(body: str, lab_path: Path) -> str:
+    normalized = " ".join(body.strip().lower().split())
+    if not normalized.startswith("docker run "):
+        return body
+
+    def replace_volume(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        raw_spec = match.group("spec")
+        quote = ""
+        spec = raw_spec
+        if raw_spec[:1] in {"'", '"'} and raw_spec[-1:] == raw_spec[:1]:
+            quote = raw_spec[:1]
+            spec = raw_spec[1:-1]
+        if ":" not in spec:
+            return match.group(0)
+        host, remainder = spec.split(":", 1)
+        if not host.startswith((".", "..")):
+            return match.group(0)
+        absolute_host = (lab_path / host).resolve()
+        rebuilt = f"{absolute_host}:{remainder}"
+        if quote:
+            rebuilt = f"{quote}{rebuilt}{quote}"
+        return f"{prefix}{rebuilt}"
+
+    return DOCKER_RUN_VOLUME_RE.sub(replace_volume, body)

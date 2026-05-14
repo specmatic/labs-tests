@@ -15,7 +15,7 @@ from lablib.report_building import (
     load_lab_results_from_snapshots,
     upstream_labs_git_ref,
 )
-from lablib.reporting import write_json
+from lablib.reporting import build_report, write_html, write_json
 from lablib.scaffold import run_lab
 from lablib.workspace_setup import (
     cleanup_upstream_lab_snapshot,
@@ -113,7 +113,17 @@ def main() -> int:
         print("", flush=True)
         snapshot = create_upstream_lab_snapshot(lab_name)
         try:
-            lab_spec = build_readme_lab_spec(lab_name)
+            try:
+                lab_spec = build_readme_lab_spec(lab_name)
+            except Exception as exc:
+                write_lab_construction_failure_report(lab_name, exc)
+                print(
+                    f"[warning] Failed to build README-driven lab '{lab_name}': {exc}. "
+                    "Impact: this lab is marked failed in the generated report, but the run will continue.",
+                    flush=True,
+                )
+                overall_exit = 1
+                continue
             lab_args = argparse.Namespace(
                 refresh_report=args.refresh_report,
                 skip_setup=True,
@@ -171,6 +181,63 @@ def remove_path_if_exists(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
         return
     path.unlink(missing_ok=True)
+
+
+def write_lab_construction_failure_report(lab_name: str, error: Exception) -> None:
+    output_dir = LABS_OUTPUT_DIR / f"{lab_name}-output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    readme_path = ROOT.parent / "labs" / lab_name / "README.md"
+    phase_result = {
+        "name": "README execution discovery",
+        "description": "Build the executable phase list from the lab README.",
+        "status": "failed",
+        "readmePhase": {
+            "id": "readme-execution-discovery",
+            "title": "README execution discovery",
+        },
+        "command": {
+            "display": "(lab construction)",
+            "exitCode": "n/a",
+            "durationSeconds": 0.0,
+            "timedOut": False,
+            "timeoutReason": "",
+        },
+        "assertions": [
+            {
+                "status": "failed",
+                "message": "The lab README could not be turned into executable phases.",
+                "category": "readme",
+                "details": [
+                    {"label": "Reason", "value": str(error)},
+                    {
+                        "label": "Impact",
+                        "value": "This lab could not execute, but the remaining labs continued running.",
+                    },
+                    {
+                        "label": "Action",
+                        "value": "Add executable shell-command sections under recognizable headings in the README, or broaden the shared README discovery rules.",
+                    },
+                ],
+            }
+        ],
+        "artifacts": [],
+        "consoleSnippet": "",
+        "fixSummary": [],
+        "warnings": [],
+    }
+    report = build_report(
+        lab_name=lab_name,
+        description=f"README-driven automation for {lab_name}.",
+        lab_path=readme_path.parent,
+        spec_path=readme_path,
+        readme_path=readme_path,
+        output_path=output_dir,
+        phases=[phase_result],
+    )
+    write_json(output_dir / "report.json", report)
+    write_html(output_dir / "report.html", report)
+    print(f"Wrote JSON report to {output_dir / 'report.json'}", flush=True)
+    print(f"Wrote HTML report to {output_dir / 'report.html'}", flush=True)
 
 
 if __name__ == "__main__":

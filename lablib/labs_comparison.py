@@ -132,7 +132,7 @@ def generate_labs_comparison(
 ) -> dict[str, Any]:
     repo_root = root or ROOT
     selected = set(discover_report_lab_names(repo_root) if lab_names is None else lab_names)
-    labs = [build_lab_profile(repo_root / lab_name) for lab_name in sorted(selected)]
+    labs = [build_lab_profile(lab_name) for lab_name in sorted(selected)]
     common_required_h2 = list(tuple(labs[0]["readme"]["requiredH2"]) if labs else ())
     validation_rows = build_validation_rows(labs)
     payload = {
@@ -195,8 +195,8 @@ def discover_report_lab_names(root: Path | None = None) -> list[str]:
     return []
 
 
-def build_lab_profile(lab_dir: Path) -> dict[str, Any]:
-    spec = build_readme_lab_spec(lab_dir.name)
+def build_lab_profile(lab_name: str) -> dict[str, Any]:
+    spec = build_readme_lab_spec(lab_name)
     common_artifacts = [artifact_profile(artifact) for artifact in spec.common_artifact_specs]
     phase_artifacts = []
     for phase in spec.phases:
