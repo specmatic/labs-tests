@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import os
 from pathlib import Path
 import shutil
 
@@ -27,6 +28,7 @@ from lablib.workspace_setup import (
 
 
 ROOT = Path(__file__).resolve().parent
+GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,8 +124,20 @@ def main() -> int:
             exit_code = run_lab(lab_spec, lab_args)
             overall_exit = max(overall_exit, exit_code)
         finally:
-            restore_upstream_lab_snapshot(snapshot)
-            cleanup_upstream_lab_snapshot(snapshot)
+            try:
+                restore_upstream_lab_snapshot(snapshot)
+            except Exception as exc:
+                if GITHUB_ACTIONS:
+                    print(
+                        f"[warning] Failed to restore sibling lab '{lab_name}' after execution: {exc}. "
+                        "Impact: this run may leave modified files in the GitHub Actions workspace, "
+                        "but the workflow started from a clean checkout so the job will continue.",
+                        flush=True,
+                    )
+                else:
+                    raise
+            finally:
+                cleanup_upstream_lab_snapshot(snapshot)
 
     lab_results = load_lab_results_from_snapshots(selected_labs)
     write_consolidated_payload(setup_payload, lab_results, args.labs_branch)

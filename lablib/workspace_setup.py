@@ -164,6 +164,7 @@ def restore_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
     for attempt in range(2):
         restore_errors.clear()
         if snapshot.original_path.exists():
+            best_effort_lab_runtime_cleanup(snapshot.original_path)
             force_remove_tree(snapshot.original_path)
         shutil.copytree(snapshot.snapshot_path, snapshot.original_path)
         if trees_match(snapshot.snapshot_path, snapshot.original_path, restore_errors):
@@ -184,8 +185,17 @@ def cleanup_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
 def force_remove_tree(path: Path, *, ignore_errors: bool = False) -> None:
     if not path.exists():
         return
-    make_tree_writable(path)
-    shutil.rmtree(path, ignore_errors=ignore_errors, onerror=handle_remove_readonly)
+    try:
+        make_tree_writable(path)
+        shutil.rmtree(path, ignore_errors=ignore_errors, onerror=handle_remove_readonly)
+    except PermissionError:
+        if not remove_tree_with_docker(path) and not ignore_errors:
+            raise
+    if path.exists() and not ignore_errors:
+        raise RuntimeError(
+            f"Failed to remove directory during labs-tests cleanup: {path}. "
+            "Action required: inspect Docker-owned files in the sibling labs repository."
+        )
 
 
 def make_tree_writable(path: Path) -> None:
@@ -205,6 +215,8 @@ def make_path_writable(path: Path) -> None:
         current_mode = path.stat().st_mode
         path.chmod(current_mode | stat.S_IWUSR)
     except FileNotFoundError:
+        return
+    except PermissionError:
         return
 
 
@@ -258,6 +270,40 @@ def compare_dircmp(comparison: filecmp.dircmp, errors: list[str]) -> bool:
         matched = compare_dircmp(subdir, errors) and matched
 
     return matched
+
+
+def best_effort_lab_runtime_cleanup(lab_path: Path) -> None:
+    compose_file = lab_path / "docker-compose.yaml"
+    if not compose_file.exists():
+        return
+    run_command(
+        ["docker", "compose", "down", "-v", "--remove-orphans"],
+        lab_path,
+        stream_output=False,
+    )
+
+
+def remove_tree_with_docker(path: Path) -> bool:
+    parent = path.parent
+    if not parent.exists():
+        return True
+    cleanup_result = run_command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{parent}:/parent",
+            "--entrypoint",
+            "sh",
+            "alpine:3.20",
+            "-lc",
+            f"rm -rf -- /parent/{path.name}",
+        ],
+        ROOT,
+        stream_output=False,
+    )
+    return cleanup_result.exit_code == 0 and not path.exists()
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
     for command in reversed(commands):
         if command.get("exitCode", 0) == 0:
