@@ -57,6 +57,13 @@ jobs:
           docker --version
           docker compose version
 
+      - name: Prepare temporary Specmatic license file
+        if: env.SPECMATIC_LICENSE_KEY != ''
+        shell: bash
+        run: |
+          mkdir -p temp
+          printf '%s\n' "${SPECMATIC_LICENSE_KEY}" > temp/github-actions-license.txt
+
       - name: Run README-driven lab harnesses
         id: run_labs
         shell: bash
