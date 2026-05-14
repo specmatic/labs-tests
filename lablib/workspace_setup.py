@@ -16,7 +16,8 @@ from lablib.readme_schema import parse_simple_yaml
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
 LAB_DISCOVERY_CONFIG = ROOT / "labs-discovery.yaml"
-TEMP_LICENSE_PATH = ROOT / "temp" / "license.txt"
+TEMP_LICENSE_DIR = ROOT / "temp"
+LICENSE_HEADER = "---- BEGIN LICENSE ----"
 UPSTREAM_LICENSE_PATH = UPSTREAM_LABS / "license.txt"
 
 
@@ -38,7 +39,7 @@ class UpstreamLabSnapshot:
 class UpstreamLicenseSnapshot:
     original_path: Path
     backup_path: Path | None
-    temp_license_path: Path
+    temp_license_path: Path | None
     applied_temp_license: bool
 
 
@@ -199,16 +200,17 @@ def prepare_upstream_license_for_run() -> UpstreamLicenseSnapshot:
         backup_path = backup_root / "license.txt"
         shutil.copy2(UPSTREAM_LICENSE_PATH, backup_path)
 
+    temp_license_path = discover_temp_license_path()
     applied_temp_license = False
-    if TEMP_LICENSE_PATH.exists():
+    if temp_license_path is not None:
         UPSTREAM_LICENSE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(TEMP_LICENSE_PATH, UPSTREAM_LICENSE_PATH)
+        shutil.copy2(temp_license_path, UPSTREAM_LICENSE_PATH)
         applied_temp_license = True
 
     return UpstreamLicenseSnapshot(
         original_path=UPSTREAM_LICENSE_PATH,
         backup_path=backup_path,
-        temp_license_path=TEMP_LICENSE_PATH,
+        temp_license_path=temp_license_path,
         applied_temp_license=applied_temp_license,
     )
 
@@ -225,6 +227,19 @@ def restore_upstream_license_after_run(snapshot: UpstreamLicenseSnapshot) -> Non
         backup_root = snapshot.backup_path.parent if snapshot.backup_path is not None else None
         if backup_root is not None and backup_root.exists():
             force_remove_tree(backup_root, ignore_errors=True)
+
+
+def discover_temp_license_path() -> Path | None:
+    if not TEMP_LICENSE_DIR.exists():
+        return None
+    for candidate in sorted(TEMP_LICENSE_DIR.glob("*.txt")):
+        try:
+            first_line = candidate.read_text(encoding="utf-8").splitlines()[0].strip()
+        except (IndexError, OSError, UnicodeDecodeError):
+            continue
+        if first_line == LICENSE_HEADER:
+            return candidate
+    return None
 
 
 def force_remove_tree(path: Path, *, ignore_errors: bool = False) -> None:
