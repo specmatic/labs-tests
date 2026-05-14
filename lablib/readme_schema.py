@@ -224,16 +224,16 @@ def extract_fallback_phases(text: str, headings: list[Heading], phase_ids: list[
     fallback_index = 0
 
     for index, heading in enumerate(candidate_headings):
-        if not is_fallback_phase_heading(heading):
-            continue
         section_end = section_end_for_heading(candidate_headings, heading, index, len(text))
+        if has_executable_child_heading(text, candidate_headings, index, heading, section_end, phase_ids):
+            continue
         section_text = text[heading.start:section_end].strip()
         code_blocks = extract_code_blocks(section_text)
-        if not any(block.is_command for block in code_blocks):
+        if not should_extract_fallback_phase(heading, code_blocks):
             continue
 
-        phase_id = match_title_to_phase_id(heading.title, phase_ids)
-        if phase_id is None and heading.title.lower().startswith("task "):
+        phase_id = infer_fallback_phase_id(heading.title, phase_ids)
+        if phase_id == "task":
             task_index += 1
             phase_id = f"task-{task_index}"
         if phase_id is None:
@@ -255,12 +255,49 @@ def extract_fallback_phases(text: str, headings: list[Heading], phase_ids: list[
     return phases
 
 
-def is_fallback_phase_heading(heading: Heading) -> bool:
+def should_extract_fallback_phase(heading: Heading, code_blocks: list[CodeBlock]) -> bool:
+    if not any(block.is_command for block in code_blocks):
+        return False
     title = heading.title.strip().lower()
-    if "baseline" in title or "final" in title or title.startswith("task "):
-        return True
-    if heading.level == 2 and re.match(r"^\d+\.\s+", heading.title.strip()):
-        return True
+    excluded_fragments = (
+        "time required",
+        "prerequisites",
+        "architecture",
+        "files in this lab",
+        "lab rules",
+        "specmatic references",
+        "reference",
+        "what you learned",
+        "next step",
+        "troubleshooting",
+        "additional resources",
+        "windows notes",
+        "optional:",
+        "(optional)",
+        "root cause",
+    )
+    return not any(fragment in title for fragment in excluded_fragments)
+
+
+def has_executable_child_heading(
+    text: str,
+    headings: list[Heading],
+    index: int,
+    heading: Heading,
+    section_end: int,
+    phase_ids: list[str],
+) -> bool:
+    del phase_ids
+    for child_heading in headings[index + 1 :]:
+        if child_heading.start >= section_end:
+            break
+        if child_heading.level <= heading.level:
+            continue
+        child_end = section_end_for_heading(headings, child_heading, headings.index(child_heading), section_end)
+        child_text = text[child_heading.start:child_end].strip()
+        child_blocks = extract_code_blocks(child_text)
+        if should_extract_fallback_phase(child_heading, child_blocks):
+            return True
     return False
 
 
@@ -290,6 +327,31 @@ def match_title_to_phase_id(title: str, phase_ids: list[str]) -> str | None:
     for phase_id in phase_ids:
         if phase_id in title_lower:
             return phase_id
+    return None
+
+
+def infer_fallback_phase_id(title: str, phase_ids: list[str]) -> str | None:
+    matched = match_title_to_phase_id(title, phase_ids)
+    if matched is not None:
+        return matched
+
+    normalized = re.sub(r"\s+", " ", title.strip().lower())
+    if normalized.startswith("task "):
+        return "task"
+    if any(fragment in normalized for fragment in ("baseline", "intentional failure", "failing tests", "run the failing tests", "baseline run")):
+        return "baseline"
+    if normalized.startswith("part a"):
+        return "baseline"
+    if any(fragment in normalized for fragment in ("your task", "learner task", "fix ", "fix path", "configure ", "ensure ", "repair ", "update ")):
+        return "task"
+    if normalized.startswith("part b"):
+        return "task"
+    if any(fragment in normalized for fragment in ("verify the fix", "re-run", "rerun", "expected to pass", "pass criteria")):
+        return "final"
+    if normalized.startswith("part c"):
+        return "final"
+    if "studio" in normalized:
+        return "studio"
     return None
 
 

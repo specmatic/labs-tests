@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import filecmp
 import os
 from pathlib import Path
 import shutil
@@ -9,13 +10,12 @@ import tempfile
 from typing import Any
 
 from lablib.command_runner import CommandResult, run_command
+from lablib.readme_schema import parse_simple_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
-LAB_NAMES = [
-    "api-coverage",
-]
+LAB_DISCOVERY_CONFIG = ROOT / "labs-discovery.yaml"
 
 
 @dataclass
@@ -41,7 +41,7 @@ def run_setup(
     lab_names: list[str] | None = None,
 ) -> SetupResult:
     commands: list[dict[str, Any]] = []
-    selected_labs = set(lab_names or LAB_NAMES)
+    del lab_names
 
     if not UPSTREAM_LABS.exists():
         clone_result = execute(
@@ -116,6 +116,32 @@ def run_setup(
     )
 
 
+def discover_available_labs() -> list[str]:
+    if not UPSTREAM_LABS.exists():
+        return []
+    skipped_labs = set(load_ignored_lab_names())
+    return sorted(
+        path.name
+        for path in UPSTREAM_LABS.iterdir()
+        if path.is_dir()
+        and not path.name.startswith(".")
+        and (path / "README.md").exists()
+        and path.name not in skipped_labs
+    )
+
+
+def load_ignored_lab_names() -> list[str]:
+    if not LAB_DISCOVERY_CONFIG.exists():
+        return []
+    config = parse_simple_yaml(LAB_DISCOVERY_CONFIG.read_text(encoding="utf-8"))
+    ignored = config.get("ignored_labs", [])
+    if isinstance(ignored, str):
+        return [ignored]
+    if isinstance(ignored, list):
+        return [str(item) for item in ignored]
+    return []
+
+
 def create_upstream_lab_snapshot(lab_name: str) -> UpstreamLabSnapshot:
     original_path = UPSTREAM_LABS / lab_name
     if not original_path.exists():
@@ -134,17 +160,32 @@ def create_upstream_lab_snapshot(lab_name: str) -> UpstreamLabSnapshot:
 
 
 def restore_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
-    if snapshot.original_path.exists():
-        make_tree_writable(snapshot.original_path)
-        shutil.rmtree(snapshot.original_path)
-    shutil.copytree(snapshot.snapshot_path, snapshot.original_path)
+    restore_errors: list[str] = []
+    for attempt in range(2):
+        restore_errors.clear()
+        if snapshot.original_path.exists():
+            force_remove_tree(snapshot.original_path)
+        shutil.copytree(snapshot.snapshot_path, snapshot.original_path)
+        if trees_match(snapshot.snapshot_path, snapshot.original_path, restore_errors):
+            return
+    raise RuntimeError(
+        f"Failed to restore upstream lab '{snapshot.lab_name}' to its pre-run state. "
+        "Action required: inspect the sibling labs directory for leftover changes.\n"
+        + "\n".join(restore_errors[:20])
+    )
 
 
 def cleanup_upstream_lab_snapshot(snapshot: UpstreamLabSnapshot) -> None:
     snapshot_root = snapshot.snapshot_path.parent
     if snapshot_root.exists():
-        make_tree_writable(snapshot_root)
-        shutil.rmtree(snapshot_root, ignore_errors=True)
+        force_remove_tree(snapshot_root, ignore_errors=True)
+
+
+def force_remove_tree(path: Path, *, ignore_errors: bool = False) -> None:
+    if not path.exists():
+        return
+    make_tree_writable(path)
+    shutil.rmtree(path, ignore_errors=ignore_errors, onerror=handle_remove_readonly)
 
 
 def make_tree_writable(path: Path) -> None:
@@ -165,6 +206,58 @@ def make_path_writable(path: Path) -> None:
         path.chmod(current_mode | stat.S_IWUSR)
     except FileNotFoundError:
         return
+
+
+def handle_remove_readonly(function, target, excinfo) -> None:
+    del function, excinfo
+    target_path = Path(target)
+    make_path_writable(target_path)
+    if target_path.is_dir():
+        shutil.rmtree(target_path, ignore_errors=False, onerror=handle_remove_readonly)
+    else:
+        target_path.unlink(missing_ok=True)
+
+
+def trees_match(expected_root: Path, actual_root: Path, errors: list[str]) -> bool:
+    if not expected_root.exists():
+        errors.append(f"Expected snapshot root is missing: {expected_root}")
+        return False
+    if not actual_root.exists():
+        errors.append(f"Restored lab root is missing: {actual_root}")
+        return False
+
+    comparison = filecmp.dircmp(expected_root, actual_root, ignore=[])
+    return compare_dircmp(comparison, errors)
+
+
+def compare_dircmp(comparison: filecmp.dircmp, errors: list[str]) -> bool:
+    matched = True
+
+    if comparison.left_only:
+        matched = False
+        errors.append(
+            f"Missing after restore in {comparison.right}: {', '.join(sorted(comparison.left_only))}"
+        )
+    if comparison.right_only:
+        matched = False
+        errors.append(
+            f"Unexpected after restore in {comparison.right}: {', '.join(sorted(comparison.right_only))}"
+        )
+    if comparison.diff_files:
+        matched = False
+        errors.append(
+            f"Content differs after restore in {comparison.right}: {', '.join(sorted(comparison.diff_files))}"
+        )
+    if comparison.funny_files:
+        matched = False
+        errors.append(
+            f"Uncomparable files after restore in {comparison.right}: {', '.join(sorted(comparison.funny_files))}"
+        )
+
+    for subdir in comparison.subdirs.values():
+        matched = compare_dircmp(subdir, errors) and matched
+
+    return matched
 def summarize_setup_failure(commands: list[dict[str, Any]]) -> str:
     for command in reversed(commands):
         if command.get("exitCode", 0) == 0:

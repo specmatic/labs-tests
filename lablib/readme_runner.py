@@ -3,15 +3,27 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import shutil
 
-from lablib.readme_expectations import command_output_skip_reason
+from lablib.readme_expectations import command_execution_skip_reason
 from lablib.readme_schema import ReadmeDocument, ReadmePhase, parse_readme_document
-from lablib.scaffold import LabSpec, PhaseSpec, add_standard_lab_args, extract_tests_run_summaries, parse_console_test_summary, run_lab
+from lablib.scaffold import (
+    LabSpec,
+    PhaseSpec,
+    add_standard_lab_args,
+    docker_compose_down,
+    extract_tests_run_summaries,
+    parse_console_test_summary,
+    run_lab,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_LABS = ROOT.parent / "labs"
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+COMPOSE_UP_RE = re.compile(
+    r"^(?P<prefix>\s*(?:docker compose|docker-compose)(?:\s+--profile\s+\S+)*)\s+up\b(?P<suffix>.*)$"
+)
 
 
 def upstream_lab_path(lab_name: str) -> Path:
@@ -28,11 +40,11 @@ def load_readme_document(readme_path: Path) -> ReadmeDocument:
 
 def executable_shell_blocks(phase_doc: ReadmePhase) -> list[str]:
     return [
-        block.body.strip()
+        execution_command_body(block.body.strip())
         for block in phase_doc.command_blocks
         if (block.raw_language or "").lower() == "shell"
         and block.body.strip()
-        and tracked_command_exit_code(block.body.strip())
+        and should_execute_command(phase_doc, block.body.strip())
     ]
 
 
@@ -45,8 +57,48 @@ def phase_expected_exit_code(phase_doc: ReadmePhase) -> int:
     return 1 if (summary_counts["failed"] > 0 or summary_counts["other"] > 0) else 0
 
 
+def should_execute_command(phase_doc: ReadmePhase, body: str) -> bool:
+    if phase_doc.id == "studio":
+        return False
+    return command_execution_skip_reason(body) is None
+
+
 def tracked_command_exit_code(body: str) -> bool:
-    return command_output_skip_reason(body) is None
+    return command_execution_skip_reason(body) is None
+
+
+def execution_command_body(body: str) -> str:
+    if is_background_startup_compose_command(body):
+        return detached_compose_command(body)
+    return body
+
+
+def is_background_startup_compose_command(body: str) -> bool:
+    normalized = " ".join(body.strip().lower().split())
+    if not normalized:
+        return False
+    if ("docker compose" not in normalized and "docker-compose" not in normalized) or " up" not in f" {normalized}":
+        return False
+    return "--abort-on-container-exit" not in normalized and "--exit-code-from" not in normalized and " -d" not in f" {normalized} "
+
+
+def detached_compose_command(body: str) -> str:
+    match = COMPOSE_UP_RE.match(body.strip())
+    if match is None:
+        if "docker compose up" in body:
+            return body.replace("docker compose up", "docker compose up -d", 1)
+        if "docker-compose up" in body:
+            return body.replace("docker-compose up", "docker-compose up -d", 1)
+        return body
+
+    prefix = match.group("prefix")
+    suffix = match.group("suffix")
+    return "\n".join(
+        [
+            f"{prefix} down -v --remove-orphans >/dev/null 2>&1 || true",
+            f"{prefix} up -d{suffix}",
+        ]
+    )
 
 
 def build_phase_script_from_blocks(command_bodies: list[str]) -> str:
@@ -94,6 +146,8 @@ def phase_output_dir_name(phase_doc: ReadmePhase) -> str:
 
 
 def build_phase_spec(phase_doc: ReadmePhase) -> PhaseSpec | None:
+    if phase_doc.id == "studio":
+        return None
     command_bodies = executable_shell_blocks(phase_doc)
     if not command_bodies:
         return None
@@ -130,6 +184,7 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
     readme_path = readme_path_for_lab(lab_name)
     document = load_readme_document(readme_path)
     phases = build_phase_specs(document)
+    runtime_cleanup = readme_lab_runtime_cleanup if (upstream_lab / "docker-compose.yaml").exists() else None
 
     return LabSpec(
         name=lab_name,
@@ -141,8 +196,8 @@ def build_readme_lab_spec(lab_name: str) -> LabSpec:
         output_dir=ROOT / "output" / "labs-output" / f"{lab_name}-output",
         command=phases[0].command or ["true"],
         phases=phases,
-        clear_reports=None,
-        post_phase_cleanup=None,
+        clear_reports=runtime_cleanup,
+        post_phase_cleanup=runtime_cleanup,
     )
 
 
@@ -156,3 +211,13 @@ def run_readme_lab(lab_name: str, description: str) -> int:
     parser = build_readme_lab_parser(description)
     args = parser.parse_args()
     return run_lab(build_readme_lab_spec(lab_name), args)
+
+
+def readme_lab_runtime_cleanup(spec: LabSpec) -> None:
+    compose_file = spec.upstream_lab / "docker-compose.yaml"
+    if compose_file.exists():
+        docker_compose_down(spec, "down", "-v", "--remove-orphans")
+
+    build_dir = spec.upstream_lab / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir, ignore_errors=True)

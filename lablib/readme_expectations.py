@@ -62,6 +62,21 @@ def command_output_skip_reason(command: str) -> str | None:
         return "terminaloutput is not required for git index setup commands"
     return None
 
+
+def command_execution_skip_reason(command: str) -> str | None:
+    normalized = " ".join(command.strip().lower().split())
+    if not normalized:
+        return None
+    if (
+        ("docker compose" in normalized or "docker-compose" in normalized)
+        and " down" in f" {normalized}"
+    ):
+        return "teardown commands are not executed as implementation steps"
+    teardown_prefixes = ("docker stop", "docker rm")
+    if normalized.startswith(teardown_prefixes):
+        return "teardown commands are not executed as implementation steps"
+    return None
+
 CANONICAL_README_H2_SEQUENCE = (
     "Objective",
     "Why this lab matters",
